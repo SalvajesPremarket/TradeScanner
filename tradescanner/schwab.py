@@ -41,11 +41,8 @@ def _request_json(request: urllib.request.Request, timeout: int = 15) -> Any:
             return json.loads(body) if body else {}
     except urllib.error.HTTPError as exc:
         # Do not surface request headers or credentials in errors.
-        try:
-            detail = exc.read().decode("utf-8")[:300]
-        except Exception:
-            detail = "upstream request failed"
-        raise SchwabAPIError(f"Schwab API returned HTTP {exc.code}: {detail}") from None
+        # Do not expose upstream response bodies to API clients.
+        raise SchwabAPIError(f"Schwab API returned HTTP {exc.code}.") from None
     except (urllib.error.URLError, TimeoutError) as exc:
         raise SchwabAPIError(f"Could not reach Schwab API: {type(exc).__name__}") from None
     except json.JSONDecodeError:
