@@ -35,8 +35,6 @@ def normalize_schwab_quotes(payload: dict[str, Any]) -> list[dict[str, Any]]:
         # Only accept an explicitly named float field from Schwab. The standard
         # sharesOutstanding field is a different metric and must not be substituted.
         float_shares = _number(fundamental.get("floatShares"))
-        if float_shares is None:
-            float_shares = _number(fundamental.get("floatSharesOutstanding"))
         rows.append({
             "symbol": str(symbol).strip().upper(),
             "company": reference.get("description"),
