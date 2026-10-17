@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TradeScanner | Interfaz visual</title>
+  <style>
+    :root {
+      --navy: #172b4d;
+      --blue: #2f6f9f;
+      --line: #d8e0e8;
+      --paper: #ffffff;
+      --page: #f3f6f9;
+      --ink: #243447;
+      --muted: #718096;
+      --head: #eaf0f5;
+      --green: #16834a;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--page); color: var(--ink); font: 13px Arial, Helvetica, sans-serif; }
+    .topbar { display:flex; align-items:center; justify-content:space-between; gap:16px; flex-wrap:wrap; background:var(--navy); color:#fff; padding:17px 24px; border-bottom:4px solid #4b9a73; }
+    .brand { font-size:25px; font-weight:800; letter-spacing:.2px; }
+    .brand span { color:#a9d6b8; }
+    .nav { display:flex; flex-wrap:wrap; gap:18px; color:#e2eaf2; font-size:11px; font-weight:700; }
+    .market-strip { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:1px; background:var(--line); border-bottom:1px solid var(--line); }
+    .market-cell { background:var(--paper); padding:11px 18px; }
+    .market-cell small { display:block; color:var(--muted); font-weight:700; font-size:10px; margin-bottom:5px; }
+    .market-cell strong { font-size:16px; color:var(--navy); }
+    main { max-width:1600px; margin:0 auto; padding:22px; }
+    .page-title { display:flex; align-items:flex-start; justify-content:space-between; gap:14px; flex-wrap:wrap; margin-bottom:17px; }
+    h1 { margin:0 0 6px; color:var(--navy); font-size:28px; }
+    .subtitle { color:var(--muted); font-size:12px; }
+    .design-tag { padding:7px 10px; border:1px solid #b9d8c5; background:#edf7f0; color:#28633d; border-radius:3px; font-size:10px; font-weight:700; }
+    .summary { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:11px; margin-bottom:17px; }
+    .summary-card { min-height:86px; padding:13px 14px; background:var(--paper); border:1px solid var(--line); border-radius:4px; }
+    .summary-card .label { color:var(--muted); font-size:10px; font-weight:700; }
+    .summary-card .placeholder { margin-top:10px; font-size:21px; font-weight:700; color:var(--navy); }
+    .summary-card .caption { margin-top:5px; font-size:10px; color:var(--muted); }
+    .workspace { background:var(--paper); border:1px solid var(--line); border-radius:4px; }
+    .workspace-head { display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; padding:14px 15px; border-bottom:1px solid var(--line); }
+    h2 { margin:0; color:var(--navy); font-size:15px; }
+    .subnav { display:flex; gap:6px; flex-wrap:wrap; }
+    .subnav span { padding:6px 9px; border:1px solid var(--line); border-radius:3px; color:#52657a; font-size:10px; font-weight:700; }
+    .subnav .selected { background:var(--navy); color:#fff; border-color:var(--navy); }
+    .filter-title { padding:12px 15px 8px; color:var(--muted); font-size:10px; font-weight:700; }
+    .filters { display:flex; align-items:center; flex-wrap:wrap; gap:8px; padding:0 15px 14px; border-bottom:1px solid var(--line); }
+    .filter { display:flex; align-items:center; gap:8px; min-height:32px; padding:7px 9px; background:#fff; border:1px solid #cbd5df; border-radius:3px; color:#34495e; font-size:11px; }
+    .filter b { color:var(--navy); font-size:10px; }
+    .filter .blank { display:inline-block; width:32px; height:13px; border-bottom:1px solid #aebbc8; }
+    .filter .toggle { color:var(--green); font-weight:700; }
+    .table-tools { display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; padding:12px 15px; }
+    .table-tools .muted { color:var(--muted); font-size:11px; }
+    .tool-chip { padding:6px 9px; border:1px solid var(--line); border-radius:3px; color:#52657a; font-size:10px; font-weight:700; }
+    .table-wrap { overflow-x:auto; }
+    table { width:100%; min-width:850px; border-collapse:collapse; }
+    thead th { padding:11px 10px; background:var(--head); border-top:1px solid var(--line); border-bottom:1px solid var(--line); color:#4a5e72; text-align:left; white-space:nowrap; font-size:10px; }
+    tbody td { height:43px; padding:10px; border-bottom:1px solid #e9eef3; color:#7c8997; }
+    tbody tr:nth-child(even) { background:#fbfcfd; }
+    .empty { padding:27px 15px; text-align:center; color:var(--muted); font-size:12px; }
+    .footer { padding:13px 15px; border-top:1px solid var(--line); color:#7b8794; font-size:10px; }
+    @media (max-width:800px) {
+      main { padding:12px; }
+      .market-strip { grid-template-columns:repeat(2,minmax(0,1fr)); }
+      .summary { grid-template-columns:repeat(2,minmax(0,1fr)); }
+      .topbar { padding:15px; }
+      h1 { font-size:24px; }
+    }
+    @media (max-width:420px) {
+      .summary { grid-template-columns:1fr 1fr; gap:7px; }
+      .summary-card { padding:10px; }
+      .summary-card .placeholder { font-size:18px; }
+      .market-cell { padding:10px; }
+    }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">Trade<span>Scanner</span></div>
+    <nav class="nav" aria-label="Navegación visual">
+      <span>SCREENER</span><span>ACCIONES</span><span>GRÁFICOS</span><span>LISTAS</span><span>CONFIGURACIÓN</span>
+    </nav>
+  </header>
+
+  <section class="market-strip" aria-label="Espacios visuales de mercado">
+    <div class="market-cell"><small>S&amp;P 500</small><strong>—</strong></div>
+    <div class="market-cell"><small>NASDAQ</small><strong>—</strong></div>
+    <div class="market-cell"><small>DOW JONES</small><strong>—</strong></div>
+    <div class="market-cell"><small>RUSSELL 2000</small><strong>—</strong></div>
+  </section>
+
+  <main>
+    <section class="page-title">
+      <div>
+        <h1>Stock Screener</h1>
+        <div class="subtitle">Interfaz visual de TradeScanner · Diseño inspirado en screener financieros</div>
+      </div>
+      <div class="design-tag">SOLO DISEÑO · SIN LÓGICA</div>
+    </section>
+
+    <section class="summary" aria-label="Tarjetas visuales">
+      <article class="summary-card"><div class="label">MERCADO</div><div class="placeholder">—</div><div class="caption">Espacio reservado</div></article>
+      <article class="summary-card"><div class="label">ACCIONES</div><div class="placeholder">—</div><div class="caption">Espacio reservado</div></article>
+      <article class="summary-card"><div class="label">GANADORAS</div><div class="placeholder">—</div><div class="caption">Espacio reservado</div></article>
+      <article class="summary-card"><div class="label">PERDEDORAS</div><div class="placeholder">—</div><div class="caption">Espacio reservado</div></article>
+    </section>
+
+    <section class="workspace">
+      <div class="workspace-head">
+        <h2>RADAR DE ACCIONES</h2>
+        <div class="subnav"><span class="selected">Todas</span><span>Precio</span><span>Rendimiento</span><span>Técnicos</span></div>
+      </div>
+      <div class="filter-title">FILTROS · REPRESENTACIÓN VISUAL ÚNICAMENTE</div>
+      <div class="filters" aria-label="Muestras visuales de filtros">
+        <div class="filter"><b>PRECIO</b><span class="blank"></span><span>—</span><span class="blank"></span></div>
+        <div class="filter"><b>GAP</b><span class="toggle">OFF</span></div>
+        <div class="filter"><b>FLOAT</b><span class="toggle">OFF</span></div>
+        <div class="filter"><b>RVOL</b><span class="blank"></span></div>
+        <div class="filter"><b>VOLUMEN</b><span class="blank"></span></div>
+        <div class="filter"><b>CAMBIO %</b><span class="blank"></span></div>
+      </div>
+      <div class="table-tools">
+        <span class="muted">Resultados · sin datos conectados</span>
+        <div class="subnav"><span>Vista de tabla</span><span>Columnas</span><span>Diseño</span></div>
+      </div>
+      <div class="table-wrap">
+        <table aria-label="Tabla visual vacía">
+          <thead><tr><th>TICKER</th><th>EMPRESA</th><th>PRECIO</th><th>CAMBIO %</th><th>GAP %</th><th>FLOAT</th><th>RVOL</th><th>VOLUMEN</th><th>SECTOR</th><th>GRÁFICO</th></tr></thead>
+          <tbody><tr><td colspan="10"><div class="empty">La tabla queda vacía hasta una futura integración de datos.</div></td></tr></tbody>
+        </table>
+      </div>
+      <div class="footer">Plantilla estática HTML/CSS. No incluye JavaScript, fórmulas, filtros funcionales, cotizaciones ni conexiones externas.</div>
+    </section>
+  </main>
+</body>
+</html>
