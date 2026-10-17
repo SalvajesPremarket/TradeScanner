@@ -12,6 +12,8 @@ Implementación nueva desde cero. No importar ni recuperar código de sistemas a
 - Cálculo de GAP solo cuando existen precio y cierre anterior válidos.
 - Filtros iniciales de precio, GAP, RVOL y volumen; los filtros activos excluyen datos ausentes en lugar de inventarlos.
 - Pruebas unitarias para validación de símbolos, normalización y filtros.
+- Almacenamiento SQLite de snapshots observados y colector por lotes de hasta 100 símbolos (`tradescanner/snapshots.py`).
+- `GET /api/snapshots/status`: muestra cantidad de snapshots guardados, símbolos vistos y hora del último registro.
 - GitHub Actions configurado para ejecutar las pruebas en push y pull request.
 - `.gitignore` evita subir archivos de entorno locales.
 
@@ -22,7 +24,8 @@ Implementación nueva desde cero. No importar ni recuperar código de sistemas a
 - Construir el universo de símbolos y el ciclo de escaneo completo.
 - Implementar ingestión de velas live, asociación vela/snapshot y cálculo de frescura.
 - Completar RVOL con una fuente histórica verificable y FLOAT con una fuente fiable.
-- Persistencia, recuperación ante fallos, métricas y despliegue de producción.
+- Configurar `TRADESCANNER_DB_PATH` apuntando a almacenamiento persistente de Render; la ruta local predeterminada no garantiza conservar datos tras reinicios o despliegues.
+- Recuperación ante fallos, métricas y despliegue de producción.
 - Conectar la tabla de la interfaz a la API y comprobar el flujo end-to-end.
 
 ## Ejecutar localmente
@@ -41,6 +44,7 @@ Configurar solo en el entorno seguro del servicio:
 - `SCHWAB_CLIENT_ID`
 - `SCHWAB_CLIENT_SECRET`
 - `SCHWAB_REFRESH_TOKEN`
+- `TRADESCANNER_DB_PATH` (opcional; recomendado en producción para usar un disco persistente)
 
 Nunca guardar credenciales en GitHub. Rota cualquier clave o token compartido en el chat o almacenado en un servicio antiguo antes de volver a usarlo.
 
