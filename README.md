@@ -16,20 +16,23 @@ Implementación nueva desde cero. No importar ni recuperar código de sistemas a
 - Almacenamiento SQLite de snapshots observados y colector por lotes de hasta 100 símbolos (`tradescanner/snapshots.py`).
 - `GET /api/snapshots/status`: muestra cantidad de snapshots guardados, símbolos vistos y hora del último registro.
 - `GET /api/snapshots/latest?limit=100`: devuelve los snapshots más recientes por símbolo (límite de 1 a 1000).
-- `POST /api/scan?symbols=AAPL,MSFT`: ejecuta un ciclo bajo demanda, consulta Schwab en lotes de hasta 100 símbolos, guarda solo cotizaciones recibidas y devuelve contadores y duración. Aún no es un proceso automático ni tiene un universo completo integrado.
+- `POST /api/scan?symbols=AAPL,MSFT`: ejecuta un ciclo bajo demanda y guarda solo cotizaciones recibidas.
+- Motor automático incremental: usa el universo listado de Nasdaq Trader y consulta un lote de hasta 100 símbolos por ciclo; persiste el cursor en SQLite para continuar después de reinicios.
+- `GET /api/engine/status`: expone estado, último ciclo, cursor, contadores y errores sin incluir secretos.
+- Caché en memoria del access token de Schwab, con renovación anticipada al vencimiento para no solicitar un token por cada lote.
 - Pruebas unitarias de normalización, filtros, snapshots y parser del universo.
 - GitHub Actions configurado para ejecutar las pruebas en push y pull request.
 - `.gitignore` evita subir archivos de entorno locales.
 
 ## Pendiente antes de considerar el motor operativo
 
-- Ejecutar y verificar CI; la existencia del workflow no significa que las pruebas ya hayan pasado.
 - Validar la autenticación y cotizaciones con credenciales Schwab nuevas y válidas.
-- Usar el directorio de Nasdaq Trader como fuente inicial del universo dentro del ciclo de escaneo; el endpoint de estado ya lo consulta, pero el ciclo aún requiere símbolos explícitos y no lanza un escaneo masivo automáticamente.
+- Validar la autenticación y cotizaciones con credenciales Schwab nuevas y válidas.
+- Implementar ingestión de velas live, asociación vela/snapshot y cálculo de frescura.
 - Implementar ingestión de velas live, asociación vela/snapshot y cálculo de frescura.
 - Completar RVOL con una fuente histórica verificable y FLOAT con una fuente fiable.
 - Configurar `TRADESCANNER_DB_PATH` apuntando a almacenamiento persistente de Render; la ruta local predeterminada no garantiza conservar datos tras reinicios o despliegues.
-- Añadir control de ritmo, token OAuth reutilizable y límites de carga antes de habilitar escaneo masivo; después programar ciclos automáticos y métricas de producción.
+- Validar límites y ritmo del proveedor con datos reales; el ciclo inicial es deliberadamente secuencial y conservador.
 - Conectar la tabla de la interfaz a la API y comprobar el flujo end-to-end.
 
 ## Ejecutar localmente
@@ -49,6 +52,8 @@ Configurar solo en el entorno seguro del servicio:
 - `SCHWAB_CLIENT_SECRET`
 - `SCHWAB_REFRESH_TOKEN`
 - `TRADESCANNER_DB_PATH` (opcional; recomendado en producción para usar un disco persistente)
+- `TRADESCANNER_AUTO_SCAN_ENABLED` (opcional; predeterminado `true`; usar `false` para desactivar el ciclo automático)
+- `TRADESCANNER_SCAN_INTERVAL_SECONDS` (opcional; predeterminado 30 segundos, mínimo 10)
 
 Nunca guardar credenciales en GitHub. Rota cualquier clave o token compartido en el chat o almacenado en un servicio antiguo antes de volver a usarlo.
 
