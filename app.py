@@ -5,6 +5,7 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse
 
 from tradescanner.core import apply_filters, normalize_schwab_quotes
+from tradescanner.snapshots import SnapshotStore
 from tradescanner.schwab import (
     SchwabAPIError,
     SchwabConfigurationError,
@@ -43,6 +44,19 @@ def status():
             else "Schwab credentials are not configured."
         ),
     }
+
+
+@app.get("/api/snapshots/status")
+def snapshots_status():
+    try:
+        store = SnapshotStore()
+        return {
+            "storage": "sqlite",
+            "storage_path_configured": bool(os.getenv("TRADESCANNER_DB_PATH")),
+            **store.stats(),
+        }
+    except (OSError, RuntimeError) as exc:
+        raise HTTPException(status_code=503, detail="Snapshot storage is unavailable.") from None
 
 
 @app.get("/api/quotes")
