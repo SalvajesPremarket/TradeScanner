@@ -7,6 +7,7 @@ Implementación nueva desde cero. No importar ni recuperar código de sistemas a
 - Interfaz limpia servida por FastAPI.
 - `GET /health`: health check básico.
 - `GET /api/status`: indica si están configuradas las credenciales Schwab, sin exponer secretos.
+- `GET /api/universe/status`: obtiene el directorio público de Nasdaq Trader, informa la cantidad de símbolos soportados, fecha del archivo y una muestra. Incluye ETFs y excluye issues de prueba; formatos de símbolo no compatibles se omiten.
 - `GET /api/quotes?symbols=AAPL,MSFT`: consulta cotizaciones reales a Schwab usando OAuth refresh token.
 - Normalización de precio, cierre anterior, cambio, cambio porcentual, volumen y hora de cotización cuando el proveedor los devuelve.
 - Cálculo de GAP solo cuando existen precio y cierre anterior válidos.
@@ -23,11 +24,11 @@ Implementación nueva desde cero. No importar ni recuperar código de sistemas a
 
 - Ejecutar y verificar CI; la existencia del workflow no significa que las pruebas ya hayan pasado.
 - Validar la autenticación y cotizaciones con credenciales Schwab nuevas y válidas.
-- Conectar una fuente verificable para construir el universo completo de símbolos; el ciclo actual requiere que se le pasen símbolos explícitos.
+- Usar el directorio de Nasdaq Trader como fuente inicial del universo dentro del ciclo de escaneo; el endpoint de estado ya lo consulta, pero el ciclo aún requiere símbolos explícitos y no lanza un escaneo masivo automáticamente.
 - Implementar ingestión de velas live, asociación vela/snapshot y cálculo de frescura.
 - Completar RVOL con una fuente histórica verificable y FLOAT con una fuente fiable.
 - Configurar `TRADESCANNER_DB_PATH` apuntando a almacenamiento persistente de Render; la ruta local predeterminada no garantiza conservar datos tras reinicios o despliegues.
-- Programar ciclos automáticos, agregar recuperación ante fallos y métricas de producción.
+- Añadir control de ritmo, token OAuth reutilizable y límites de carga antes de habilitar escaneo masivo; después programar ciclos automáticos y métricas de producción.
 - Conectar la tabla de la interfaz a la API y comprobar el flujo end-to-end.
 
 ## Ejecutar localmente
