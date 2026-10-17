@@ -98,7 +98,7 @@ class CandleStore:
             )
         return len(records)
 
-    def latest(self, symbol: str, limit: int = 3000) -> list[dict[str, Any]]:
+    def latest(self, symbol: str, limit: int = 6000) -> list[dict[str, Any]]:
         bounded_limit = max(1, min(int(limit), 10000))
         with self._connect() as connection:
             rows = connection.execute(
