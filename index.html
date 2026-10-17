@@ -217,7 +217,7 @@
         if (state.last_error) details.push("Error motor: " + state.last_error);
         if (state.candle_error) details.push("Error velas: " + state.candle_error);
         if (state.float_error) details.push("Error FLOAT: " + state.float_error);
-        if (!enginePayload.float_provider_configured) details.push("FLOAT FMP sin configurar");
+        if (enginePayload.float_provider) details.push("FLOAT: " + enginePayload.float_provider);
         if (!details.length && state.status === "waiting_for_credentials") details.push("Configurar credenciales seguras de Schwab en el servicio.");
         if (!details.length) details.push("Esperando el primer lote real.");
         messageNode.textContent = details.join(" · ");
