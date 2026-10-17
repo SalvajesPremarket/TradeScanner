@@ -9,7 +9,6 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse
 
 from tradescanner.candles import CandleStore
-from tradescanner.fundamentals import FloatStore
 from tradescanner.core import apply_filters, normalize_schwab_quotes
 from tradescanner.engine import get_engine_status, record_engine_status, run_scan_cycle
 from tradescanner.snapshots import SnapshotStore, collect_snapshots
@@ -113,7 +112,7 @@ def engine_status():
         "cycle_interval_seconds": interval,
         "batch_size": 100,
         "provider": "Schwab",
-        "float_provider_configured": bool(os.getenv("FMP_API_KEY", "").strip()),
+        "float_provider": "Schwab (only if explicit float fields are returned)",
         "state": state or {"status": "starting"},
     }
 
@@ -154,16 +153,14 @@ def snapshots_latest(limit: int = Query(100, ge=1, le=1000)):
         store = SnapshotStore()
         rows = store.latest(limit)
         candle_store = CandleStore(store.path)
-        float_rows = FloatStore(store.path).get_many([row["symbol"] for row in rows])
         for row in rows:
             metrics = candle_store.rvol(row["symbol"])
             row["rvol"] = metrics["rvol"]
             row["rvol_sessions_used"] = metrics["sessions_used"]
             row["rvol_as_of"] = metrics.get("as_of")
-            float_data = float_rows.get(row["symbol"], {})
-            row["float_shares"] = float_data.get("float_shares")
-            row["float_as_of"] = float_data.get("data_date")
-            row["float_source"] = float_data.get("source_url")
+            row.setdefault("float_shares", None)
+            row.setdefault("float_as_of", None)
+            row.setdefault("float_source", None)
         return {"results": rows, "limit": limit}
     except (OSError, RuntimeError, sqlite3.Error, ValueError):
         raise HTTPException(status_code=503, detail="Snapshot storage is unavailable.") from None
