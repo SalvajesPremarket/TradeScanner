@@ -119,7 +119,7 @@ def get_quotes(symbols: list[str]) -> dict[str, Any]:
     if invalid:
         raise ValueError(f"Invalid ticker symbol: {invalid[0]}")
 
-    query = urllib.parse.urlencode({"symbols": ",".join(normalized), "fields": "quote,reference"})
+    query = urllib.parse.urlencode({"symbols": ",".join(normalized), "fields": "quote,reference,fundamental"})
     request = urllib.request.Request(
         f"{QUOTES_URL}?{query}",
         headers={
