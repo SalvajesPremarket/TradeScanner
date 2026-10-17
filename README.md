@@ -20,6 +20,7 @@ Implementación nueva desde cero. No importar ni recuperar código de sistemas a
 - Motor automático incremental: usa el universo listado de Nasdaq Trader y consulta un lote de hasta 100 símbolos por ciclo; persiste el cursor en SQLite para continuar después de reinicios.
 - `GET /api/engine/status`: expone estado, último ciclo, cursor, contadores y errores sin incluir secretos.
 - Caché en memoria del access token de Schwab, con renovación anticipada al vencimiento para no solicitar un token por cada lote.
+- Tabla UI conectada a snapshots reales guardados y estado del motor; no muestra filas inventadas.
 - Pruebas unitarias de normalización, filtros, snapshots y parser del universo.
 - GitHub Actions configurado para ejecutar las pruebas en push y pull request.
 - `.gitignore` evita subir archivos de entorno locales.
