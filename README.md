@@ -17,6 +17,7 @@ Implementación nueva desde cero. No importar ni recuperar código de sistemas a
 - `GET /api/snapshots/status`: muestra cantidad de snapshots guardados, símbolos vistos y hora del último registro.
 - `GET /api/snapshots/latest?limit=100`: devuelve los snapshots más recientes por símbolo (límite de 1 a 1000).
 - `POST /api/scan?symbols=AAPL,MSFT`: ejecuta un ciclo bajo demanda, consulta Schwab en lotes de hasta 100 símbolos, guarda solo cotizaciones recibidas y devuelve contadores y duración. Aún no es un proceso automático ni tiene un universo completo integrado.
+- Pruebas unitarias de normalización, filtros, snapshots y parser del universo.
 - GitHub Actions configurado para ejecutar las pruebas en push y pull request.
 - `.gitignore` evita subir archivos de entorno locales.
 
