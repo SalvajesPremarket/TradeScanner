@@ -8,6 +8,7 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse
 
+from tradescanner.candles import CandleStore
 from tradescanner.core import apply_filters, normalize_schwab_quotes
 from tradescanner.engine import get_engine_status, record_engine_status, run_scan_cycle
 from tradescanner.snapshots import SnapshotStore, collect_snapshots
@@ -148,9 +149,35 @@ def snapshots_status():
 @app.get("/api/snapshots/latest")
 def snapshots_latest(limit: int = Query(100, ge=1, le=1000)):
     try:
-        return {"results": SnapshotStore().latest(limit), "limit": limit}
+        store = SnapshotStore()
+        rows = store.latest(limit)
+        candle_store = CandleStore(store.path)
+        for row in rows:
+            metrics = candle_store.rvol(row["symbol"])
+            row["rvol"] = metrics["rvol"]
+            row["rvol_sessions_used"] = metrics["sessions_used"]
+            row["rvol_as_of"] = metrics.get("as_of")
+        return {"results": rows, "limit": limit}
     except (OSError, RuntimeError, sqlite3.Error, ValueError):
         raise HTTPException(status_code=503, detail="Snapshot storage is unavailable.") from None
+
+
+@app.get("/api/candles/{symbol}")
+def candles_status(symbol: str, limit: int = Query(500, ge=1, le=5000)):
+    normalized = symbol.strip().upper()
+    if not normalized or len(normalized) > 15:
+        raise HTTPException(status_code=400, detail="Invalid ticker symbol.")
+    try:
+        store = SnapshotStore()
+        candle_store = CandleStore(store.path)
+        return {
+            "symbol": normalized,
+            "provider": "Schwab",
+            "candles": candle_store.latest(normalized, limit),
+            "rvol": candle_store.rvol(normalized),
+        }
+    except (OSError, RuntimeError, sqlite3.Error, ValueError):
+        raise HTTPException(status_code=503, detail="Candle storage is unavailable.") from None
 
 
 @app.post("/api/scan")
