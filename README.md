@@ -14,6 +14,8 @@ Implementación nueva desde cero. No importar ni recuperar código de sistemas a
 - Pruebas unitarias para validación de símbolos, normalización y filtros.
 - Almacenamiento SQLite de snapshots observados y colector por lotes de hasta 100 símbolos (`tradescanner/snapshots.py`).
 - `GET /api/snapshots/status`: muestra cantidad de snapshots guardados, símbolos vistos y hora del último registro.
+- `GET /api/snapshots/latest?limit=100`: devuelve los snapshots más recientes por símbolo (límite de 1 a 1000).
+- `POST /api/scan?symbols=AAPL,MSFT`: ejecuta un ciclo bajo demanda, consulta Schwab en lotes de hasta 100 símbolos, guarda solo cotizaciones recibidas y devuelve contadores y duración. Aún no es un proceso automático ni tiene un universo completo integrado.
 - GitHub Actions configurado para ejecutar las pruebas en push y pull request.
 - `.gitignore` evita subir archivos de entorno locales.
 
@@ -21,11 +23,11 @@ Implementación nueva desde cero. No importar ni recuperar código de sistemas a
 
 - Ejecutar y verificar CI; la existencia del workflow no significa que las pruebas ya hayan pasado.
 - Validar la autenticación y cotizaciones con credenciales Schwab nuevas y válidas.
-- Construir el universo de símbolos y el ciclo de escaneo completo.
+- Conectar una fuente verificable para construir el universo completo de símbolos; el ciclo actual requiere que se le pasen símbolos explícitos.
 - Implementar ingestión de velas live, asociación vela/snapshot y cálculo de frescura.
 - Completar RVOL con una fuente histórica verificable y FLOAT con una fuente fiable.
 - Configurar `TRADESCANNER_DB_PATH` apuntando a almacenamiento persistente de Render; la ruta local predeterminada no garantiza conservar datos tras reinicios o despliegues.
-- Recuperación ante fallos, métricas y despliegue de producción.
+- Programar ciclos automáticos, agregar recuperación ante fallos y métricas de producción.
 - Conectar la tabla de la interfaz a la API y comprobar el flujo end-to-end.
 
 ## Ejecutar localmente
