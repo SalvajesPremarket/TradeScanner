@@ -12,6 +12,9 @@ class AppEntrypointTests(unittest.TestCase):
         self.assertIn("/api/engine/status", paths)
         self.assertIn("/api/candles/{symbol}", paths)
         self.assertIn("/api/snapshots/latest", paths)
+        self.assertIn("/oauth/start", paths)
+        self.assertIn("/oauth/callback", paths)
+        self.assertIn("/oauth/token-ready", paths)
 
 
 if __name__ == "__main__":
