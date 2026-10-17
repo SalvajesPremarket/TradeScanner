@@ -133,7 +133,7 @@
           statusNode.textContent = "Esperando credenciales Schwab";
         } else if (state.status === "error") {
           statusNode.textContent = "Motor con error";
-        } else if (state.last_success_at) {
+        } else if (state.last_quote_received_at) {
           statusNode.textContent = "Motor automático · cotizaciones recibidas";
         } else {
           statusNode.textContent = enginePayload.automatic_scan_enabled ? "Motor iniciando" : "Motor automático desactivado";
