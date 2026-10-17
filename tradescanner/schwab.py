@@ -14,6 +14,7 @@ from typing import Any
 
 TOKEN_URL = "https://api.schwabapi.com/v1/oauth/token"
 QUOTES_URL = "https://api.schwabapi.com/marketdata/v1/quotes"
+PRICE_HISTORY_URL = "https://api.schwabapi.com/marketdata/v1/pricehistory"
 _SYMBOL_RE = re.compile(r"^[A-Z][A-Z0-9.\-]{0,14}$")
 
 _TOKEN_LOCK = threading.Lock()
@@ -131,4 +132,42 @@ def get_quotes(symbols: list[str]) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise SchwabAPIError("Schwab quotes response was not an object.")
     # Return provider data unchanged; do not synthesize missing quotes.
+    return payload
+
+def get_price_history(
+    symbol: str,
+    *,
+    period: int = 5,
+    frequency: int = 1,
+) -> dict[str, Any]:
+    """Fetch recent intraday candles for one validated symbol from Schwab."""
+    normalized = symbol.strip().upper()
+    if not _SYMBOL_RE.fullmatch(normalized):
+        raise ValueError("Invalid ticker symbol.")
+    if period not in {1, 2, 3, 4, 5, 10} or frequency not in {1, 5, 10, 15, 30}:
+        raise ValueError("Unsupported Schwab price-history period or frequency.")
+
+    query = urllib.parse.urlencode({
+        "symbol": normalized,
+        "periodType": "day",
+        "period": period,
+        "frequencyType": "minute",
+        "frequency": frequency,
+        "needExtendedHoursData": "true",
+        "needPreviousClose": "false",
+    })
+    request = urllib.request.Request(
+        f"{PRICE_HISTORY_URL}?{query}",
+        headers={
+            "Authorization": f"Bearer {_access_token()}",
+            "Accept": "application/json",
+        },
+        method="GET",
+    )
+    payload = _request_json(request)
+    if not isinstance(payload, dict):
+        raise SchwabAPIError("Schwab price-history response was not an object.")
+    candles = payload.get("candles")
+    if candles is not None and not isinstance(candles, list):
+        raise SchwabAPIError("Schwab price-history candles were malformed.")
     return payload
