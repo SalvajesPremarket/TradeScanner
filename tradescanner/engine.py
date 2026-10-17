@@ -1,7 +1,6 @@
 """Incremental, restart-safe quote scanner for the clean TradeScanner core."""
 from __future__ import annotations
 
-import json
 import os
 import threading
 import time
@@ -90,6 +89,7 @@ def run_scan_cycle(
         if len(batch) < BATCH_SIZE and cursor + len(batch) < len(symbols):
             batch.extend(symbols[:BATCH_SIZE - len(batch)])
         started = time.monotonic()
+        cycle_started_at = _now()
         result = collect_snapshots(batch, target_store, quote_fetcher or get_quotes)
         next_cursor = (cursor + len(batch)) % len(symbols)
         target_store.set_state("universe_cursor", next_cursor)
@@ -100,7 +100,7 @@ def run_scan_cycle(
             universe_count=len(symbols),
             batch_size=len(batch),
             cursor=next_cursor,
-            cycle_started_at=_now(),
+            cycle_started_at=cycle_started_at,
             last_success_at=_now(),
             last_error=None,
             last_cycle_duration_seconds=round(time.monotonic() - started, 3),
