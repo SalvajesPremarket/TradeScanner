@@ -4,6 +4,7 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse
 
+from tradescanner.core import apply_filters, normalize_schwab_quotes
 from tradescanner.schwab import (
     SchwabAPIError,
     SchwabConfigurationError,
@@ -11,7 +12,7 @@ from tradescanner.schwab import (
 )
 
 ROOT = Path(__file__).resolve().parent
-app = FastAPI(title="TradeScanner", version="0.1.0")
+app = FastAPI(title="TradeScanner", version="0.2.0")
 
 
 @app.get("/", include_in_schema=False)
@@ -37,7 +38,7 @@ def status():
         "market_data_connected": False,
         "results_published": 0,
         "message": (
-            "Credentials configured; live data is verified only when a quote request succeeds."
+            "Credentials configured; connection is verified only after a successful quote request."
             if configured
             else "Schwab credentials are not configured."
         ),
@@ -45,13 +46,42 @@ def status():
 
 
 @app.get("/api/quotes")
-def quotes(symbols: str = Query(..., description="Comma-separated ticker symbols")):
+def quotes(
+    symbols: str = Query(..., description="Comma-separated ticker symbols"),
+    min_price: float | None = Query(None, ge=0),
+    max_price: float | None = Query(None, ge=0),
+    min_gap_pct: float | None = None,
+    max_gap_pct: float | None = None,
+    min_rvol: float | None = Query(None, ge=0),
+    min_volume: int | None = Query(None, ge=0),
+):
     requested = [symbol.strip() for symbol in symbols.split(",") if symbol.strip()]
     try:
+        raw = get_quotes(requested)
+        rows = normalize_schwab_quotes(raw)
+        filtered = apply_filters(
+            rows,
+            min_price=min_price,
+            max_price=max_price,
+            min_gap_pct=min_gap_pct,
+            max_gap_pct=max_gap_pct,
+            min_rvol=min_rvol,
+            min_volume=min_volume,
+        )
         return {
             "provider": "Schwab",
-            "count": len(requested),
-            "quotes": get_quotes(requested),
+            "requested_count": len(set(symbol.upper() for symbol in requested)),
+            "received_count": len(rows),
+            "result_count": len(filtered),
+            "filters": {
+                "min_price": min_price,
+                "max_price": max_price,
+                "min_gap_pct": min_gap_pct,
+                "max_gap_pct": max_gap_pct,
+                "min_rvol": min_rvol,
+                "min_volume": min_volume,
+            },
+            "results": filtered,
         }
     except SchwabConfigurationError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from None
