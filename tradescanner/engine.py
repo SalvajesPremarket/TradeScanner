@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import sqlite3
 import threading
 import time
 from datetime import datetime, timezone
@@ -124,7 +125,7 @@ def run_scan_cycle(
                     rvol = candle_store.rvol(candidate["symbol"])
                     candle_state["rvol"] = rvol.get("rvol")
                     candle_state["rvol_sessions_used"] = rvol.get("sessions_used", 0)
-            except (SchwabAPIError, SchwabConfigurationError, ValueError, OSError, RuntimeError) as exc:
+            except (SchwabAPIError, SchwabConfigurationError, ValueError, OSError, RuntimeError, sqlite3.Error) as exc:
                 candle_state["candle_error"] = type(exc).__name__
         next_cursor = (cursor + len(batch)) % len(symbols)
         target_store.set_state("universe_cursor", next_cursor)
@@ -147,7 +148,7 @@ def run_scan_cycle(
         )
         target_store.set_state("cycles_completed", state["cycles_completed"])
         return {"status": "completed", **state}
-    except (SchwabConfigurationError, SchwabAPIError, ValueError, OSError) as exc:
+    except (SchwabConfigurationError, SchwabAPIError, ValueError, OSError, sqlite3.Error) as exc:
         target_store = store or SnapshotStore()
         state = record_engine_status(
             target_store,
