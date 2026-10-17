@@ -128,7 +128,10 @@ class CandleStore:
         historical_totals: list[int] = []
         for day in previous_days:
             bars = sessions[day]
-            if not any(minute <= cutoff for minute, _ in bars):
+            # Exclude incomplete historical sessions that do not reach roughly
+            # the same time of day; otherwise their partial volume understates
+            # the baseline and inflates RVOL.
+            if max(minute for minute, _ in bars) < cutoff - 5:
                 continue
             historical_totals.append(sum(volume for minute, volume in bars if minute <= cutoff))
         if not historical_totals:
