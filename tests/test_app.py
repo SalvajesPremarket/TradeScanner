@@ -9,6 +9,9 @@ class AppEntrypointTests(unittest.TestCase):
         paths = {route.path for route in app.routes}
         self.assertIn("/health", paths)
         self.assertIn("/api/status", paths)
+        self.assertIn("/api/engine/status", paths)
+        self.assertIn("/api/candles/{symbol}", paths)
+        self.assertIn("/api/snapshots/latest", paths)
 
 
 if __name__ == "__main__":
