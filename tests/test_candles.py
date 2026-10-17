@@ -1,0 +1,59 @@
+import tempfile
+import unittest
+from datetime import datetime
+from pathlib import Path
+from zoneinfo import ZoneInfo
+
+from tradescanner.candles import CandleStore, normalize_price_history
+
+
+NY = ZoneInfo("America/New_York")
+
+
+def ms(day, hour, minute):
+    return int(datetime(2026, 10, day, hour, minute, tzinfo=NY).timestamp() * 1000)
+
+
+class CandleTests(unittest.TestCase):
+    def test_normalizes_provider_candles_without_filling_missing_fields(self):
+        payload = {"candles": [
+            {"datetime": ms(14, 9, 30), "open": 10, "high": 11, "low": 9, "close": 10.5, "volume": 100},
+            {"datetime": "invalid", "open": 10, "high": 11, "low": 9, "close": 10.5, "volume": 100},
+            {"datetime": ms(14, 9, 31), "open": 10, "high": None, "low": 9, "close": 10.5, "volume": 100},
+        ]}
+        rows = normalize_price_history("aapl", payload)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["symbol"], "AAPL")
+        self.assertEqual(rows[0]["volume"], 100)
+
+    def test_calculates_rvol_against_prior_sessions_at_same_time(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = CandleStore(Path(directory) / "candles.sqlite3")
+            rows = []
+            for day, volumes in ((12, (50, 50)), (13, (100, 100)), (14, (150, 250))):
+                for minute, volume in zip((30, 31), volumes):
+                    rows.append({
+                        "symbol": "AAPL",
+                        "candle_time_ms": ms(day, 9, minute),
+                        "open": 10.0, "high": 10.5, "low": 9.5, "close": 10.2,
+                        "volume": volume,
+                    })
+            self.assertEqual(store.save(rows), 6)
+            result = store.rvol("AAPL")
+            self.assertEqual(result["current_volume"], 400)
+            self.assertEqual(result["average_volume"], 150)
+            self.assertEqual(result["sessions_used"], 2)
+            self.assertEqual(result["rvol"], 2.6667)
+
+    def test_rvol_is_unavailable_without_prior_sessions(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = CandleStore(Path(directory) / "candles.sqlite3")
+            store.save([{
+                "symbol": "AAPL", "candle_time_ms": ms(14, 9, 30),
+                "open": 10.0, "high": 10.5, "low": 9.5, "close": 10.2, "volume": 100,
+            }])
+            self.assertIsNone(store.rvol("AAPL")["rvol"])
+
+
+if __name__ == "__main__":
+    unittest.main()
