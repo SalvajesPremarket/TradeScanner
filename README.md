@@ -1,16 +1,29 @@
 # TradeScanner
 
-Implementación nueva desde cero en este repositorio. No se importa código de repositorios antiguos.
+Implementación nueva desde cero. No importar ni recuperar código de sistemas anteriores.
 
-## Estado actual
+## Estado implementado
 
-- Interfaz estática servida por FastAPI.
-- `GET /health`: comprobación básica del proceso.
-- `GET /api/status`: informa si existen las tres variables de credenciales Schwab, sin exponer sus valores.
-- `GET /api/quotes?symbols=AAPL,MSFT`: solicita cotizaciones reales a Schwab usando OAuth refresh token.
-- Límite por petición: 100 símbolos únicos como máximo.
-- No se generan cotizaciones falsas, tickers de muestra ni resultados simulados.
-- El universo completo, el flujo de velas en vivo, el motor de snapshots y los filtros del screener aún no están implementados.
+- Interfaz limpia servida por FastAPI.
+- `GET /health`: health check básico.
+- `GET /api/status`: indica si están configuradas las credenciales Schwab, sin exponer secretos.
+- `GET /api/quotes?symbols=AAPL,MSFT`: consulta cotizaciones reales a Schwab usando OAuth refresh token.
+- Normalización de precio, cierre anterior, cambio, cambio porcentual, volumen y hora de cotización cuando el proveedor los devuelve.
+- Cálculo de GAP solo cuando existen precio y cierre anterior válidos.
+- Filtros iniciales de precio, GAP, RVOL y volumen; los filtros activos excluyen datos ausentes en lugar de inventarlos.
+- Pruebas unitarias para validación de símbolos, normalización y filtros.
+- GitHub Actions configurado para ejecutar las pruebas en push y pull request.
+- `.gitignore` evita subir archivos de entorno locales.
+
+## Pendiente antes de considerar el motor operativo
+
+- Ejecutar y verificar CI; la existencia del workflow no significa que las pruebas ya hayan pasado.
+- Validar la autenticación y cotizaciones con credenciales Schwab nuevas y válidas.
+- Construir el universo de símbolos y el ciclo de escaneo completo.
+- Implementar ingestión de velas live, asociación vela/snapshot y cálculo de frescura.
+- Completar RVOL con una fuente histórica verificable y FLOAT con una fuente fiable.
+- Persistencia, recuperación ante fallos, métricas y despliegue de producción.
+- Conectar la tabla de la interfaz a la API y comprobar el flujo end-to-end.
 
 ## Ejecutar localmente
 
@@ -19,19 +32,19 @@ python -m pip install -r requirements.txt
 uvicorn app:app --host 0.0.0.0 --port 8000
 ```
 
-Abrir `http://localhost:8000`. Documentación de la API: `http://localhost:8000/docs`.
+Abrir `http://localhost:8000`. Documentación: `http://localhost:8000/docs`.
 
 ## Variables de entorno
 
-Configurar únicamente en el entorno seguro del servicio:
+Configurar solo en el entorno seguro del servicio:
 
 - `SCHWAB_CLIENT_ID`
 - `SCHWAB_CLIENT_SECRET`
 - `SCHWAB_REFRESH_TOKEN`
 
-Nunca guardar credenciales en el repositorio. Rota cualquier clave o token compartido en el chat o guardado en servicios antiguos antes de reutilizarlo.
+Nunca guardar credenciales en GitHub. Rota cualquier clave o token compartido en el chat o almacenado en un servicio antiguo antes de volver a usarlo.
 
-## Despliegue en Render
+## Render
 
 - Build command: `pip install -r requirements.txt`
 - Start command: `uvicorn app:app --host 0.0.0.0 --port $PORT`
