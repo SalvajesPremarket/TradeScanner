@@ -16,8 +16,8 @@ class UniverseTests(unittest.TestCase):
             "File Creation Time: 101720261100|||||||||||\n"
         )
         result = parse_symbol_directory(content)
-        self.assertEqual(result["symbols"], ["AAPL"])
-        self.assertEqual(result["count"], 1)
+        self.assertEqual(result["symbols"], ["AAPL", "ETF1"])
+        self.assertEqual(result["count"], 2)
         self.assertEqual(result["generated_at"], "101720261100")
 
     def test_rejects_unknown_format(self):
