@@ -11,7 +11,8 @@ Reconstrucción limpia e independiente. No importar ni recuperar código de sist
 - Ciclo automático configurable por variables de entorno; solo avanza el cursor después de guardar snapshots.
 - Caché temporal del token de acceso Schwab con renovación anticipada.
 - Captura acotada de velas intradía para un candidato de cada lote de cotizaciones; se guarda OHLCV de Schwab en SQLite.
-- RVOL intradía calculado como volumen acumulado de la sesión actual frente al promedio acumulado de hasta cinco sesiones anteriores a la misma hora de Nueva York. Si no hay historial suficiente, devuelve `null`, nunca un valor inventado.
+- RVOL intradía calculado como volumen acumulado de la sesión actual frente al promedio acumulado de hasta cinco sesiones anteriores a la misma hora de Nueva York. Se excluyen sesiones históricas incompletas; si no hay historial suficiente, devuelve `null`.
+- FLOAT opcional desde el endpoint oficial FMP Shares Float, guardado con fecha y URL de origen y cacheado durante 24 horas. Se consulta solo para el candidato de cada lote, requiere `FMP_API_KEY` y tiene un límite predeterminado de 200 consultas diarias configurable.
 - Interfaz conectada a snapshots guardados, estado del motor y RVOL calculado cuando existe historial.
 - Las credenciales nunca se guardan en el repositorio.
 
@@ -30,6 +31,7 @@ Reconstrucción limpia e independiente. No importar ni recuperar código de sist
 ## Pendiente antes de declarar producción
 
 - Validar autenticación y cotizaciones con credenciales Schwab válidas en un entorno seguro.
+- Configurar `FMP_API_KEY` en el entorno seguro si se quiere activar el enriquecimiento FLOAT; no se necesita para ejecutar el motor base.
 - Mejorar la cobertura de velas: por límite de solicitudes, el ciclo captura velas para un candidato por lote, no para todo el universo en cada ciclo.
 - Verificar frescura de las velas y el comportamiento de RVOL con sesiones reales y datos extendidos de Schwab.
 - Incorporar una fuente fiable para FLOAT; permanece `null` hasta disponer de una fuente verificable.
@@ -54,6 +56,8 @@ Abrir `http://localhost:8000`; documentación API en `http://localhost:8000/docs
 - `TRADESCANNER_DB_PATH` (recomendado en producción, apuntando a almacenamiento persistente)
 - `TRADESCANNER_AUTO_SCAN_ENABLED` (predeterminado `true`; usar `false` para desactivar el ciclo automático)
 - `TRADESCANNER_SCAN_INTERVAL_SECONDS` (predeterminado 30; mínimo 10)
+- `FMP_API_KEY` (opcional; habilita FLOAT)
+- `TRADESCANNER_FLOAT_MAX_REQUESTS_PER_DAY` (opcional; predeterminado 200)
 
 No publicar claves o tokens en GitHub ni en el chat. Si una credencial se compartió previamente en texto, rotarla antes de utilizarla.
 
