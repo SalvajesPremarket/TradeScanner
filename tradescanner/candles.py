@@ -1,7 +1,6 @@
 """Intraday candle storage and time-of-day relative-volume calculations."""
 from __future__ import annotations
 
-import json
 import math
 import sqlite3
 from datetime import datetime
@@ -27,7 +26,7 @@ def normalize_price_history(symbol: str, payload: dict[str, Any]) -> list[dict[s
         volume = item.get("volume")
         if isinstance(timestamp, bool) or not isinstance(timestamp, (int, float)):
             continue
-        if isinstance(volume, bool) or not isinstance(volume, (int, float)) or volume < 0:
+        if isinstance(volume, bool) or not isinstance(volume, (int, float)) or not math.isfinite(volume) or volume < 0:
             continue
         values: dict[str, float] = {}
         valid = True
