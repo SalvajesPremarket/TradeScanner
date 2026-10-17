@@ -98,6 +98,30 @@ class SnapshotStore:
             "latest_snapshot_at": latest,
         }
 
+    def latest_for_symbols(self, symbols: list[str]) -> list[dict[str, Any]]:
+        normalized = list(dict.fromkeys(
+            symbol.strip().upper() for symbol in symbols
+            if isinstance(symbol, str) and symbol.strip()
+        ))
+        if not normalized:
+            return []
+        placeholders = ",".join("?" for _ in normalized)
+        with self._connect() as connection:
+            rows = connection.execute(
+                f"""
+                SELECT payload_json FROM quote_snapshots AS current
+                WHERE current.symbol IN ({placeholders})
+                  AND captured_at = (
+                    SELECT MAX(previous.captured_at)
+                    FROM quote_snapshots AS previous
+                    WHERE previous.symbol = current.symbol
+                  )
+                ORDER BY symbol
+                """,
+                normalized,
+            ).fetchall()
+        return [json.loads(row[0]) for row in rows]
+
     def latest(self, limit: int = 100) -> list[dict[str, Any]]:
         bounded_limit = max(1, min(int(limit), 1000))
         with self._connect() as connection:
