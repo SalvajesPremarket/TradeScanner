@@ -8,7 +8,8 @@ from fastapi.responses import FileResponse
 
 from tradescanner.core import apply_filters, normalize_schwab_quotes
 from tradescanner.snapshots import SnapshotStore, collect_snapshots
-from tradescanner.universe import UniverseUnavailableError, load_symbol_universe\nfrom tradescanner.schwab import (
+from tradescanner.universe import UniverseUnavailableError, load_symbol_universe
+from tradescanner.schwab import (
     SchwabAPIError,
     SchwabConfigurationError,
     get_quotes,
