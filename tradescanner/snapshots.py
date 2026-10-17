@@ -133,7 +133,7 @@ class SnapshotStore:
                     FROM quote_snapshots AS previous
                     WHERE previous.symbol = current.symbol
                 )
-                ORDER BY symbol LIMIT ?
+                ORDER BY current.captured_at DESC, current.symbol LIMIT ?
                 """,
                 (bounded_limit,),
             ).fetchall()
