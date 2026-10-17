@@ -1,12 +1,15 @@
+import asyncio
 import os
 import sqlite3
 import time
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse
 
 from tradescanner.core import apply_filters, normalize_schwab_quotes
+from tradescanner.engine import get_engine_status, record_engine_status, run_scan_cycle
 from tradescanner.snapshots import SnapshotStore, collect_snapshots
 from tradescanner.universe import UniverseUnavailableError, load_symbol_universe
 from tradescanner.schwab import (
@@ -16,7 +19,46 @@ from tradescanner.schwab import (
 )
 
 ROOT = Path(__file__).resolve().parent
-app = FastAPI(title="TradeScanner", version="0.2.0")
+
+
+async def _automatic_scan_loop(stop: asyncio.Event) -> None:
+    enabled = os.getenv("TRADESCANNER_AUTO_SCAN_ENABLED", "true").strip().lower()
+    if enabled not in {"1", "true", "yes", "on"}:
+        return
+    try:
+        interval = max(10, int(os.getenv("TRADESCANNER_SCAN_INTERVAL_SECONDS", "30")))
+    except ValueError:
+        interval = 30
+
+    while not stop.is_set():
+        try:
+            await asyncio.to_thread(run_scan_cycle)
+        except Exception as exc:
+            # Store only the exception class; never leak provider responses or secrets.
+            try:
+                record_engine_status(SnapshotStore(), status="error", last_error=type(exc).__name__)
+            except (OSError, RuntimeError, sqlite3.Error):
+                pass
+        try:
+            await asyncio.wait_for(stop.wait(), timeout=interval)
+        except asyncio.TimeoutError:
+            pass
+
+
+@asynccontextmanager
+async def lifespan(application: FastAPI):
+    stop = asyncio.Event()
+    task = asyncio.create_task(_automatic_scan_loop(stop))
+    application.state.scan_task = task
+    try:
+        yield
+    finally:
+        stop.set()
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
+
+app = FastAPI(title="TradeScanner", version="0.3.0", lifespan=lifespan)
 
 
 @app.get("/", include_in_schema=False)
@@ -35,17 +77,41 @@ def status():
         os.getenv(name)
         for name in ("SCHWAB_CLIENT_ID", "SCHWAB_CLIENT_SECRET", "SCHWAB_REFRESH_TOKEN")
     )
+    engine = get_engine_status()
+    connected = bool(engine.get("last_success_at"))
     return {
         "service": "TradeScanner",
         "provider": "Schwab",
         "provider_configured": configured,
-        "market_data_connected": False,
+        "market_data_connected": connected,
         "results_published": 0,
+        "engine_status": engine.get("status", "starting"),
         "message": (
-            "Credentials configured; connection is verified only after a successful quote request."
+            "Schwab quotes have been received by the scanner."
+            if connected
+            else "Connection is not verified until a Schwab quote batch succeeds."
             if configured
             else "Schwab credentials are not configured."
         ),
+    }
+
+
+@app.get("/api/engine/status")
+def engine_status():
+    state = get_engine_status()
+    enabled = os.getenv("TRADESCANNER_AUTO_SCAN_ENABLED", "true").strip().lower() in {
+        "1", "true", "yes", "on"
+    }
+    try:
+        interval = max(10, int(os.getenv("TRADESCANNER_SCAN_INTERVAL_SECONDS", "30")))
+    except ValueError:
+        interval = 30
+    return {
+        "automatic_scan_enabled": enabled,
+        "cycle_interval_seconds": interval,
+        "batch_size": 100,
+        "provider": "Schwab",
+        "state": state or {"status": "starting"},
     }
 
 
