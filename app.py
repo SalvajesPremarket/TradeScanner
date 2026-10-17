@@ -1,4 +1,5 @@
 import os
+import sqlite3
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Query
@@ -55,7 +56,7 @@ def snapshots_status():
             "storage_path_configured": bool(os.getenv("TRADESCANNER_DB_PATH")),
             **store.stats(),
         }
-    except (OSError, RuntimeError) as exc:
+    except (OSError, RuntimeError, sqlite3.Error):
         raise HTTPException(status_code=503, detail="Snapshot storage is unavailable.") from None
 
 
