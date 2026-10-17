@@ -8,7 +8,7 @@ from fastapi.responses import FileResponse
 
 from tradescanner.core import apply_filters, normalize_schwab_quotes
 from tradescanner.snapshots import SnapshotStore, collect_snapshots
-from tradescanner.schwab import (
+from tradescanner.universe import UniverseUnavailableError, load_symbol_universe\nfrom tradescanner.schwab import (
     SchwabAPIError,
     SchwabConfigurationError,
     get_quotes,
@@ -46,6 +46,23 @@ def status():
             else "Schwab credentials are not configured."
         ),
     }
+
+
+@app.get("/api/universe/status")
+def universe_status():
+    try:
+        universe = load_symbol_universe()
+        return {
+            "source": universe["source"],
+            "generated_at": universe["generated_at"],
+            "universe_count": universe["count"],
+            "sample_symbols": universe["symbols"][:20],
+            "includes_etfs": True,
+            "includes_test_issues": False,
+            "note": "Current listed symbols from Nasdaq Trader; unsupported ticker formats are skipped.",
+        }
+    except UniverseUnavailableError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from None
 
 
 @app.get("/api/snapshots/status")
