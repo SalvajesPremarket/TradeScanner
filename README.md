@@ -1,40 +1,41 @@
 # TradeScanner
 
-Implementación nueva desde cero. No importar ni recuperar código de sistemas anteriores.
+Reconstrucción limpia e independiente. No importar ni recuperar código de sistemas anteriores. TradeBoot permanece separado y fuera de esta fase.
 
-## Estado implementado
+## Motor implementado en esta rama
 
-- Interfaz limpia servida por FastAPI.
-- `GET /health`: health check básico.
-- `GET /api/status`: indica si están configuradas las credenciales Schwab, sin exponer secretos.
-- `GET /api/universe/status`: obtiene el directorio público de Nasdaq Trader, informa la cantidad de símbolos soportados, fecha del archivo y una muestra. Incluye ETFs y excluye issues de prueba; formatos de símbolo no compatibles se omiten.
-- `GET /api/quotes?symbols=AAPL,MSFT`: consulta cotizaciones reales a Schwab usando OAuth refresh token.
-- Normalización de precio, cierre anterior, cambio, cambio porcentual, volumen y hora de cotización cuando el proveedor los devuelve.
-- Cálculo de GAP solo cuando existen precio y cierre anterior válidos.
-- Filtros iniciales de precio, GAP, RVOL y volumen; los filtros activos excluyen datos ausentes en lugar de inventarlos.
-- Pruebas unitarias para validación de símbolos, normalización y filtros.
-- Almacenamiento SQLite de snapshots observados y colector por lotes de hasta 100 símbolos (`tradescanner/snapshots.py`).
-- `GET /api/snapshots/status`: muestra cantidad de snapshots guardados, símbolos vistos y hora del último registro.
-- `GET /api/snapshots/latest?limit=100`: devuelve los snapshots más recientes por símbolo (límite de 1 a 1000).
-- `POST /api/scan?symbols=AAPL,MSFT`: ejecuta un ciclo bajo demanda y guarda solo cotizaciones recibidas.
-- Motor automático incremental: usa el universo listado de Nasdaq Trader y consulta un lote de hasta 100 símbolos por ciclo; persiste el cursor en SQLite para continuar después de reinicios.
-- `GET /api/engine/status`: expone estado, último ciclo, cursor, contadores y errores sin incluir secretos.
-- Caché en memoria del access token de Schwab, con renovación anticipada al vencimiento para no solicitar un token por cada lote.
-- Tabla UI conectada a snapshots reales guardados y estado del motor; no muestra filas inventadas.
-- Pruebas unitarias de normalización, filtros, snapshots y parser del universo.
-- GitHub Actions configurado para ejecutar las pruebas en push y pull request.
-- `.gitignore` evita subir archivos de entorno locales.
+- FastAPI con health check, estado del motor, universo, cotizaciones y snapshots.
+- Universo de símbolos listados desde Nasdaq Trader; no se generan símbolos ficticios.
+- Consulta Schwab OAuth y cotizaciones reales por lotes de hasta 100 símbolos.
+- Motor incremental que persiste el cursor y el estado en SQLite para continuar tras reinicios.
+- Ciclo automático configurable por variables de entorno; solo avanza el cursor después de guardar snapshots.
+- Caché temporal del token de acceso Schwab con renovación anticipada.
+- Captura acotada de velas intradía para un candidato de cada lote de cotizaciones; se guarda OHLCV de Schwab en SQLite.
+- RVOL intradía calculado como volumen acumulado de la sesión actual frente al promedio acumulado de hasta cinco sesiones anteriores a la misma hora de Nueva York. Si no hay historial suficiente, devuelve `null`, nunca un valor inventado.
+- Interfaz conectada a snapshots guardados, estado del motor y RVOL calculado cuando existe historial.
+- Las credenciales nunca se guardan en el repositorio.
 
-## Pendiente antes de considerar el motor operativo
+## Endpoints
 
-- Validar la autenticación y cotizaciones con credenciales Schwab nuevas y válidas.
-- Validar la autenticación y cotizaciones con credenciales Schwab nuevas y válidas.
-- Implementar ingestión de velas live, asociación vela/snapshot y cálculo de frescura.
-- Implementar ingestión de velas live, asociación vela/snapshot y cálculo de frescura.
-- Completar RVOL con una fuente histórica verificable y FLOAT con una fuente fiable.
-- Configurar `TRADESCANNER_DB_PATH` apuntando a almacenamiento persistente de Render; la ruta local predeterminada no garantiza conservar datos tras reinicios o despliegues.
-- Validar límites y ritmo del proveedor con datos reales; el ciclo inicial es deliberadamente secuencial y conservador.
-- Conectar la tabla de la interfaz a la API y comprobar el flujo end-to-end.
+- `GET /health`: estado básico del servicio.
+- `GET /api/status`: configuración y estado de conexión con Schwab.
+- `GET /api/universe/status`: tamaño y muestra del universo.
+- `GET /api/engine/status`: estado, último lote, cursor, ciclos y estado de velas.
+- `GET /api/snapshots/status`: métricas de almacenamiento.
+- `GET /api/snapshots/latest?limit=100`: snapshots más recientes por símbolo, con RVOL solo si puede calcularse.
+- `GET /api/candles/AAPL?limit=500`: velas guardadas y cálculo RVOL de ese símbolo.
+- `GET /api/quotes?symbols=AAPL,MSFT`: consulta de cotizaciones y filtros básicos.
+- `POST /api/scan?symbols=AAPL,MSFT`: captura de snapshots bajo demanda.
+
+## Pendiente antes de declarar producción
+
+- Validar autenticación y cotizaciones con credenciales Schwab válidas en un entorno seguro.
+- Mejorar la cobertura de velas: por límite de solicitudes, el ciclo captura velas para un candidato por lote, no para todo el universo en cada ciclo.
+- Verificar frescura de las velas y el comportamiento de RVOL con sesiones reales y datos extendidos de Schwab.
+- Incorporar una fuente fiable para FLOAT; permanece `null` hasta disponer de una fuente verificable.
+- Conectar almacenamiento SQLite a disco persistente de Render antes de despliegues productivos.
+- Ejecutar y verificar CI después de estos cambios, revisar límites de API y completar prueba end-to-end.
+- Los filtros de la interfaz todavía son una estructura visual; falta conectarlos como controles interactivos al endpoint de cotizaciones.
 
 ## Ejecutar localmente
 
@@ -43,22 +44,22 @@ python -m pip install -r requirements.txt
 uvicorn app:app --host 0.0.0.0 --port 8000
 ```
 
-Abrir `http://localhost:8000`. Documentación: `http://localhost:8000/docs`.
+Abrir `http://localhost:8000`; documentación API en `http://localhost:8000/docs`.
 
 ## Variables de entorno
-
-Configurar solo en el entorno seguro del servicio:
 
 - `SCHWAB_CLIENT_ID`
 - `SCHWAB_CLIENT_SECRET`
 - `SCHWAB_REFRESH_TOKEN`
-- `TRADESCANNER_DB_PATH` (opcional; recomendado en producción para usar un disco persistente)
-- `TRADESCANNER_AUTO_SCAN_ENABLED` (opcional; predeterminado `true`; usar `false` para desactivar el ciclo automático)
-- `TRADESCANNER_SCAN_INTERVAL_SECONDS` (opcional; predeterminado 30 segundos, mínimo 10)
+- `TRADESCANNER_DB_PATH` (recomendado en producción, apuntando a almacenamiento persistente)
+- `TRADESCANNER_AUTO_SCAN_ENABLED` (predeterminado `true`; usar `false` para desactivar el ciclo automático)
+- `TRADESCANNER_SCAN_INTERVAL_SECONDS` (predeterminado 30; mínimo 10)
 
-Nunca guardar credenciales en GitHub. Rota cualquier clave o token compartido en el chat o almacenado en un servicio antiguo antes de volver a usarlo.
+No publicar claves o tokens en GitHub ni en el chat. Si una credencial se compartió previamente en texto, rotarla antes de utilizarla.
 
-## Render
+## Render (cuando el motor esté validado)
 
 - Build command: `pip install -r requirements.txt`
 - Start command: `uvicorn app:app --host 0.0.0.0 --port $PORT`
+
+No desplegar todavía: falta validar datos reales y configurar almacenamiento persistente.
