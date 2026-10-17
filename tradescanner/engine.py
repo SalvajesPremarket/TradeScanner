@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from typing import Any, Callable
 
 from tradescanner.candles import CandleStore, normalize_price_history
+from tradescanner.fundamentals import FloatDataError, FloatStore
 from tradescanner.snapshots import BATCH_SIZE, SnapshotStore, collect_snapshots
 from tradescanner.schwab import SchwabAPIError, SchwabConfigurationError, get_price_history, get_quotes
 from tradescanner.universe import load_symbol_universe
@@ -100,6 +101,11 @@ def run_scan_cycle(
             "rvol": None,
             "rvol_sessions_used": 0,
             "candle_error": None,
+            "float_symbol": None,
+            "float_shares": None,
+            "float_as_of": None,
+            "float_source": None,
+            "float_error": None,
         }
         # One bounded historical request per successful quote cycle. Prefer the
         # strongest observed GAP from this batch; never block quote persistence
@@ -125,6 +131,15 @@ def run_scan_cycle(
                     rvol = candle_store.rvol(candidate["symbol"])
                     candle_state["rvol"] = rvol.get("rvol")
                     candle_state["rvol_sessions_used"] = rvol.get("sessions_used", 0)
+                    try:
+                        float_data = FloatStore(target_store.path).get_or_fetch(candidate["symbol"])
+                        if float_data is not None:
+                            candle_state["float_symbol"] = candidate["symbol"]
+                            candle_state["float_shares"] = float_data.get("float_shares")
+                            candle_state["float_as_of"] = float_data.get("data_date")
+                            candle_state["float_source"] = float_data.get("source_url")
+                    except (FloatDataError, OSError, RuntimeError, sqlite3.Error) as exc:
+                        candle_state["float_error"] = type(exc).__name__
             except (SchwabAPIError, SchwabConfigurationError, ValueError, OSError, RuntimeError, sqlite3.Error) as exc:
                 candle_state["candle_error"] = type(exc).__name__
         next_cursor = (cursor + len(batch)) % len(symbols)
