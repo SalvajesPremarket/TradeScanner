@@ -6,6 +6,7 @@ import math
 import os
 import sqlite3
 import time
+from datetime import datetime, timezone
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -72,6 +73,12 @@ class FloatStore:
                     fetched_at INTEGER NOT NULL
                 )"""
             )
+            connection.execute(
+                """CREATE TABLE IF NOT EXISTS float_request_budget (
+                    request_day TEXT PRIMARY KEY,
+                    requests INTEGER NOT NULL
+                )"""
+            )
 
     def _connect(self) -> sqlite3.Connection:
         return sqlite3.connect(str(self.path), timeout=10)
@@ -98,6 +105,19 @@ class FloatStore:
             for row in rows
         }
 
+    def _reserve_daily_request(self, max_requests: int) -> bool:
+        if max_requests <= 0:
+            return False
+        today = datetime.now(timezone.utc).date().isoformat()
+        with self._connect() as connection:
+            cursor = connection.execute(
+                """INSERT INTO float_request_budget(request_day, requests) VALUES (?, 1)
+                   ON CONFLICT(request_day) DO UPDATE SET requests=requests + 1
+                   WHERE float_request_budget.requests < ?""",
+                (today, max_requests),
+            )
+            return cursor.rowcount == 1
+
     def get_or_fetch(
         self,
         symbol: str,
@@ -117,6 +137,12 @@ class FloatStore:
         if fetcher is not None:
             payload = fetcher(normalized)
         else:
+            try:
+                daily_limit = max(0, int(os.getenv("TRADESCANNER_FLOAT_MAX_REQUESTS_PER_DAY", "200")))
+            except ValueError:
+                daily_limit = 200
+            if not self._reserve_daily_request(daily_limit):
+                return cached
             query = urllib.parse.urlencode({"symbol": normalized, "apikey": api_key})
             request = urllib.request.Request(
                 f"{FMP_FLOAT_URL}?{query}",
