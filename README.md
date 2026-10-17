@@ -12,7 +12,7 @@ Reconstrucción limpia e independiente. No importar ni recuperar código de sist
 - Caché temporal del token de acceso Schwab con renovación anticipada.
 - Captura acotada de velas intradía para un candidato de cada lote de cotizaciones; se guarda OHLCV de Schwab en SQLite.
 - RVOL intradía calculado como volumen acumulado de la sesión actual frente al promedio acumulado de hasta cinco sesiones anteriores a la misma hora de Nueva York. Se excluyen sesiones históricas incompletas; si no hay historial suficiente, devuelve `null`.
-- FLOAT opcional desde el endpoint oficial FMP Shares Float, guardado con fecha y URL de origen y cacheado durante 24 horas. Se consulta solo para el candidato de cada lote, requiere `FMP_API_KEY` y tiene un límite predeterminado de 200 consultas diarias configurable.
+- FLOAT: se acepta únicamente si Schwab devuelve un campo explícito `floatShares`. Schwab normalmente expone `sharesOutstanding`, que no equivale a FLOAT; nunca se usa como sustituto. Si no hay un campo FLOAT verificable, el valor queda `null` y el filtro FLOAT no incluye ese símbolo.
 - Interfaz conectada a snapshots guardados, estado del motor y RVOL calculado cuando existe historial.
 - Las credenciales nunca se guardan en el repositorio.
 
@@ -34,10 +34,10 @@ Reconstrucción limpia e independiente. No importar ni recuperar código de sist
 - Configurar `FMP_API_KEY` en el entorno seguro si se quiere activar el enriquecimiento FLOAT; no se necesita para ejecutar el motor base.
 - Mejorar la cobertura de velas: por límite de solicitudes, el ciclo captura velas para un candidato por lote, no para todo el universo en cada ciclo.
 - Verificar frescura de las velas y el comportamiento de RVOL con sesiones reales y datos extendidos de Schwab.
-- Incorporar una fuente fiable para FLOAT; permanece `null` hasta disponer de una fuente verificable.
+- Confirmar con respuestas reales de Schwab si el endpoint autorizado para esta cuenta devuelve un campo FLOAT explícito; la documentación habitual de cotizaciones expone `sharesOutstanding`, no un número de float shares. Si no lo devuelve, FLOAT permanece `null` sin proveedor externo.
 - Conectar almacenamiento SQLite a disco persistente de Render antes de despliegues productivos.
 - Ejecutar y verificar CI después de estos cambios, revisar límites de API y completar prueba end-to-end.
-- Los filtros de la interfaz todavía son una estructura visual; falta conectarlos como controles interactivos al endpoint de cotizaciones.
+- Los filtros actuales funcionan en la interfaz sobre snapshots reales almacenados; solo filtran los datos que estén disponibles y no fabrican valores.
 
 ## Ejecutar localmente
 
@@ -56,8 +56,6 @@ Abrir `http://localhost:8000`; documentación API en `http://localhost:8000/docs
 - `TRADESCANNER_DB_PATH` (recomendado en producción, apuntando a almacenamiento persistente)
 - `TRADESCANNER_AUTO_SCAN_ENABLED` (predeterminado `true`; usar `false` para desactivar el ciclo automático)
 - `TRADESCANNER_SCAN_INTERVAL_SECONDS` (predeterminado 30; mínimo 10)
-- `FMP_API_KEY` (opcional; habilita FLOAT)
-- `TRADESCANNER_FLOAT_MAX_REQUESTS_PER_DAY` (opcional; predeterminado 200)
 
 No publicar claves o tokens en GitHub ni en el chat. Si una credencial se compartió previamente en texto, rotarla antes de utilizarla.
 
