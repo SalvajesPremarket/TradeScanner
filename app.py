@@ -13,6 +13,7 @@ from tradescanner.core import apply_filters, normalize_schwab_quotes
 from tradescanner.engine import get_engine_status, record_engine_status, run_scan_cycle
 from tradescanner.snapshots import SnapshotStore, collect_snapshots
 from tradescanner.universe import UniverseUnavailableError, load_symbol_universe
+from tradescanner.oauth import router as oauth_router
 from tradescanner.schwab import (
     SchwabAPIError,
     SchwabConfigurationError,
@@ -59,7 +60,8 @@ async def lifespan(application: FastAPI):
         await asyncio.gather(task, return_exceptions=True)
 
 
-app = FastAPI(title="TradeScanner", version="0.3.0", lifespan=lifespan)
+app = FastAPI(title="TradeScanner", version="0.3.1", lifespan=lifespan)
+app.include_router(oauth_router)
 
 
 @app.get("/", include_in_schema=False)
