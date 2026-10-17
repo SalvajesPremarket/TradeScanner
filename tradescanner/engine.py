@@ -137,7 +137,7 @@ def run_scan_cycle(
             batch_size=len(batch),
             cursor=next_cursor,
             cycle_started_at=cycle_started_at,
-            last_success_at=_now(),
+            last_cycle_at=_now(),
             last_error=None,
             last_cycle_duration_seconds=round(time.monotonic() - started, 3),
             requested_count=result["requested_count"],
@@ -146,6 +146,9 @@ def run_scan_cycle(
             **candle_state,
             cycles_completed=int(target_store.get_state("cycles_completed", 0)) + 1,
         )
+        if result["received_count"] > 0:
+            state["last_quote_received_at"] = _now()
+            target_store.set_state("engine_status", state)
         target_store.set_state("cycles_completed", state["cycles_completed"])
         return {"status": "completed", **state}
     except (SchwabConfigurationError, SchwabAPIError, ValueError, OSError, sqlite3.Error) as exc:
