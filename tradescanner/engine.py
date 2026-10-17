@@ -7,8 +7,9 @@ import time
 from datetime import datetime, timezone
 from typing import Any, Callable
 
+from tradescanner.candles import CandleStore, normalize_price_history
 from tradescanner.snapshots import BATCH_SIZE, SnapshotStore, collect_snapshots
-from tradescanner.schwab import SchwabAPIError, SchwabConfigurationError, get_quotes
+from tradescanner.schwab import SchwabAPIError, SchwabConfigurationError, get_price_history, get_quotes
 from tradescanner.universe import load_symbol_universe
 
 UNIVERSE_CACHE_SECONDS = 6 * 60 * 60
@@ -59,6 +60,7 @@ def run_scan_cycle(
     *,
     universe_loader: Callable[[], dict[str, Any]] | None = None,
     quote_fetcher: Callable[[list[str]], dict[str, Any]] | None = None,
+    candle_fetcher: Callable[[str], dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Scan one provider-sized batch; cursor advances only after successful persistence."""
     if not _cycle_lock.acquire(blocking=False):
@@ -91,6 +93,39 @@ def run_scan_cycle(
         started = time.monotonic()
         cycle_started_at = _now()
         result = collect_snapshots(batch, target_store, quote_fetcher or get_quotes)
+        candle_state: dict[str, Any] = {
+            "candle_symbol": None,
+            "candles_saved": 0,
+            "rvol": None,
+            "rvol_sessions_used": 0,
+            "candle_error": None,
+        }
+        # One bounded historical request per successful quote cycle. Prefer the
+        # strongest observed GAP from this batch; never block quote persistence
+        # or cursor progress if the separate candle endpoint is unavailable.
+        history_fetch = candle_fetcher or (get_price_history if quote_fetcher is None else None)
+        if history_fetch is not None:
+            try:
+                rows = target_store.latest_for_symbols(batch)
+                eligible = [
+                    row for row in rows
+                    if isinstance(row.get("price"), (int, float)) and row["price"] > 0
+                ]
+                if eligible:
+                    candidate = max(
+                        eligible,
+                        key=lambda row: abs(row.get("gap_pct") or 0.0),
+                    )
+                    candle_payload = history_fetch(candidate["symbol"])
+                    candles = normalize_price_history(candidate["symbol"], candle_payload)
+                    candle_store = CandleStore(target_store.path)
+                    candle_state["candle_symbol"] = candidate["symbol"]
+                    candle_state["candles_saved"] = candle_store.save(candles)
+                    rvol = candle_store.rvol(candidate["symbol"])
+                    candle_state["rvol"] = rvol.get("rvol")
+                    candle_state["rvol_sessions_used"] = rvol.get("sessions_used", 0)
+            except (SchwabAPIError, SchwabConfigurationError, ValueError, OSError, RuntimeError) as exc:
+                candle_state["candle_error"] = type(exc).__name__
         next_cursor = (cursor + len(batch)) % len(symbols)
         target_store.set_state("universe_cursor", next_cursor)
         state = record_engine_status(
@@ -107,6 +142,7 @@ def run_scan_cycle(
             requested_count=result["requested_count"],
             received_count=result["received_count"],
             snapshots_saved=result["snapshots_saved"],
+            **candle_state,
             cycles_completed=int(target_store.get_state("cycles_completed", 0)) + 1,
         )
         target_store.set_state("cycles_completed", state["cycles_completed"])
