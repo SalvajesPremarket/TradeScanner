@@ -43,7 +43,7 @@
   <main>
     <section class="heading">
       <div><h1>Radar de acciones</h1><div class="subtitle">Interfaz base limpia de TradeScanner</div></div>
-      <div class="status">Motor nuevo en desarrollo</div>
+      <div class="status" id="engine-status" role="status">Conectando con el motor…</div>
     </section>
     <section class="panel" aria-label="Radar de acciones">
       <div class="panel-head"><h2>ACCIONES</h2></div>
@@ -56,15 +56,106 @@
         <div class="filter"><b>VOLUMEN</b><span class="range"></span></div>
         <div class="filter"><b>CAMBIO %</b><span class="range"></span></div>
       </div>
-      <div class="tools"><span class="muted">Resultados</span><span class="muted">Datos pendientes de conexión al motor nuevo</span></div>
+      <div class="tools"><span class="muted" id="result-count">Resultados: 0</span><span class="muted" id="engine-message">Esperando estado del motor.</span></div>
       <div class="table-wrap">
         <table aria-label="Resultados del radar">
           <thead><tr><th>TICKER</th><th>EMPRESA</th><th>PRECIO</th><th>CAMBIO %</th><th>GAP %</th><th>FLOAT</th><th>RVOL</th><th>VOLUMEN</th><th>SECTOR</th><th>GRÁFICO</th></tr></thead>
-          <tbody><tr><td colspan="10"><div class="empty">Sin resultados hasta conectar el motor nuevo.</div></td></tr></tbody>
+          <tbody id="result-rows"><tr><td colspan="10"><div class="empty">Esperando primeras cotizaciones reales de Schwab.</div></td></tr></tbody>
         </table>
       </div>
       <footer>Interfaz limpia. Sin fórmulas, datos simulados ni conexiones al sistema anterior.</footer>
     </section>
   </main>
+
+  <script>
+    const statusNode = document.getElementById("engine-status");
+    const messageNode = document.getElementById("engine-message");
+    const countNode = document.getElementById("result-count");
+    const rowsNode = document.getElementById("result-rows");
+
+    function displayNumber(value, digits = 2) {
+      if (value === null || value === undefined || value === "") return "—";
+      const number = Number(value);
+      return Number.isFinite(number) ? number.toLocaleString("en-US", {
+        minimumFractionDigits: digits, maximumFractionDigits: digits
+      }) : "—";
+    }
+
+    function cell(row, value) {
+      const td = document.createElement("td");
+      td.textContent = value === null || value === undefined || value === "" ? "—" : String(value);
+      row.appendChild(td);
+    }
+
+    function renderRows(results) {
+      rowsNode.replaceChildren();
+      if (!results.length) {
+        const tr = document.createElement("tr");
+        const td = document.createElement("td");
+        td.colSpan = 10;
+        const empty = document.createElement("div");
+        empty.className = "empty";
+        empty.textContent = "Todavía no hay cotizaciones guardadas. No se muestran datos simulados.";
+        td.appendChild(empty);
+        tr.appendChild(td);
+        rowsNode.appendChild(tr);
+        return;
+      }
+      for (const item of results) {
+        const tr = document.createElement("tr");
+        cell(tr, item.symbol);
+        cell(tr, item.company);
+        cell(tr, item.price == null ? "—" : "$" + displayNumber(item.price));
+        cell(tr, item.change_pct == null ? "—" : displayNumber(item.change_pct) + "%");
+        cell(tr, item.gap_pct == null ? "—" : displayNumber(item.gap_pct) + "%");
+        cell(tr, item.float_shares == null ? "—" : displayNumber(item.float_shares, 0));
+        cell(tr, item.rvol == null ? "—" : displayNumber(item.rvol) + "x");
+        cell(tr, item.volume == null ? "—" : displayNumber(item.volume, 0));
+        cell(tr, item.sector);
+        cell(tr, "—");
+        rowsNode.appendChild(tr);
+      }
+    }
+
+    async function refreshScanner() {
+      try {
+        const [engineResponse, snapshotsResponse] = await Promise.all([
+          fetch("/api/engine/status", { cache: "no-store" }),
+          fetch("/api/snapshots/latest?limit=1000", { cache: "no-store" })
+        ]);
+        if (!engineResponse.ok || !snapshotsResponse.ok) throw new Error("API unavailable");
+        const enginePayload = await engineResponse.json();
+        const snapshotPayload = await snapshotsResponse.json();
+        const state = enginePayload.state || {};
+        const results = Array.isArray(snapshotPayload.results) ? snapshotPayload.results : [];
+        countNode.textContent = "Resultados: " + results.length;
+        if (state.status === "waiting_for_credentials") {
+          statusNode.textContent = "Esperando credenciales Schwab";
+        } else if (state.status === "error") {
+          statusNode.textContent = "Motor con error";
+        } else if (state.last_success_at) {
+          statusNode.textContent = "Motor automático · cotizaciones recibidas";
+        } else {
+          statusNode.textContent = enginePayload.automatic_scan_enabled ? "Motor iniciando" : "Motor automático desactivado";
+        }
+        const details = [];
+        if (state.universe_count) details.push("Universo: " + Number(state.universe_count).toLocaleString("en-US"));
+        if (state.cycles_completed != null) details.push("Ciclos: " + state.cycles_completed);
+        if (state.received_count != null) details.push("Recibidas en último lote: " + state.received_count);
+        if (state.last_error) details.push("Error: " + state.last_error);
+        if (!details.length && state.status === "waiting_for_credentials") details.push("Configurar credenciales seguras de Schwab en el servicio.");
+        if (!details.length) details.push("Esperando el primer lote real.");
+        messageNode.textContent = details.join(" · ");
+        renderRows(results);
+      } catch (_) {
+        statusNode.textContent = "API temporalmente no disponible";
+        messageNode.textContent = "No se pudo actualizar el estado. Se reintentará automáticamente.";
+      }
+    }
+
+    refreshScanner();
+    window.setInterval(refreshScanner, 15000);
+  </script>
+
 </body>
 </html>
