@@ -26,6 +26,23 @@ class NormalizeSchwabQuotesTests(unittest.TestCase):
         self.assertIsNone(rows[0]["float_shares"])
         self.assertIsNone(rows[0]["rvol"])
 
+    def test_uses_only_explicit_schwab_float_not_shares_outstanding(self):
+        rows = normalize_schwab_quotes({
+            "AAPL": {
+                "quote": {"lastPrice": 100, "closePrice": 99},
+                "reference": {"description": "Apple"},
+                "fundamental": {"sharesOutstanding": 1500000},
+            },
+            "XYZ": {
+                "quote": {"lastPrice": 10, "closePrice": 9},
+                "reference": {"description": "Example"},
+                "fundamental": {"floatShares": 250000},
+            },
+        })
+        self.assertIsNone(rows[0]["float_shares"])
+        self.assertEqual(rows[1]["float_shares"], 250000)
+        self.assertEqual(rows[1]["float_source"], "schwab")
+
     def test_missing_fields_are_not_invented(self):
         rows = normalize_schwab_quotes({"XYZ": {"quote": {}, "reference": {}}})
         self.assertIsNone(rows[0]["price"])
