@@ -79,7 +79,7 @@ def status():
         for name in ("SCHWAB_CLIENT_ID", "SCHWAB_CLIENT_SECRET", "SCHWAB_REFRESH_TOKEN")
     )
     engine = get_engine_status()
-    connected = bool(engine.get("last_success_at"))
+    connected = bool(engine.get("last_quote_received_at"))
     return {
         "service": "TradeScanner",
         "provider": "Schwab",
