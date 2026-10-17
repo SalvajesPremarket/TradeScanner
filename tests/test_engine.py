@@ -1,7 +1,9 @@
 import os
 import tempfile
 import unittest
+from datetime import datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 from unittest.mock import patch
 
 from tradescanner.engine import run_scan_cycle
@@ -55,6 +57,44 @@ class AutomaticEngineTests(unittest.TestCase):
                 )
             self.assertEqual(result["status"], "waiting_for_credentials")
             self.assertEqual(store.stats()["snapshot_count"], 0)
+
+
+    def test_scan_cycle_saves_candidate_candles_and_computes_rvol(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = SnapshotStore(Path(directory) / "engine.sqlite3")
+            symbols = ["AAPL", "MSFT"]
+
+            def fetch(batch):
+                return {
+                    symbol: {
+                        "quote": {"lastPrice": 11.0, "closePrice": 10.0, "totalVolume": 1000},
+                        "reference": {"description": symbol},
+                    }
+                    for symbol in batch
+                }
+
+            ny = ZoneInfo("America/New_York")
+            def timestamp(day):
+                return int(datetime(2026, 10, day, 9, 30, tzinfo=ny).timestamp() * 1000)
+
+            def fetch_history(symbol):
+                self.assertEqual(symbol, "AAPL")
+                return {"candles": [
+                    {"datetime": timestamp(14), "open": 10, "high": 11, "low": 9, "close": 10, "volume": 100},
+                    {"datetime": timestamp(15), "open": 10, "high": 11, "low": 9, "close": 10, "volume": 200},
+                ]}
+
+            result = run_scan_cycle(
+                store,
+                universe_loader=lambda: {"symbols": symbols},
+                quote_fetcher=fetch,
+                candle_fetcher=fetch_history,
+            )
+            self.assertEqual(result["candle_symbol"], "AAPL")
+            self.assertEqual(result["candles_saved"], 2)
+            self.assertEqual(result["rvol"], 2.0)
+            self.assertEqual(result["rvol_sessions_used"], 1)
+
 
 
 if __name__ == "__main__":
