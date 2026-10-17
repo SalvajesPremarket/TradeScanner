@@ -9,7 +9,7 @@ import urllib.request
 from typing import Any
 
 SYMBOL_DIRECTORY_URL = "https://www.nasdaqtrader.com/dynamic/SymDir/nasdaqtraded.txt"
-_SYMBOL_RE = re.compile(r"^[A-Z][A-Z0-9.\\-]{0,14}$")
+_SYMBOL_RE = re.compile(r"^[A-Z][A-Z0-9.-]{0,14}$")
 
 
 class UniverseUnavailableError(RuntimeError):
