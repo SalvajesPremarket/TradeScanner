@@ -13,7 +13,7 @@ def _number(value: Any) -> float | None:
 def normalize_schwab_quotes(payload: dict[str, Any]) -> list[dict[str, Any]]:
     """Normalize only fields actually present in Schwab's response.
 
-    Missing values stay None. No price, float, volume baseline, or candle is invented.
+    Missing values stay None. Shares outstanding are never mislabeled as float.
     """
     rows: list[dict[str, Any]] = []
     for symbol, record in payload.items():
@@ -21,8 +21,10 @@ def normalize_schwab_quotes(payload: dict[str, Any]) -> list[dict[str, Any]]:
             continue
         quote = record.get("quote")
         reference = record.get("reference")
+        fundamental = record.get("fundamental")
         quote = quote if isinstance(quote, dict) else {}
         reference = reference if isinstance(reference, dict) else {}
+        fundamental = fundamental if isinstance(fundamental, dict) else {}
 
         last = _number(quote.get("lastPrice"))
         previous_close = _number(quote.get("closePrice"))
@@ -30,6 +32,11 @@ def normalize_schwab_quotes(payload: dict[str, Any]) -> list[dict[str, Any]]:
         if last is not None and previous_close is not None and previous_close > 0:
             gap_pct = round(((last / previous_close) - 1.0) * 100.0, 10)
 
+        # Only accept an explicitly named float field from Schwab. The standard
+        # sharesOutstanding field is a different metric and must not be substituted.
+        float_shares = _number(fundamental.get("floatShares"))
+        if float_shares is None:
+            float_shares = _number(fundamental.get("floatSharesOutstanding"))
         rows.append({
             "symbol": str(symbol).strip().upper(),
             "company": reference.get("description"),
@@ -39,12 +46,13 @@ def normalize_schwab_quotes(payload: dict[str, Any]) -> list[dict[str, Any]]:
             "change_pct": _number(quote.get("netPercentChange")),
             "gap_pct": gap_pct,
             "volume": _number(quote.get("totalVolume")),
-            "float_shares": None,
+            "float_shares": float_shares,
             "rvol": None,
-            "sector": None,
+            "sector": fundamental.get("sector"),
             "exchange": reference.get("exchangeName"),
             "quote_time_ms": _number(quote.get("quoteTimeInLong")),
             "data_source": "schwab",
+            "float_source": "schwab" if float_shares is not None else None,
         })
     return rows
 
