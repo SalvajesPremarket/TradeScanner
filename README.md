@@ -31,7 +31,7 @@ Reconstrucción limpia e independiente. No importar ni recuperar código de sist
 ## Pendiente antes de declarar producción
 
 - Validar autenticación y cotizaciones con credenciales Schwab válidas en un entorno seguro.
-- Configurar `FMP_API_KEY` en el entorno seguro si se quiere activar el enriquecimiento FLOAT; no se necesita para ejecutar el motor base.
+- Probar autenticación y cotizaciones reales de Schwab en un entorno seguro antes de declarar la conexión validada.
 - Mejorar la cobertura de velas: por límite de solicitudes, el ciclo captura velas para un candidato por lote, no para todo el universo en cada ciclo.
 - Verificar frescura de las velas y el comportamiento de RVOL con sesiones reales y datos extendidos de Schwab.
 - Confirmar con respuestas reales de Schwab si el endpoint autorizado para esta cuenta devuelve un campo FLOAT explícito; la documentación habitual de cotizaciones expone `sharesOutstanding`, no un número de float shares. Si no lo devuelve, FLOAT permanece `null` sin proveedor externo.
