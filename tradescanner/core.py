@@ -41,7 +41,8 @@ def normalize_schwab_quotes(payload: dict[str, Any]) -> list[dict[str, Any]]:
             "volume": _number(quote.get("totalVolume")),
             "float_shares": None,
             "rvol": None,
-            "sector": reference.get("exchangeName"),
+            "sector": None,
+            "exchange": reference.get("exchangeName"),
             "quote_time_ms": _number(quote.get("quoteTimeInLong")),
             "data_source": "schwab",
         })
