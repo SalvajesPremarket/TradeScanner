@@ -142,7 +142,13 @@
         if (state.universe_count) details.push("Universo: " + Number(state.universe_count).toLocaleString("en-US"));
         if (state.cycles_completed != null) details.push("Ciclos: " + state.cycles_completed);
         if (state.received_count != null) details.push("Recibidas en último lote: " + state.received_count);
-        if (state.last_error) details.push("Error: " + state.last_error);
+        if (state.candle_symbol) details.push("Velas: " + state.candle_symbol + " (" + (state.candles_saved || 0) + ")");
+        if (state.rvol_sessions_used != null && state.candle_symbol) details.push("Sesiones RVOL: " + state.rvol_sessions_used);
+        if (state.float_symbol) details.push("FLOAT: " + state.float_symbol);
+        if (state.last_error) details.push("Error motor: " + state.last_error);
+        if (state.candle_error) details.push("Error velas: " + state.candle_error);
+        if (state.float_error) details.push("Error FLOAT: " + state.float_error);
+        if (!enginePayload.float_provider_configured) details.push("FLOAT FMP sin configurar");
         if (!details.length && state.status === "waiting_for_credentials") details.push("Configurar credenciales seguras de Schwab en el servicio.");
         if (!details.length) details.push("Esperando el primer lote real.");
         messageNode.textContent = details.join(" · ");
