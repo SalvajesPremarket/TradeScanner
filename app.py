@@ -1,12 +1,13 @@
 import os
 import sqlite3
+import time
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse
 
 from tradescanner.core import apply_filters, normalize_schwab_quotes
-from tradescanner.snapshots import SnapshotStore
+from tradescanner.snapshots import SnapshotStore, collect_snapshots
 from tradescanner.schwab import (
     SchwabAPIError,
     SchwabConfigurationError,
@@ -58,6 +59,43 @@ def snapshots_status():
         }
     except (OSError, RuntimeError, sqlite3.Error):
         raise HTTPException(status_code=503, detail="Snapshot storage is unavailable.") from None
+
+
+@app.get("/api/snapshots/latest")
+def snapshots_latest(limit: int = Query(100, ge=1, le=1000)):
+    try:
+        return {"results": SnapshotStore().latest(limit), "limit": limit}
+    except (OSError, RuntimeError, sqlite3.Error, ValueError):
+        raise HTTPException(status_code=503, detail="Snapshot storage is unavailable.") from None
+
+
+@app.post("/api/scan")
+def scan(symbols: str = Query(..., description="Comma-separated ticker symbols; up to 100 per provider request")):
+    requested = [symbol.strip() for symbol in symbols.split(",") if symbol.strip()]
+    if not requested:
+        raise HTTPException(status_code=400, detail="Provide at least one ticker symbol.")
+    if len(set(symbol.upper() for symbol in requested)) > 10000:
+        raise HTTPException(status_code=400, detail="A scan is limited to 10000 unique symbols.")
+
+    started = time.monotonic()
+    try:
+        result = collect_snapshots(requested, SnapshotStore())
+    except SchwabConfigurationError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from None
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
+    except SchwabAPIError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from None
+    except (OSError, RuntimeError, sqlite3.Error):
+        raise HTTPException(status_code=503, detail="Snapshot storage is unavailable.") from None
+
+    return {
+        "status": "completed",
+        "provider": "Schwab",
+        **result,
+        "duration_seconds": round(time.monotonic() - started, 3),
+        "note": "Only quotes returned by Schwab were saved; missing values were not synthesized.",
+    }
 
 
 @app.get("/api/quotes")
