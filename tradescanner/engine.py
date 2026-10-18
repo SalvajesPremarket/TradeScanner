@@ -94,6 +94,10 @@ def run_scan_cycle(
         started = time.monotonic()
         cycle_started_at = _now()
         result = collect_snapshots(batch, target_store, quote_fetcher or get_quotes)
+        if result["received_count"] <= 0 or result["snapshots_saved"] <= 0:
+            raise SchwabAPIError(
+                "Schwab returned no persistable quotes; the universe cursor was not advanced."
+            )
         candle_state: dict[str, Any] = {
             "candle_symbol": None,
             "candles_saved": 0,
