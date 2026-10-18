@@ -7,6 +7,7 @@ from zoneinfo import ZoneInfo
 from unittest.mock import patch
 
 from tradescanner.engine import run_scan_cycle
+from tradescanner.schwab import SchwabAPIError
 from tradescanner.snapshots import SnapshotStore
 
 
@@ -46,6 +47,28 @@ class AutomaticEngineTests(unittest.TestCase):
             self.assertEqual(requested_batches[1], symbols[100:200])
             self.assertEqual(store.stats()["snapshot_count"], 200)
             self.assertEqual(store.get_state("cycles_completed"), 2)
+
+    def test_empty_quote_batch_does_not_advance_cursor_or_complete_cycle(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = SnapshotStore(Path(directory) / "engine.sqlite3")
+            symbols = [f"SYM{i:03d}" for i in range(150)]
+
+            with patch.dict(os.environ, {
+                "SCHWAB_CLIENT_ID": "test-id",
+                "SCHWAB_CLIENT_SECRET": "test-secret",
+                "SCHWAB_REFRESH_TOKEN": "test-refresh",
+            }):
+                with self.assertRaises(SchwabAPIError):
+                    run_scan_cycle(
+                        store,
+                        universe_loader=lambda: {"symbols": symbols},
+                        quote_fetcher=lambda batch: {},
+                    )
+
+            self.assertEqual(store.get_state("universe_cursor", 0), 0)
+            self.assertEqual(store.get_state("cycles_completed", 0), 0)
+            self.assertEqual(store.stats()["snapshot_count"], 0)
+            self.assertEqual(store.get_state("engine_status", {}).get("status"), "error")
 
     def test_missing_credentials_waits_without_loading_universe(self):
         with tempfile.TemporaryDirectory() as directory:
