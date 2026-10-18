@@ -16,6 +16,10 @@
     .heading{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:17px}
     h1{margin:0;color:var(--navy);font-size:26px}.subtitle{margin-top:5px;color:var(--muted);font-size:12px}
     .status{padding:7px 10px;border:1px solid var(--line);background:var(--paper);color:var(--muted);border-radius:3px;font-size:10px;font-weight:700}
+    .heading-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+    .oauth-button{display:inline-flex;align-items:center;justify-content:center;padding:10px 14px;border-radius:4px;background:#2f6f9f;color:#fff;text-decoration:none;font-size:12px;font-weight:700;border:1px solid #245879}
+    .oauth-button:hover{background:#245879}
+    .oauth-button:focus-visible{outline:3px solid #a9d6b8;outline-offset:2px}
     .panel{background:var(--paper);border:1px solid var(--line);border-radius:4px}
     .panel-head{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;padding:14px 15px;border-bottom:1px solid var(--line)}
     h2{margin:0;color:var(--navy);font-size:15px}
@@ -46,7 +50,7 @@
   <main>
     <section class="heading">
       <div><h1>Radar de acciones</h1><div class="subtitle">Interfaz limpia · cotizaciones observadas de Schwab</div></div>
-      <div class="status" id="engine-status" role="status">Conectando con el motor…</div>
+      <div class="heading-actions"><a class="oauth-button" href="/oauth/start" rel="nofollow">Connect Schwab</a><div class="status" id="engine-status" role="status">Conectando con el motor…</div></div>
     </section>
     <section class="panel" aria-label="Radar de acciones">
       <div class="panel-head"><h2>ACCIONES</h2></div>
