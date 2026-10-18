@@ -3,6 +3,7 @@ import unittest
 from unittest.mock import patch
 
 import app as app_module
+import tradescanner.oauth as oauth_module
 from app import app
 from tradescanner.oauth import router as oauth_router
 
@@ -27,6 +28,20 @@ class AppEntrypointTests(unittest.TestCase):
         self.assertIn("/oauth/start", paths)
         self.assertIn("/oauth/callback", paths)
         self.assertIn("/oauth/token-ready", paths)
+
+    def test_pending_refresh_tokens_expire_and_are_single_use(self):
+        oauth_module._PENDING.clear()
+        with patch("tradescanner.oauth.time.monotonic", return_value=100.0):
+            oauth_module._store_pending_token("session-a", "test-refresh")
+        with patch("tradescanner.oauth.time.monotonic", return_value=200.0):
+            self.assertEqual(oauth_module._consume_pending_token("session-a"), "test-refresh")
+            self.assertIsNone(oauth_module._consume_pending_token("session-a"))
+
+        with patch("tradescanner.oauth.time.monotonic", return_value=300.0):
+            oauth_module._store_pending_token("session-b", "expired-refresh")
+        with patch("tradescanner.oauth.time.monotonic", return_value=901.0):
+            self.assertIsNone(oauth_module._consume_pending_token("session-b"))
+        oauth_module._PENDING.clear()
 
 
 if __name__ == "__main__":
