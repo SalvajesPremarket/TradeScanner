@@ -28,7 +28,7 @@ def normalize_schwab_quotes(payload: dict[str, Any]) -> list[dict[str, Any]]:
         previous_close = _number(quote.get("closePrice"))
         gap_pct = None
         if last is not None and previous_close is not None and previous_close > 0:
-            gap_pct = ((last / previous_close) - 1.0) * 100.0
+            gap_pct = round(((last / previous_close) - 1.0) * 100.0, 10)
 
         rows.append({
             "symbol": str(symbol).strip().upper(),
