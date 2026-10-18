@@ -18,7 +18,7 @@ from .infisical_vault import read_secret, write_secret
 TOKEN_URL = "https://api.schwabapi.com/v1/oauth/token"
 QUOTES_URL = "https://api.schwabapi.com/marketdata/v1/quotes"
 PRICE_HISTORY_URL = "https://api.schwabapi.com/marketdata/v1/pricehistory"
-_SYMBOL_RE = re.compile(r"^[A-Z][A-Z0-9.\\-]{0,14}$")
+_SYMBOL_RE = re.compile(r"^[A-Z][A-Z0-9.-]{0,14}$")
 
 _TOKEN_LOCK = threading.Lock()
 _CACHED_TOKEN: str | None = None
