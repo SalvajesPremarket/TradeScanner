@@ -1,13 +1,16 @@
 """Pure, provider-agnostic normalization and filter logic for TradeScanner."""
 from __future__ import annotations
 
+import math
+import time
 from typing import Any
 
 
 def _number(value: Any) -> float | None:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return None
-    return float(value)
+    result = float(value)
+    return result if math.isfinite(result) else None
 
 
 def normalize_schwab_quotes(payload: dict[str, Any]) -> list[dict[str, Any]]:
@@ -28,6 +31,23 @@ def normalize_schwab_quotes(payload: dict[str, Any]) -> list[dict[str, Any]]:
 
         last = _number(quote.get("lastPrice"))
         previous_close = _number(quote.get("closePrice"))
+        volume = _number(quote.get("totalVolume"))
+        quote_time_ms = _number(quote.get("quoteTimeInLong"))
+        if last is not None and last <= 0:
+            last = None
+        if previous_close is not None and previous_close <= 0:
+            previous_close = None
+        if volume is not None and volume < 0:
+            volume = None
+        quote_age_seconds = (
+            time.time() - quote_time_ms / 1000.0
+            if quote_time_ms is not None and quote_time_ms > 0
+            else None
+        )
+        quote_is_fresh = (
+            quote_age_seconds is not None
+            and -30 <= quote_age_seconds <= 300
+        )
         gap_pct = None
         if last is not None and previous_close is not None and previous_close > 0:
             gap_pct = round(((last / previous_close) - 1.0) * 100.0, 10)
@@ -43,12 +63,14 @@ def normalize_schwab_quotes(payload: dict[str, Any]) -> list[dict[str, Any]]:
             "change": _number(quote.get("netChange")),
             "change_pct": _number(quote.get("netPercentChange")),
             "gap_pct": gap_pct,
-            "volume": _number(quote.get("totalVolume")),
+            "volume": volume,
             "float_shares": float_shares,
             "rvol": None,
             "sector": fundamental.get("sector"),
             "exchange": reference.get("exchangeName"),
-            "quote_time_ms": _number(quote.get("quoteTimeInLong")),
+            "quote_time_ms": quote_time_ms,
+            "quote_age_seconds": round(quote_age_seconds, 3) if quote_age_seconds is not None else None,
+            "quote_is_fresh": quote_is_fresh,
             "data_source": "schwab",
             "float_source": "schwab" if float_shares is not None else None,
         })
