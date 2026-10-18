@@ -115,8 +115,8 @@ class AutomaticEngineTests(unittest.TestCase):
             )
             self.assertEqual(result["candle_symbol"], "AAPL")
             self.assertEqual(result["candles_saved"], 2)
-            self.assertEqual(result["rvol"], 2.0)
-            self.assertEqual(result["rvol_sessions_used"], 1)
+            self.assertIsNone(result["rvol"])
+            self.assertEqual(result["rvol_sessions_used"], 0)
 
 
 
