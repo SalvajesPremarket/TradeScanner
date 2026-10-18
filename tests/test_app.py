@@ -2,6 +2,8 @@ import os
 import unittest
 from unittest.mock import patch
 
+from fastapi import HTTPException
+
 import app as app_module
 import tradescanner.oauth as oauth_module
 from app import app
@@ -45,8 +47,10 @@ class AppEntrypointTests(unittest.TestCase):
 
     def test_manual_scan_rejects_more_than_one_provider_batch(self):
         symbols = ",".join(f"SYM{i:03d}" for i in range(101))
-        with self.assertRaisesRegex(Exception, "100 unique symbols"):
+        with self.assertRaises(HTTPException) as raised:
             app_module.scan(symbols)
+        self.assertEqual(raised.exception.status_code, 400)
+        self.assertIn("100 unique symbols", raised.exception.detail)
 
 
 if __name__ == "__main__":
