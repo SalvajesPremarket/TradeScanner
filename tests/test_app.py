@@ -4,6 +4,7 @@ import unittest
 from unittest.mock import patch
 
 from fastapi import HTTPException
+from starlette.requests import Request
 
 import app as app_module
 import tradescanner.oauth as oauth_module
@@ -47,6 +48,36 @@ class AppEntrypointTests(unittest.TestCase):
         self.assertIn("/oauth/start", paths)
         self.assertIn("/oauth/callback", paths)
         self.assertIn("/oauth/token-ready", paths)
+
+    def test_oauth_callback_rejects_state_mismatch_before_token_exchange(self):
+        request = Request({
+            "type": "http",
+            "method": "GET",
+            "path": "/oauth/callback",
+            "headers": [(b"cookie", b"tradescanner_oauth_state=expected-state")],
+            "query_string": b"",
+            "server": ("test", 443),
+            "scheme": "https",
+            "client": ("test", 12345),
+            "root_path": "",
+        })
+        with patch("tradescanner.oauth.urllib.request.urlopen") as upstream:
+            with self.assertRaises(HTTPException) as raised:
+                oauth_module.oauth_callback(
+                    request, code="test-code", state="wrong-state"
+                )
+        self.assertEqual(raised.exception.status_code, 400)
+        upstream.assert_not_called()
+
+    def test_snapshot_status_never_claims_durability_is_verified(self):
+        with patch("app.SnapshotStore") as store_class:
+            store_class.return_value.stats.return_value = {
+                "snapshot_count": 0, "symbols_seen": 0, "latest_snapshot_at": None
+            }
+            with patch.dict(os.environ, {}, clear=True):
+                result = app_module.snapshots_status()
+        self.assertEqual(result["durability_status"], "not_verified")
+        self.assertIn("durable mounted volume", result["durability_note"])
 
     def test_pending_refresh_tokens_expire_and_are_single_use(self):
         oauth_module._PENDING.clear()
