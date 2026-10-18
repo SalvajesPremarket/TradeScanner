@@ -48,6 +48,24 @@ class AutomaticEngineTests(unittest.TestCase):
             self.assertEqual(store.stats()["snapshot_count"], 200)
             self.assertEqual(store.get_state("cycles_completed"), 2)
 
+    def test_stale_quotes_do_not_refresh_market_data_connectivity(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = SnapshotStore(Path(directory) / "engine.sqlite3")
+            symbols = ["AAPL"]
+            def fetch(batch):
+                return {symbol: {"quote": {
+                    "lastPrice": 10.0, "closePrice": 9.0,
+                    "quoteTimeInLong": 1_000,
+                }, "reference": {}} for symbol in batch}
+            with patch.dict(os.environ, {
+                "SCHWAB_CLIENT_ID": "test-id",
+                "SCHWAB_CLIENT_SECRET": "test-secret",
+                "SCHWAB_REFRESH_TOKEN": "test-refresh",
+            }):
+                result = run_scan_cycle(store, universe_loader=lambda: {"symbols": symbols}, quote_fetcher=fetch)
+            self.assertEqual(result["status"], "running")
+            self.assertNotIn("last_quote_received_at", result)
+
     def test_empty_quote_batch_does_not_advance_cursor_or_complete_cycle(self):
         with tempfile.TemporaryDirectory() as directory:
             store = SnapshotStore(Path(directory) / "engine.sqlite3")
