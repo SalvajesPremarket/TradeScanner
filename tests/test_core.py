@@ -20,7 +20,7 @@ class NormalizeSchwabQuotesTests(unittest.TestCase):
         })
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["symbol"], "AAPL")
-        self.assertEqual(rows[0]["gap_pct"], 5.0)
+        self.assertAlmostEqual(rows[0]["gap_pct"], 5.0, places=8)
         self.assertIsNone(rows[0]["sector"])
         self.assertEqual(rows[0]["exchange"], "NASDAQ")
         self.assertIsNone(rows[0]["float_shares"])
