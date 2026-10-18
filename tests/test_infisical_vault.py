@@ -39,6 +39,8 @@ class InfisicalVaultTests(unittest.TestCase):
             self.assertEqual(vault._access_token(), "test-access-token")
 
         request = captured[0]
+        self.assertEqual(request.full_url, vault._AUTH_URL)
+        self.assertEqual(request.method, "POST")
         self.assertEqual(request.get_header("Content-type"), "application/x-www-form-urlencoded")
         form = urllib.parse.parse_qs(request.data.decode())
         self.assertEqual(form["clientId"], ["client-id"])
@@ -49,6 +51,19 @@ class InfisicalVaultTests(unittest.TestCase):
             vault, "_json_request", return_value={"secret": {"secretValue": "private-value"}}
         ):
             self.assertEqual(vault.read_secret("SCHWAB_REFRESH_TOKEN"), "private-value")
+        # v4 single-secret endpoint uses projectId, environment and secretPath.
+        # Ensure the project ID is not sent under the obsolete workspaceId key.
+        request = vault.urllib.request.Request(
+            vault._secret_url("SCHWAB_REFRESH_TOKEN"),
+            headers={"Authorization": "Bearer test-access"},
+            method="GET",
+        )
+        self.assertTrue(request.full_url.startswith("https://app.infisical.com/api/v4/secrets/"))
+        query = urllib.parse.parse_qs(urllib.parse.urlparse(request.full_url).query)
+        self.assertEqual(query["projectId"], ["project-id"])
+        self.assertEqual(query["environment"], ["prod"])
+        self.assertEqual(query["secretPath"], ["/"])
+        self.assertNotIn("workspaceId", query)
 
     def test_write_secret_creates_missing_secret(self):
         requests = []
@@ -67,6 +82,13 @@ class InfisicalVaultTests(unittest.TestCase):
             vault.write_secret("SCHWAB_REFRESH_TOKEN", "private-value")
 
         self.assertEqual(requests[-1].method, "POST")
+        self.assertTrue(requests[-1].full_url.startswith("https://app.infisical.com/api/v4/secrets/"))
+        self.assertNotIn("workspaceId", urllib.parse.parse_qs(urllib.parse.urlparse(requests[-1].full_url).query))
+        self.assertEqual(requests[-1].get_header("Content-type"), "application/json")
+        payload = __import__("json").loads(requests[-1].data.decode())
+        self.assertEqual(payload["projectId"], "project-id")
+        self.assertEqual(payload["environment"], "prod")
+        self.assertEqual(payload["secretPath"], "/")
         self.assertNotIn("private-value", requests[-1].full_url)
 
     def test_write_secret_updates_existing_secret(self):
