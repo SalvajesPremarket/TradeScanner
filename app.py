@@ -154,6 +154,11 @@ def snapshots_status():
         return {
             "storage": "sqlite",
             "storage_path_configured": bool(os.getenv("TRADESCANNER_DB_PATH")),
+            "durability_status": "not_verified",
+            "durability_note": (
+                "SQLite persistence is not guaranteed by setting a path alone; "
+                "verify that TRADESCANNER_DB_PATH points to a durable mounted volume."
+            ),
             **store.stats(),
         }
     except (OSError, RuntimeError, sqlite3.Error):
