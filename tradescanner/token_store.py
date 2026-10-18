@@ -24,6 +24,11 @@ def _path() -> Path:
 
 
 def load_refresh_token() -> str | None:
+    # Until a durable path is configured, allow the current environment token
+    # to bootstrap existing deployments. OAuth writes and token rotation still
+    # fail closed unless persistent storage is configured.
+    if not os.getenv("TRADESCANNER_TOKEN_STORE_PATH", "").strip():
+        return None
     path = _path()
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
