@@ -1,4 +1,5 @@
 import os
+from datetime import datetime, timezone
 import unittest
 from unittest.mock import patch
 
@@ -24,6 +25,22 @@ class AppEntrypointTests(unittest.TestCase):
         with patch.dict(os.environ, {}, clear=True), patch("app.get_engine_status", return_value={}):
             result = app_module.engine_status()
         self.assertFalse(result["automatic_scan_enabled"])
+
+    def test_market_data_connection_requires_a_recent_quote(self):
+        with patch.dict(os.environ, {}, clear=True), patch(
+            "app.get_engine_status",
+            return_value={"last_quote_received_at": "2000-01-01T00:00:00+00:00"},
+        ):
+            stale = app_module.status()
+        self.assertFalse(stale["market_data_connected"])
+
+        recent_time = datetime.now(timezone.utc).isoformat()
+        with patch.dict(os.environ, {}, clear=True), patch(
+            "app.get_engine_status",
+            return_value={"last_quote_received_at": recent_time},
+        ):
+            recent = app_module.status()
+        self.assertTrue(recent["market_data_connected"])
 
     def test_schwab_oauth_routes_are_registered(self):
         paths = {route.path for route in oauth_router.routes if hasattr(route, "path")}
