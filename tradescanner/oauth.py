@@ -11,6 +11,7 @@ import json
 import os
 import secrets
 import threading
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -21,8 +22,34 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 router = APIRouter()
 TOKEN_URL = "https://api.schwabapi.com/v1/oauth/token"
 AUTHORIZE_URL = "https://api.schwabapi.com/v1/oauth/authorize"
-_PENDING: dict[str, str] = {}
+_PENDING_TTL_SECONDS = 600
+_MAX_PENDING_TOKENS = 32
+_PENDING: dict[str, tuple[str, float]] = {}
 _LOCK = threading.Lock()
+
+
+def _purge_pending_locked(now: float) -> None:
+    expired = [key for key, (_, expires_at) in _PENDING.items() if expires_at <= now]
+    for key in expired:
+        _PENDING.pop(key, None)
+
+
+def _store_pending_token(session_key: str, refresh_token: str) -> None:
+    now = time.monotonic()
+    with _LOCK:
+        _purge_pending_locked(now)
+        if len(_PENDING) >= _MAX_PENDING_TOKENS:
+            oldest = min(_PENDING, key=lambda key: _PENDING[key][1])
+            _PENDING.pop(oldest, None)
+        _PENDING[session_key] = (refresh_token, now + _PENDING_TTL_SECONDS)
+
+
+def _consume_pending_token(session_key: str) -> str | None:
+    now = time.monotonic()
+    with _LOCK:
+        _purge_pending_locked(now)
+        entry = _PENDING.pop(session_key, None) if session_key else None
+    return entry[0] if entry else None
 
 
 def _redirect_uri() -> str:
@@ -59,11 +86,6 @@ def oauth_start():
 
 @router.get("/oauth/callback", include_in_schema=False)
 def oauth_callback(request: Request, code: str | None = None, state: str | None = None, error: str | None = None):
-    response = HTMLResponse(
-        "<h2>Autorización Schwab</h2><p>Si autorizaste la aplicación, vuelve a intentar el proceso.</p>",
-        status_code=400,
-        headers={"Cache-Control": "no-store", "Pragma": "no-cache"},
-    )
     expected_state = request.cookies.get("tradescanner_oauth_state")
     if error:
         raise HTTPException(status_code=400, detail="Schwab authorization was denied or cancelled.")
@@ -107,13 +129,12 @@ def oauth_callback(request: Request, code: str | None = None, state: str | None 
         raise HTTPException(status_code=502, detail="Schwab response did not include a refresh token.")
 
     session_key = secrets.token_urlsafe(32)
-    with _LOCK:
-        _PENDING[session_key] = refresh_token
+    _store_pending_token(session_key, refresh_token)
     response = RedirectResponse("/oauth/token-ready", status_code=303)
     response.delete_cookie("tradescanner_oauth_state", path="/oauth")
     response.set_cookie(
-        "tradescanner_oauth_session", session_key, max_age=600, httponly=True,
-        secure=True, samesite="strict", path="/oauth",
+        "tradescanner_oauth_session", session_key, max_age=_PENDING_TTL_SECONDS,
+        httponly=True, secure=True, samesite="strict", path="/oauth",
     )
     response.headers["Cache-Control"] = "no-store"
     response.headers["Referrer-Policy"] = "no-referrer"
@@ -123,8 +144,7 @@ def oauth_callback(request: Request, code: str | None = None, state: str | None 
 @router.get("/oauth/token-ready", include_in_schema=False, response_class=HTMLResponse)
 def oauth_token_ready(request: Request):
     session_key = request.cookies.get("tradescanner_oauth_session", "")
-    with _LOCK:
-        refresh_token = _PENDING.pop(session_key, None) if session_key else None
+    refresh_token = _consume_pending_token(session_key)
     if not refresh_token:
         raise HTTPException(status_code=410, detail="Token unavailable or already viewed. Restart OAuth.")
     safe_token = html.escape(refresh_token)
