@@ -4,6 +4,7 @@ from unittest.mock import patch
 
 from tradescanner.schwab import (
     SchwabConfigurationError,
+    SchwabAPIError,
     get_quotes,
     _clear_token_cache,
 )
@@ -39,6 +40,38 @@ class SchwabAdapterTests(unittest.TestCase):
 
         self.assertEqual(calls.count("https://api.schwabapi.com/v1/oauth/token"), 1)
         self.assertEqual(sum(url.startswith("https://api.schwabapi.com/marketdata/v1/quotes") for url in calls), 2)
+        _clear_token_cache()
+
+
+    def test_identifies_oauth_stage_without_exposing_provider_body(self):
+        _clear_token_cache()
+        with patch.dict(os.environ, {
+            "SCHWAB_CLIENT_ID": "test-id",
+            "SCHWAB_CLIENT_SECRET": "test-secret",
+            "SCHWAB_REFRESH_TOKEN": "test-refresh",
+        }), patch("tradescanner.schwab._request_json", side_effect=SchwabAPIError("Schwab API returned HTTP 400.")):
+            with self.assertRaisesRegex(SchwabAPIError, r"OAuth token request failed: Schwab API returned HTTP 400") as caught:
+                get_quotes(["AAPL"])
+        self.assertNotIn("test-secret", str(caught.exception))
+        self.assertNotIn("test-refresh", str(caught.exception))
+        _clear_token_cache()
+
+    def test_identifies_quotes_stage_after_oauth_succeeds(self):
+        _clear_token_cache()
+        def fake_request(request, timeout=15):
+            if request.full_url == "https://api.schwabapi.com/v1/oauth/token":
+                return {"access_token": "test-access-token", "expires_in": 3600}
+            raise SchwabAPIError("Schwab API returned HTTP 400.")
+
+        with patch.dict(os.environ, {
+            "SCHWAB_CLIENT_ID": "test-id",
+            "SCHWAB_CLIENT_SECRET": "test-secret",
+            "SCHWAB_REFRESH_TOKEN": "test-refresh",
+        }), patch("tradescanner.schwab._request_json", side_effect=fake_request):
+            with self.assertRaisesRegex(SchwabAPIError, r"market-data quotes request failed: Schwab API returned HTTP 400") as caught:
+                get_quotes(["AAPL"])
+        self.assertNotIn("test-secret", str(caught.exception))
+        self.assertNotIn("test-refresh", str(caught.exception))
         _clear_token_cache()
 
 
