@@ -28,8 +28,13 @@ class InfisicalError(RuntimeError):
 
 
 def is_configured() -> bool:
+    # Environment is required explicitly: silently defaulting to "production"
+    # can send token reads/writes to the wrong Infisical environment.
     return all(os.getenv(name, "").strip() for name in (
-        "INFISICAL_CLIENT_ID", "INFISICAL_CLIENT_SECRET", "INFISICAL_PROJECT_ID"
+        "INFISICAL_CLIENT_ID",
+        "INFISICAL_CLIENT_SECRET",
+        "INFISICAL_PROJECT_ID",
+        "INFISICAL_ENVIRONMENT",
     ))
 
 
@@ -37,15 +42,15 @@ def _config() -> tuple[str, str, str, str, str]:
     client_id = os.getenv("INFISICAL_CLIENT_ID", "").strip()
     client_secret = os.getenv("INFISICAL_CLIENT_SECRET", "").strip()
     project_id = os.getenv("INFISICAL_PROJECT_ID", "").strip()
-    environment = os.getenv("INFISICAL_ENVIRONMENT", "production").strip()
+    environment = os.getenv("INFISICAL_ENVIRONMENT", "").strip()
     secret_path = os.getenv("INFISICAL_SECRET_PATH", "/").strip() or "/"
-    if not all((client_id, client_secret, project_id)):
+    if not all((client_id, client_secret, project_id, environment)):
         raise InfisicalError(
             "Infisical is not configured. Set INFISICAL_CLIENT_ID, "
-            "INFISICAL_CLIENT_SECRET and INFISICAL_PROJECT_ID."
+            "INFISICAL_CLIENT_SECRET, INFISICAL_PROJECT_ID and INFISICAL_ENVIRONMENT."
         )
-    if not environment or not secret_path.startswith("/"):
-        raise InfisicalError("Infisical environment or secret path is invalid.")
+    if not secret_path.startswith("/"):
+        raise InfisicalError("Infisical secret path is invalid.")
     return client_id, client_secret, project_id, environment, secret_path
 
 
@@ -74,10 +79,17 @@ def _access_token() -> str:
         if _ACCESS_TOKEN and now < _ACCESS_TOKEN_EXPIRES:
             return _ACCESS_TOKEN
         client_id, client_secret, _, _, _ = _config()
+        # Universal Auth's documented login endpoint expects form-encoded data.
         request = urllib.request.Request(
             _AUTH_URL,
-            data=json.dumps({"clientId": client_id, "clientSecret": client_secret}).encode(),
-            headers={"Content-Type": "application/json", "Accept": "application/json"},
+            data=urllib.parse.urlencode({
+                "clientId": client_id,
+                "clientSecret": client_secret,
+            }).encode(),
+            headers={
+                "Content-Type": "application/x-www-form-urlencoded",
+                "Accept": "application/json",
+            },
             method="POST",
         )
         payload = _json_request(request)
@@ -90,7 +102,7 @@ def _access_token() -> str:
         except (TypeError, ValueError):
             ttl = 600.0
         _ACCESS_TOKEN = token
-        _ACCESS_TOKEN_EXPIRES = time.monotonic() + max(30.0, min(ttl - 30.0, 600.0))
+        _ACCESS_TOKEN_EXPIRES = time.monotonic() + max(1.0, min(ttl - 30.0, 600.0))
         return token
 
 
