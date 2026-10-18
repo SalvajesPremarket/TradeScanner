@@ -40,6 +40,8 @@ def parse_symbol_directory(content: str) -> dict[str, Any]:
             continue
         if len(fields) < 11 or fields[0].strip().upper() != "Y":
             continue
+        if fields[5].strip().upper() == "Y":  # Exclude ETFs from the common-stock universe.
+            continue
         if fields[7].strip().upper() != "N":
             continue
 
