@@ -82,8 +82,8 @@ class InfisicalVaultTests(unittest.TestCase):
             vault.write_secret("SCHWAB_REFRESH_TOKEN", "private-value")
 
         self.assertEqual(requests[-1].method, "POST")
-        self.assertTrue(requests[-1].full_url.startswith("https://app.infisical.com/api/v4/secrets/"))
-        self.assertNotIn("workspaceId", urllib.parse.parse_qs(urllib.parse.urlparse(requests[-1].full_url).query))
+        self.assertEqual(requests[-1].full_url, "https://app.infisical.com/api/v4/secrets/SCHWAB_REFRESH_TOKEN")
+        self.assertEqual(urllib.parse.urlparse(requests[-1].full_url).query, "")
         self.assertEqual(requests[-1].get_header("Content-type"), "application/json")
         payload = __import__("json").loads(requests[-1].data.decode())
         self.assertEqual(payload["projectId"], "project-id")
@@ -106,6 +106,11 @@ class InfisicalVaultTests(unittest.TestCase):
             vault.write_secret("SCHWAB_REFRESH_TOKEN", "new-private-value")
 
         self.assertEqual(requests[-1].method, "PATCH")
+        self.assertEqual(requests[-1].full_url, "https://app.infisical.com/api/v4/secrets/SCHWAB_REFRESH_TOKEN")
+        payload = __import__("json").loads(requests[-1].data.decode())
+        self.assertEqual(payload["projectId"], "project-id")
+        self.assertEqual(payload["environment"], "prod")
+        self.assertEqual(payload["secretPath"], "/")
         self.assertNotIn("new-private-value", requests[-1].full_url)
 
 
