@@ -67,6 +67,27 @@ class CandleTests(unittest.TestCase):
             self.assertEqual(result["sessions_used"], 2)
             self.assertEqual(result["rvol"], 2.6667)
 
+    def test_rvol_excludes_history_missing_current_minute_buckets(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = CandleStore(Path(directory) / "candles.sqlite3")
+            rows = [
+                # Historical session 12 is missing minute 09:31 and must be excluded.
+                {"symbol": "AAPL", "candle_time_ms": ms(12, 9, 30),
+                 "open": 10.0, "high": 10.5, "low": 9.5, "close": 10.2, "volume": 10},
+                {"symbol": "AAPL", "candle_time_ms": ms(13, 9, 30),
+                 "open": 10.0, "high": 10.5, "low": 9.5, "close": 10.2, "volume": 100},
+                {"symbol": "AAPL", "candle_time_ms": ms(13, 9, 31),
+                 "open": 10.0, "high": 10.5, "low": 9.5, "close": 10.2, "volume": 100},
+                {"symbol": "AAPL", "candle_time_ms": ms(14, 9, 30),
+                 "open": 10.0, "high": 10.5, "low": 9.5, "close": 10.2, "volume": 150},
+                {"symbol": "AAPL", "candle_time_ms": ms(14, 9, 31),
+                 "open": 10.0, "high": 10.5, "low": 9.5, "close": 10.2, "volume": 250},
+            ]
+            store.save(rows)
+            result = store.rvol("AAPL")
+            self.assertEqual(result["sessions_used"], 1)
+            self.assertIsNone(result["rvol"])
+
     def test_rvol_is_unavailable_without_prior_sessions(self):
         with tempfile.TemporaryDirectory() as directory:
             store = CandleStore(Path(directory) / "candles.sqlite3")
