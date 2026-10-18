@@ -26,17 +26,38 @@ def normalize_price_history(symbol: str, payload: dict[str, Any]) -> list[dict[s
         volume = item.get("volume")
         if isinstance(timestamp, bool) or not isinstance(timestamp, (int, float)):
             continue
-        if isinstance(volume, bool) or not isinstance(volume, (int, float)) or not math.isfinite(volume) or volume < 0:
+        if (
+            isinstance(volume, bool)
+            or not isinstance(volume, (int, float))
+            or not math.isfinite(volume)
+            or volume < 0
+            or not float(volume).is_integer()
+        ):
             continue
         values: dict[str, float] = {}
         valid = True
         for field in ("open", "high", "low", "close"):
             value = item.get(field)
-            if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not math.isfinite(value)
+                or value <= 0
+            ):
                 valid = False
                 break
             values[field] = float(value)
-        if not valid or not math.isfinite(timestamp):
+        if (
+            not valid
+            or not math.isfinite(timestamp)
+            or timestamp <= 0
+            or not float(timestamp).is_integer()
+        ):
+            continue
+        if (
+            values["high"] < max(values["open"], values["close"], values["low"])
+            or values["low"] > min(values["open"], values["close"], values["high"])
+        ):
             continue
         normalized.append({
             "symbol": symbol.strip().upper(),
@@ -134,7 +155,9 @@ class CandleStore:
             if max(minute for minute, _ in bars) < cutoff - 5:
                 continue
             historical_totals.append(sum(volume for minute, volume in bars if minute <= cutoff))
-        if not historical_totals:
+        # One prior session is too fragile to establish a reliable baseline.
+        # Keep RVOL unavailable until at least two comparable historical sessions exist.
+        if len(historical_totals) < 2:
             return {
                 "rvol": None,
                 "current_volume": current_volume,
