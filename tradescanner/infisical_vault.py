@@ -149,11 +149,6 @@ def write_secret(name: str, value: str) -> None:
     _, _, project_id, environment, secret_path = _config()
     token = _access_token()
     base = f"{_SECRET_URL}/{urllib.parse.quote(name, safe='')}"
-    params = {
-        "projectId": project_id,
-        "environment": environment,
-        "secretPath": secret_path,
-    }
     body = {
         "projectId": project_id,
         "environment": environment,
@@ -168,7 +163,8 @@ def write_secret(name: str, value: str) -> None:
         "Accept": "application/json",
     }
     exists = read_secret(name) is not None
-    url = f"{base}?{urllib.parse.urlencode(params)}"
+    # v4 create/update accept project, environment and path in the JSON body.
+    url = base
     request = urllib.request.Request(
         url,
         data=json.dumps(body).encode(),
