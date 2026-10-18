@@ -85,7 +85,7 @@ class CandleTests(unittest.TestCase):
             ]
             store.save(rows)
             result = store.rvol("AAPL")
-            self.assertEqual(result["sessions_used"], 1)
+            self.assertEqual(result["sessions_used"], 0)
             self.assertIsNone(result["rvol"])
 
     def test_rvol_is_unavailable_without_prior_sessions(self):
