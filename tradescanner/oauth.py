@@ -17,6 +17,9 @@ import urllib.request
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
+from .token_store import save_refresh_token
+from .schwab_errors import TokenStoreError
+
 router = APIRouter()
 TOKEN_URL = "https://api.schwabapi.com/v1/oauth/token"
 AUTHORIZE_URL = "https://api.schwabapi.com/v1/oauth/authorize"
@@ -117,18 +120,17 @@ def oauth_callback(
     if not isinstance(refresh_token, str) or not refresh_token:
         raise HTTPException(status_code=502, detail="Schwab response did not include a refresh token.")
 
-    # Return the value in this response rather than redirecting to an in-memory
-    # handoff. This avoids prefetch consumption and loss across restarts/instances.
-    safe_token = html.escape(refresh_token)
-    page = f"""<!doctype html><html><head><meta charset="utf-8"><meta name="referrer" content="no-referrer">
+    try:
+        save_refresh_token(refresh_token)
+    except TokenStoreError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from None
+
+    response = _private_html("""<!doctype html><html><head><meta charset="utf-8">
     <meta name="viewport" content="width=device-width,initial-scale=1"><title>TradeScanner OAuth</title></head>
     <body style="font-family:system-ui;max-width:760px;margin:40px auto;padding:0 18px">
-    <h2>Autorización Schwab completada</h2>
-    <p>Copia el valor que aparece abajo y guárdalo en Render como <b>SCHWAB_REFRESH_TOKEN</b>.
-    Este valor se muestra en esta respuesta privada. No lo compartas ni lo envíes por chat.</p>
-    <textarea readonly rows="5" style="width:100%;box-sizing:border-box">{safe_token}</textarea>
-    <p>Después de guardarlo en Render, elimina esta pestaña. Mantén el escáner automático desactivado hasta verificar la conexión.</p>
-    </body></html>"""
-    response = _private_html(page)
+    <h2>Schwab conectado correctamente</h2>
+    <p>TradeScanner guardó la autorización en almacenamiento persistente. No necesitas copiar ni pegar tokens.</p>
+    <p>Los tokens de acceso se renovarán automáticamente. Si Schwab rota el refresh token, el nuevo valor se guardará automáticamente.</p>
+    <p>Puedes volver a la pestaña de TradeScanner.</p></body></html>""")
     response.delete_cookie("tradescanner_oauth_state", path="/oauth")
     return response

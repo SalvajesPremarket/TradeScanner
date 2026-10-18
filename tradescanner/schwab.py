@@ -12,6 +12,9 @@ import urllib.parse
 import urllib.request
 from typing import Any
 
+from .token_store import load_refresh_token, save_refresh_token
+from .schwab_errors import TokenStoreError
+
 TOKEN_URL = "https://api.schwabapi.com/v1/oauth/token"
 QUOTES_URL = "https://api.schwabapi.com/marketdata/v1/quotes"
 PRICE_HISTORY_URL = "https://api.schwabapi.com/marketdata/v1/pricehistory"
@@ -34,10 +37,13 @@ class SchwabAPIError(RuntimeError):
 def _credentials() -> tuple[str, str, str]:
     client_id = os.getenv("SCHWAB_CLIENT_ID", "").strip()
     client_secret = os.getenv("SCHWAB_CLIENT_SECRET", "").strip()
-    refresh_token = os.getenv("SCHWAB_REFRESH_TOKEN", "").strip()
+    try:
+        refresh_token = load_refresh_token() or os.getenv("SCHWAB_REFRESH_TOKEN", "").strip()
+    except TokenStoreError as exc:
+        raise SchwabConfigurationError(str(exc)) from None
     if not all((client_id, client_secret, refresh_token)):
         raise SchwabConfigurationError(
-            "Configure SCHWAB_CLIENT_ID, SCHWAB_CLIENT_SECRET and SCHWAB_REFRESH_TOKEN."
+            "Configure Schwab client credentials and a refresh token, or complete OAuth with persistent token storage enabled."
         )
     return client_id, client_secret, refresh_token
 
@@ -89,13 +95,22 @@ def _access_token() -> str:
         token = payload.get("access_token") if isinstance(payload, dict) else None
         if not token:
             raise SchwabAPIError("Schwab token response did not contain an access token.")
+        rotated_refresh = payload.get("refresh_token") if isinstance(payload, dict) else None
+        if isinstance(rotated_refresh, str) and rotated_refresh.strip() and rotated_refresh.strip() != refresh_token:
+            try:
+                save_refresh_token(rotated_refresh)
+            except TokenStoreError:
+                raise SchwabAPIError(
+                    "Schwab rotated the refresh token, but secure persistence failed. Check durable token storage."
+                ) from None
+            credentials = (client_id, client_secret, rotated_refresh.strip())
+
         try:
             lifetime = max(60.0, float(payload.get("expires_in", 1800)))
         except (TypeError, ValueError):
             lifetime = 1800.0
         _CACHED_TOKEN = str(token)
         _CACHED_CREDENTIALS = credentials
-        # Refresh one minute before provider expiry to avoid edge-of-expiry calls.
         _CACHED_TOKEN_EXPIRES_AT = time.monotonic() + max(1.0, lifetime - 60.0)
         return _CACHED_TOKEN
 
