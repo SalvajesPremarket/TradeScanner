@@ -122,6 +122,7 @@ def _access_token() -> str:
             if infisical_is_configured():
                 try:
                     write_secret("SCHWAB_REFRESH_TOKEN", rotated_token)
+                    credentials = (client_id, client_secret, rotated_token)
                 except InfisicalError:
                     raise SchwabAPIError(
                         "Schwab issued a rotated refresh token but Infisical could not persist it."
