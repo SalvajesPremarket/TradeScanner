@@ -191,8 +191,9 @@ def scan(symbols: str = Query(..., description="Comma-separated ticker symbols; 
     requested = [symbol.strip() for symbol in symbols.split(",") if symbol.strip()]
     if not requested:
         raise HTTPException(status_code=400, detail="Provide at least one ticker symbol.")
-    if len(set(symbol.upper() for symbol in requested)) > 10000:
-        raise HTTPException(status_code=400, detail="A scan is limited to 10000 unique symbols.")
+    unique_count = len(set(symbol.upper() for symbol in requested))
+    if unique_count > 100:
+        raise HTTPException(status_code=400, detail="A manual scan is limited to 100 unique symbols per request.")
 
     started = time.monotonic()
     try:
