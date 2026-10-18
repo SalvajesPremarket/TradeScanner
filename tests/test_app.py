@@ -43,6 +43,11 @@ class AppEntrypointTests(unittest.TestCase):
             self.assertIsNone(oauth_module._consume_pending_token("session-b"))
         oauth_module._PENDING.clear()
 
+    def test_manual_scan_rejects_more_than_one_provider_batch(self):
+        symbols = ",".join(f"SYM{i:03d}" for i in range(101))
+        with self.assertRaisesRegex(Exception, "100 unique symbols"):
+            app_module.scan(symbols)
+
 
 if __name__ == "__main__":
     unittest.main()
