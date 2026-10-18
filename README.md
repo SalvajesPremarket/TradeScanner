@@ -54,7 +54,7 @@ Abrir `http://localhost:8000`; documentación API en `http://localhost:8000/docs
 - `SCHWAB_CLIENT_SECRET`
 - `SCHWAB_REFRESH_TOKEN`
 - `TRADESCANNER_DB_PATH` (recomendado en producción, apuntando a almacenamiento persistente)
-- `TRADESCANNER_AUTO_SCAN_ENABLED` (predeterminado `true`; usar `false` para desactivar el ciclo automático)
+- `TRADESCANNER_AUTO_SCAN_ENABLED` (predeterminado `false`; establecer `true` explícitamente solo después de validar Schwab y almacenamiento persistente)
 - `TRADESCANNER_SCAN_INTERVAL_SECONDS` (predeterminado 30; mínimo 10)
 
 No publicar claves o tokens en GitHub ni en el chat. Si una credencial se compartió previamente en texto, rotarla antes de utilizarla.
