@@ -85,7 +85,11 @@ def _access_token() -> str:
             },
             method="POST",
         )
-        payload = _request_json(request)
+        try:
+            payload = _request_json(request)
+        except SchwabAPIError as exc:
+            # Identify the failing stage without logging credentials or upstream bodies.
+            raise SchwabAPIError(f"Schwab OAuth token request failed: {exc}") from None
         token = payload.get("access_token") if isinstance(payload, dict) else None
         if not token:
             raise SchwabAPIError("Schwab token response did not contain an access token.")
@@ -128,7 +132,11 @@ def get_quotes(symbols: list[str]) -> dict[str, Any]:
         },
         method="GET",
     )
-    payload = _request_json(request)
+    try:
+        payload = _request_json(request)
+    except SchwabAPIError as exc:
+        # Identify the failing stage without logging credentials or upstream bodies.
+        raise SchwabAPIError(f"Schwab market-data quotes request failed: {exc}") from None
     if not isinstance(payload, dict):
         raise SchwabAPIError("Schwab quotes response was not an object.")
     # Return provider data unchanged; do not synthesize missing quotes.
