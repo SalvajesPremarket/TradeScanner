@@ -16,7 +16,7 @@ from typing import Any
 
 _BASE_URL = "https://app.infisical.com"
 _AUTH_URL = f"{_BASE_URL}/api/v1/auth/universal-auth/login"
-_SECRET_URL = f"{_BASE_URL}/api/v3/secrets/raw"
+_SECRET_URL = f"{_BASE_URL}/api/v4/secrets"
 _LOCK = threading.Lock()
 _ACCESS_TOKEN: str | None = None
 _ACCESS_TOKEN_EXPIRES = 0.0
@@ -109,7 +109,7 @@ def _access_token() -> str:
 def _secret_url(name: str) -> str:
     _, _, project_id, environment, secret_path = _config()
     query = urllib.parse.urlencode({
-        "workspaceId": project_id,
+        "projectId": project_id,
         "environment": environment,
         "secretPath": secret_path,
     })
@@ -150,12 +150,12 @@ def write_secret(name: str, value: str) -> None:
     token = _access_token()
     base = f"{_SECRET_URL}/{urllib.parse.quote(name, safe='')}"
     params = {
-        "workspaceId": project_id,
+        "projectId": project_id,
         "environment": environment,
         "secretPath": secret_path,
     }
     body = {
-        "workspaceId": project_id,
+        "projectId": project_id,
         "environment": environment,
         "secretPath": secret_path,
         "secretValue": value.strip(),
