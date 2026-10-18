@@ -160,7 +160,10 @@ def run_scan_cycle(
             **candle_state,
             cycles_completed=int(target_store.get_state("cycles_completed", 0)) + 1,
         )
-        if result["received_count"] > 0:
+        # Only mark market-data connectivity from provider timestamps that are
+        # within the accepted freshness window; a newly fetched stale quote is not live data.
+        latest_rows = target_store.latest_for_symbols(batch)
+        if any(row.get("quote_is_fresh") is True for row in latest_rows):
             state["last_quote_received_at"] = _now()
             target_store.set_state("engine_status", state)
         target_store.set_state("cycles_completed", state["cycles_completed"])
