@@ -37,7 +37,7 @@ def _config() -> tuple[str, str, str, str, str]:
     client_id = os.getenv("INFISICAL_CLIENT_ID", "").strip()
     client_secret = os.getenv("INFISICAL_CLIENT_SECRET", "").strip()
     project_id = os.getenv("INFISICAL_PROJECT_ID", "").strip()
-    environment = os.getenv("INFISICAL_ENVIRONMENT", "prod").strip()
+    environment = os.getenv("INFISICAL_ENVIRONMENT", "production").strip()
     secret_path = os.getenv("INFISICAL_SECRET_PATH", "/").strip() or "/"
     if not all((client_id, client_secret, project_id)):
         raise InfisicalError(
