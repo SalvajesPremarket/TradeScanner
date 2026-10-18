@@ -26,6 +26,27 @@ class NormalizeSchwabQuotesTests(unittest.TestCase):
         self.assertIsNone(rows[0]["float_shares"])
         self.assertIsNone(rows[0]["rvol"])
 
+    def test_quote_freshness_requires_recent_provider_timestamp(self):
+        import time
+        now_ms = int(time.time() * 1000)
+        rows = normalize_schwab_quotes({
+            "FRESH": {"quote": {"lastPrice": 10, "closePrice": 9, "quoteTimeInLong": now_ms}, "reference": {}},
+            "STALE": {"quote": {"lastPrice": 10, "closePrice": 9, "quoteTimeInLong": now_ms - 600_000}, "reference": {}},
+            "MISSING": {"quote": {"lastPrice": 10, "closePrice": 9}, "reference": {}},
+        })
+        self.assertTrue(rows[0]["quote_is_fresh"])
+        self.assertFalse(rows[1]["quote_is_fresh"])
+        self.assertFalse(rows[2]["quote_is_fresh"])
+
+    def test_non_finite_and_non_positive_quote_values_are_not_used(self):
+        rows = normalize_schwab_quotes({
+            "BAD": {"quote": {"lastPrice": float("nan"), "closePrice": 0, "totalVolume": float("inf")}, "reference": {}}
+        })
+        self.assertIsNone(rows[0]["price"])
+        self.assertIsNone(rows[0]["previous_close"])
+        self.assertIsNone(rows[0]["volume"])
+        self.assertIsNone(rows[0]["gap_pct"])
+
     def test_uses_only_explicit_schwab_float_not_shares_outstanding(self):
         rows = normalize_schwab_quotes({
             "AAPL": {
