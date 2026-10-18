@@ -1,5 +1,8 @@
+import os
 import unittest
+from unittest.mock import patch
 
+import app as app_module
 from app import app
 from tradescanner.oauth import router as oauth_router
 
@@ -13,6 +16,11 @@ class AppEntrypointTests(unittest.TestCase):
         self.assertIn("/api/engine/status", paths)
         self.assertIn("/api/candles/{symbol}", paths)
         self.assertIn("/api/snapshots/latest", paths)
+
+    def test_automatic_scan_defaults_to_disabled(self):
+        with patch.dict(os.environ, {}, clear=True), patch("app.get_engine_status", return_value={}):
+            result = app_module.engine_status()
+        self.assertFalse(result["automatic_scan_enabled"])
 
     def test_schwab_oauth_routes_are_registered(self):
         paths = {route.path for route in oauth_router.routes if hasattr(route, "path")}
