@@ -56,7 +56,7 @@ Abrir `http://localhost:8000`; documentación API en `http://localhost:8000/docs
 - `INFISICAL_CLIENT_ID` (ID de la identidad de máquina)
 - `INFISICAL_CLIENT_SECRET` (secreto de la identidad de máquina; solo en variables privadas de Render)
 - `INFISICAL_PROJECT_ID` (ID del proyecto TradeScanner en Infisical)
-- `INFISICAL_ENVIRONMENT` (slug del entorno Infisical; por defecto `prod`, confirmar el slug real)
+- `INFISICAL_ENVIRONMENT` (slug del entorno Infisical; por defecto `production` (debe coincidir con el slug del entorno en Infisical))
 - `INFISICAL_SECRET_PATH` (ruta de secretos; por defecto `/`)
 - `TRADESCANNER_DB_PATH` (recomendado en producción, apuntando a almacenamiento persistente)
 - `TRADESCANNER_AUTO_SCAN_ENABLED` (predeterminado `false`; mantener desactivado hasta validar cotizaciones reales)
