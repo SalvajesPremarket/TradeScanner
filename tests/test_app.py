@@ -96,7 +96,9 @@ class AppEntrypointTests(unittest.TestCase):
             "SCHWAB_CLIENT_ID": "test-client",
             "SCHWAB_CLIENT_SECRET": "test-secret",
             "SCHWAB_REDIRECT_URI": "https://example.onrender.com/oauth/callback",
-        }), patch("tradescanner.oauth.urllib.request.urlopen") as upstream:
+        }), patch("tradescanner.oauth.infisical_is_configured", return_value=True), patch(
+            "tradescanner.oauth.write_secret"
+        ) as store_secret, patch("tradescanner.oauth.urllib.request.urlopen") as upstream:
             upstream.return_value.__enter__.return_value.read.return_value = (
                 b'{"refresh_token":"test-refresh-value"}'
             )
@@ -104,7 +106,8 @@ class AppEntrypointTests(unittest.TestCase):
                 request, code="test-code", state="expected-state"
             )
         self.assertEqual(response.status_code, 200)
-        self.assertIn(b"test-refresh-value", response.body)
+        store_secret.assert_called_once_with("SCHWAB_REFRESH_TOKEN", "test-refresh-value")
+        self.assertNotIn(b"test-refresh-value", response.body)
         self.assertEqual(response.headers["cache-control"], "no-store, no-cache, must-revalidate")
         self.assertEqual(response.headers["referrer-policy"], "no-referrer")
         self.assertIn("tradescanner_oauth_state", response.headers.get("set-cookie", ""))
