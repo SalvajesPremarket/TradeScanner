@@ -5,6 +5,8 @@ import base64
 import json
 import os
 import re
+import threading
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -12,7 +14,13 @@ from typing import Any
 
 TOKEN_URL = "https://api.schwabapi.com/v1/oauth/token"
 QUOTES_URL = "https://api.schwabapi.com/marketdata/v1/quotes"
+PRICE_HISTORY_URL = "https://api.schwabapi.com/marketdata/v1/pricehistory"
 _SYMBOL_RE = re.compile(r"^[A-Z][A-Z0-9.\-]{0,14}$")
+
+_TOKEN_LOCK = threading.Lock()
+_CACHED_TOKEN: str | None = None
+_CACHED_TOKEN_EXPIRES_AT = 0.0
+_CACHED_CREDENTIALS: tuple[str, str, str] | None = None
 
 
 class SchwabConfigurationError(RuntimeError):
@@ -50,28 +58,55 @@ def _request_json(request: urllib.request.Request, timeout: int = 15) -> Any:
 
 
 def _access_token() -> str:
-    client_id, client_secret, refresh_token = _credentials()
-    basic = base64.b64encode(f"{client_id}:{client_secret}".encode()).decode()
-    body = urllib.parse.urlencode({
-        "grant_type": "refresh_token",
-        "refresh_token": refresh_token,
-    }).encode()
-    request = urllib.request.Request(
-        TOKEN_URL,
-        data=body,
-        headers={
-            "Authorization": f"Basic {basic}",
-            "Content-Type": "application/x-www-form-urlencoded",
-            "Accept": "application/json",
-        },
-        method="POST",
-    )
-    payload = _request_json(request)
-    token = payload.get("access_token") if isinstance(payload, dict) else None
-    if not token:
-        raise SchwabAPIError("Schwab token response did not contain an access token.")
-    return str(token)
+    global _CACHED_TOKEN, _CACHED_TOKEN_EXPIRES_AT, _CACHED_CREDENTIALS
+    credentials = _credentials()
+    now = time.monotonic()
+    with _TOKEN_LOCK:
+        if (
+            _CACHED_TOKEN
+            and _CACHED_CREDENTIALS == credentials
+            and now < _CACHED_TOKEN_EXPIRES_AT
+        ):
+            return _CACHED_TOKEN
 
+        client_id, client_secret, refresh_token = credentials
+        basic = base64.b64encode(f"{client_id}:{client_secret}".encode()).decode()
+        body = urllib.parse.urlencode({
+            "grant_type": "refresh_token",
+            "refresh_token": refresh_token,
+        }).encode()
+        request = urllib.request.Request(
+            TOKEN_URL,
+            data=body,
+            headers={
+                "Authorization": f"Basic {basic}",
+                "Content-Type": "application/x-www-form-urlencoded",
+                "Accept": "application/json",
+            },
+            method="POST",
+        )
+        payload = _request_json(request)
+        token = payload.get("access_token") if isinstance(payload, dict) else None
+        if not token:
+            raise SchwabAPIError("Schwab token response did not contain an access token.")
+        try:
+            lifetime = max(60.0, float(payload.get("expires_in", 1800)))
+        except (TypeError, ValueError):
+            lifetime = 1800.0
+        _CACHED_TOKEN = str(token)
+        _CACHED_CREDENTIALS = credentials
+        # Refresh one minute before provider expiry to avoid edge-of-expiry calls.
+        _CACHED_TOKEN_EXPIRES_AT = time.monotonic() + max(1.0, lifetime - 60.0)
+        return _CACHED_TOKEN
+
+
+def _clear_token_cache() -> None:
+    """Clear in-memory token state; intended for deterministic tests."""
+    global _CACHED_TOKEN, _CACHED_TOKEN_EXPIRES_AT, _CACHED_CREDENTIALS
+    with _TOKEN_LOCK:
+        _CACHED_TOKEN = None
+        _CACHED_TOKEN_EXPIRES_AT = 0.0
+        _CACHED_CREDENTIALS = None
 
 def get_quotes(symbols: list[str]) -> dict[str, Any]:
     """Fetch real quotes for a bounded list of validated symbols."""
@@ -84,7 +119,7 @@ def get_quotes(symbols: list[str]) -> dict[str, Any]:
     if invalid:
         raise ValueError(f"Invalid ticker symbol: {invalid[0]}")
 
-    query = urllib.parse.urlencode({"symbols": ",".join(normalized), "fields": "quote,reference"})
+    query = urllib.parse.urlencode({"symbols": ",".join(normalized), "fields": "quote,reference,fundamental"})
     request = urllib.request.Request(
         f"{QUOTES_URL}?{query}",
         headers={
@@ -97,4 +132,42 @@ def get_quotes(symbols: list[str]) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise SchwabAPIError("Schwab quotes response was not an object.")
     # Return provider data unchanged; do not synthesize missing quotes.
+    return payload
+
+def get_price_history(
+    symbol: str,
+    *,
+    period: int = 5,
+    frequency: int = 1,
+) -> dict[str, Any]:
+    """Fetch recent intraday candles for one validated symbol from Schwab."""
+    normalized = symbol.strip().upper()
+    if not _SYMBOL_RE.fullmatch(normalized):
+        raise ValueError("Invalid ticker symbol.")
+    if period not in {1, 2, 3, 4, 5, 10} or frequency not in {1, 5, 10, 15, 30}:
+        raise ValueError("Unsupported Schwab price-history period or frequency.")
+
+    query = urllib.parse.urlencode({
+        "symbol": normalized,
+        "periodType": "day",
+        "period": period,
+        "frequencyType": "minute",
+        "frequency": frequency,
+        "needExtendedHoursData": "true",
+        "needPreviousClose": "false",
+    })
+    request = urllib.request.Request(
+        f"{PRICE_HISTORY_URL}?{query}",
+        headers={
+            "Authorization": f"Bearer {_access_token()}",
+            "Accept": "application/json",
+        },
+        method="GET",
+    )
+    payload = _request_json(request)
+    if not isinstance(payload, dict):
+        raise SchwabAPIError("Schwab price-history response was not an object.")
+    candles = payload.get("candles")
+    if candles is not None and not isinstance(candles, list):
+        raise SchwabAPIError("Schwab price-history candles were malformed.")
     return payload

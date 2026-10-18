@@ -37,9 +37,31 @@ class SnapshotStore:
                 "CREATE INDEX IF NOT EXISTS idx_quote_snapshots_symbol_time "
                 "ON quote_snapshots(symbol, captured_at)"
             )
+            connection.execute(
+                "CREATE TABLE IF NOT EXISTS scanner_state ("
+                "state_key TEXT PRIMARY KEY, state_json TEXT NOT NULL)"
+            )
 
     def _connect(self) -> sqlite3.Connection:
         return sqlite3.connect(str(self.path), timeout=10)
+
+    def get_state(self, key: str, default: Any = None) -> Any:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT state_json FROM scanner_state WHERE state_key = ?", (key,)
+            ).fetchone()
+        if row is None:
+            return default
+        return json.loads(row[0])
+
+    def set_state(self, key: str, value: Any) -> None:
+        encoded = json.dumps(value, separators=(",", ":"), allow_nan=False)
+        with self._connect() as connection:
+            connection.execute(
+                "INSERT INTO scanner_state(state_key, state_json) VALUES (?, ?) "
+                "ON CONFLICT(state_key) DO UPDATE SET state_json = excluded.state_json",
+                (key, encoded),
+            )
 
     def save(self, rows: list[dict[str, Any]]) -> int:
         if not rows:
@@ -76,6 +98,30 @@ class SnapshotStore:
             "latest_snapshot_at": latest,
         }
 
+    def latest_for_symbols(self, symbols: list[str]) -> list[dict[str, Any]]:
+        normalized = list(dict.fromkeys(
+            symbol.strip().upper() for symbol in symbols
+            if isinstance(symbol, str) and symbol.strip()
+        ))
+        if not normalized:
+            return []
+        placeholders = ",".join("?" for _ in normalized)
+        with self._connect() as connection:
+            rows = connection.execute(
+                f"""
+                SELECT payload_json FROM quote_snapshots AS current
+                WHERE current.symbol IN ({placeholders})
+                  AND captured_at = (
+                    SELECT MAX(previous.captured_at)
+                    FROM quote_snapshots AS previous
+                    WHERE previous.symbol = current.symbol
+                  )
+                ORDER BY symbol
+                """,
+                normalized,
+            ).fetchall()
+        return [json.loads(row[0]) for row in rows]
+
     def latest(self, limit: int = 100) -> list[dict[str, Any]]:
         bounded_limit = max(1, min(int(limit), 1000))
         with self._connect() as connection:
@@ -87,7 +133,7 @@ class SnapshotStore:
                     FROM quote_snapshots AS previous
                     WHERE previous.symbol = current.symbol
                 )
-                ORDER BY symbol LIMIT ?
+                ORDER BY current.captured_at DESC, current.symbol LIMIT ?
                 """,
                 (bounded_limit,),
             ).fetchall()

@@ -2,9 +2,9 @@ name: TradeScanner checks
 
 on:
   push:
-    branches: [main, "fix/**"]
+    branches: [main, "fix/**", "engine/**"]
   pull_request:
-    branches: [main]
+    branches: [main, "fix/**", "engine/**"]
 
 jobs:
   tests:

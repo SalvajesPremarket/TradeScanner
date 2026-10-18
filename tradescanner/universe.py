@@ -40,6 +40,9 @@ def parse_symbol_directory(content: str) -> dict[str, Any]:
             continue
         if len(fields) < 11 or fields[0].strip().upper() != "Y":
             continue
+        # This scanner universe is for individual equities, not ETFs.
+        if fields[5].strip().upper() == "Y":
+            continue
         if fields[7].strip().upper() != "N":
             continue
 
