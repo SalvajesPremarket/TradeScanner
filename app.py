@@ -2,6 +2,7 @@ import asyncio
 import os
 import sqlite3
 import time
+from datetime import datetime, timezone
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -81,7 +82,17 @@ def status():
         for name in ("SCHWAB_CLIENT_ID", "SCHWAB_CLIENT_SECRET", "SCHWAB_REFRESH_TOKEN")
     )
     engine = get_engine_status()
-    connected = bool(engine.get("last_quote_received_at"))
+    last_quote_at = engine.get("last_quote_received_at")
+    connected = False
+    if isinstance(last_quote_at, str):
+        try:
+            parsed_quote_at = datetime.fromisoformat(last_quote_at)
+            if parsed_quote_at.tzinfo is None:
+                parsed_quote_at = parsed_quote_at.replace(tzinfo=timezone.utc)
+            quote_age_seconds = (datetime.now(timezone.utc) - parsed_quote_at.astimezone(timezone.utc)).total_seconds()
+            connected = -30 <= quote_age_seconds <= 300
+        except (TypeError, ValueError, OverflowError):
+            connected = False
     return {
         "service": "TradeScanner",
         "provider": "Schwab",
@@ -90,9 +101,9 @@ def status():
         "results_published": 0,
         "engine_status": engine.get("status", "starting"),
         "message": (
-            "Schwab quotes have been received by the scanner."
+            "Schwab quotes were received within the last five minutes."
             if connected
-            else "Connection is not verified until a Schwab quote batch succeeds."
+            else "No recent successful Schwab quote batch has been verified."
             if configured
             else "Schwab credentials are not configured."
         ),
