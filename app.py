@@ -24,7 +24,7 @@ ROOT = Path(__file__).resolve().parent
 
 
 async def _automatic_scan_loop(stop: asyncio.Event) -> None:
-    enabled = os.getenv("TRADESCANNER_AUTO_SCAN_ENABLED", "true").strip().lower()
+    enabled = os.getenv("TRADESCANNER_AUTO_SCAN_ENABLED", "false").strip().lower()
     if enabled not in {"1", "true", "yes", "on"}:
         return
     try:
@@ -102,7 +102,7 @@ def status():
 @app.get("/api/engine/status")
 def engine_status():
     state = get_engine_status()
-    enabled = os.getenv("TRADESCANNER_AUTO_SCAN_ENABLED", "true").strip().lower() in {
+    enabled = os.getenv("TRADESCANNER_AUTO_SCAN_ENABLED", "false").strip().lower() in {
         "1", "true", "yes", "on"
     }
     try:
