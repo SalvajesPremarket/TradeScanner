@@ -26,6 +26,28 @@ class CandleTests(unittest.TestCase):
         self.assertEqual(rows[0]["symbol"], "AAPL")
         self.assertEqual(rows[0]["volume"], 100)
 
+    def test_rejects_invalid_ohlcv_and_fractional_volume(self):
+        payload = {"candles": [
+            {"datetime": ms(14, 9, 30), "open": 10, "high": 9, "low": 8, "close": 10, "volume": 100},
+            {"datetime": ms(14, 9, 31), "open": 10, "high": 11, "low": 10.5, "close": 10.2, "volume": 100},
+            {"datetime": ms(14, 9, 32), "open": 10, "high": 11, "low": 9, "close": 10.2, "volume": 10.5},
+            {"datetime": ms(14, 9, 33), "open": 0, "high": 11, "low": 0, "close": 10.2, "volume": 100},
+        ]}
+        self.assertEqual(normalize_price_history("AAPL", payload), [])
+
+    def test_rvol_requires_two_comparable_historical_sessions(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = CandleStore(Path(directory) / "candles.sqlite3")
+            store.save([
+                {"symbol": "AAPL", "candle_time_ms": ms(13, 9, 30),
+                 "open": 10.0, "high": 10.5, "low": 9.5, "close": 10.2, "volume": 100},
+                {"symbol": "AAPL", "candle_time_ms": ms(14, 9, 30),
+                 "open": 10.0, "high": 10.5, "low": 9.5, "close": 10.2, "volume": 200},
+            ])
+            result = store.rvol("AAPL")
+            self.assertIsNone(result["rvol"])
+            self.assertEqual(result["sessions_used"], 0)
+
     def test_calculates_rvol_against_prior_sessions_at_same_time(self):
         with tempfile.TemporaryDirectory() as directory:
             store = CandleStore(Path(directory) / "candles.sqlite3")
