@@ -143,18 +143,27 @@ class CandleStore:
         current_day = max(sessions)
         current_bars = sessions[current_day]
         cutoff = max(minute for minute, _ in current_bars)
-        current_volume = sum(volume for minute, volume in current_bars if minute <= cutoff)
+        current_by_minute = {
+            minute: volume for minute, volume in current_bars if minute <= cutoff
+        }
+        current_minutes = set(current_by_minute)
+        current_volume = sum(current_by_minute.values())
 
         previous_days = sorted((day for day in sessions if day < current_day), reverse=True)[:5]
         historical_totals: list[int] = []
         for day in previous_days:
             bars = sessions[day]
-            # Exclude incomplete historical sessions that do not reach roughly
-            # the same time of day; otherwise their partial volume understates
-            # the baseline and inflates RVOL.
-            if max(minute for minute, _ in bars) < cutoff - 5:
+            historical_by_minute = {
+                minute: volume for minute, volume in bars if minute <= cutoff
+            }
+            # Compare only sessions containing every minute bucket observed in
+            # the current session; a missing historical interval would distort
+            # the time-of-day baseline and could inflate RVOL.
+            if not current_minutes.issubset(historical_by_minute):
                 continue
-            historical_totals.append(sum(volume for minute, volume in bars if minute <= cutoff))
+            historical_totals.append(sum(
+                historical_by_minute[minute] for minute in current_minutes
+            ))
         # One prior session is too fragile to establish a reliable baseline.
         # Keep RVOL unavailable until at least two comparable historical sessions exist.
         if len(historical_totals) < 2:
