@@ -20,10 +20,17 @@ _SECRET_URL = f"{_BASE_URL}/api/v3/secrets/raw"
 _LOCK = threading.Lock()
 _ACCESS_TOKEN: str | None = None
 _ACCESS_TOKEN_EXPIRES = 0.0
+_SECRET_CACHE: dict[str, tuple[str | None, float]] = {}
 
 
 class InfisicalError(RuntimeError):
     """Safe-to-display error from the Infisical integration."""
+
+
+def is_configured() -> bool:
+    return all(os.getenv(name, "").strip() for name in (
+        "INFISICAL_CLIENT_ID", "INFISICAL_CLIENT_SECRET", "INFISICAL_PROJECT_ID"
+    ))
 
 
 def _config() -> tuple[str, str, str, str, str]:
@@ -98,6 +105,9 @@ def _secret_url(name: str) -> str:
 
 
 def read_secret(name: str) -> str | None:
+    cached = _SECRET_CACHE.get(name)
+    if cached and time.monotonic() < cached[1]:
+        return cached[0]
     request = urllib.request.Request(
         _secret_url(name),
         headers={"Authorization": f"Bearer {_access_token()}", "Accept": "application/json"},
@@ -107,6 +117,7 @@ def read_secret(name: str) -> str | None:
         payload = _json_request(request)
     except urllib.error.HTTPError as exc:
         if exc.code == 404:
+            _SECRET_CACHE[name] = (None, time.monotonic() + 15.0)
             return None
         raise
     data = payload.get("secret", payload.get("data", payload))
@@ -114,7 +125,9 @@ def read_secret(name: str) -> str | None:
         data = data["secret"]
     value = data.get("secretValue") if isinstance(data, dict) else None
     if not isinstance(value, str) or not value:
+        _SECRET_CACHE[name] = (None, time.monotonic() + 15.0)
         return None
+    _SECRET_CACHE[name] = (value, time.monotonic() + 15.0)
     return value
 
 
@@ -142,13 +155,7 @@ def write_secret(name: str, value: str) -> None:
         "Content-Type": "application/json",
         "Accept": "application/json",
     }
-    try:
-        read_secret(name)
-        exists = True
-    except InfisicalError:
-        # A read failure must not be treated as a missing secret. It could be
-        # a permissions/network failure, so propagate rather than overwrite.
-        raise
+    exists = read_secret(name) is not None
     url = f"{base}?{urllib.parse.urlencode(params)}"
     request = urllib.request.Request(
         url,
@@ -157,6 +164,7 @@ def write_secret(name: str, value: str) -> None:
         method="PATCH" if exists else "POST",
     )
     _json_request(request)
+    _SECRET_CACHE[name] = (value.strip(), time.monotonic() + 15.0)
 
 
 def _reset_cache_for_tests() -> None:
@@ -164,3 +172,4 @@ def _reset_cache_for_tests() -> None:
     with _LOCK:
         _ACCESS_TOKEN = None
         _ACCESS_TOKEN_EXPIRES = 0.0
+    _SECRET_CACHE.clear()
