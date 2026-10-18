@@ -1,12 +1,7 @@
-"""One-time Schwab OAuth helper for securely obtaining the initial refresh token.
-
-The refresh token is returned directly in the validated OAuth callback response.
-It is never logged or stored in process memory between HTTP requests.
-"""
+"""Schwab OAuth callback that persists refresh tokens to Infisical."""
 from __future__ import annotations
 
 import base64
-import html
 import json
 import os
 import secrets
@@ -16,6 +11,9 @@ import urllib.request
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
+
+from .infisical_vault import InfisicalError, is_configured as infisical_is_configured
+from .infisical_vault import write_secret
 
 router = APIRouter()
 TOKEN_URL = "https://api.schwabapi.com/v1/oauth/token"
@@ -49,6 +47,8 @@ def oauth_start():
     client_id = os.getenv("SCHWAB_CLIENT_ID", "").strip()
     if not client_id or not os.getenv("SCHWAB_CLIENT_SECRET", "").strip():
         raise HTTPException(status_code=503, detail="Schwab client credentials are not configured.")
+    if not infisical_is_configured():
+        raise HTTPException(status_code=503, detail="Secure token storage is not configured.")
     redirect_uri = _redirect_uri()
     state = secrets.token_urlsafe(32)
     params = urllib.parse.urlencode({
@@ -79,6 +79,8 @@ def oauth_callback(
         raise HTTPException(status_code=400, detail="Schwab authorization was denied or cancelled.")
     if not code or not state or not expected_state or not secrets.compare_digest(state, expected_state):
         raise HTTPException(status_code=400, detail="OAuth state validation failed. Start again at /oauth/start.")
+    if not infisical_is_configured():
+        raise HTTPException(status_code=503, detail="Secure token storage is not configured.")
 
     client_id = os.getenv("SCHWAB_CLIENT_ID", "").strip()
     client_secret = os.getenv("SCHWAB_CLIENT_SECRET", "").strip()
@@ -106,7 +108,6 @@ def oauth_callback(
         with urllib.request.urlopen(token_request, timeout=20) as upstream:
             payload = json.loads(upstream.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
-        # Never pass Schwab's response body or request headers to the client/log.
         raise HTTPException(status_code=502, detail=f"Schwab token exchange failed (HTTP {exc.code}).") from None
     except (urllib.error.URLError, TimeoutError):
         raise HTTPException(status_code=502, detail="Could not reach Schwab token service.") from None
@@ -117,18 +118,20 @@ def oauth_callback(
     if not isinstance(refresh_token, str) or not refresh_token:
         raise HTTPException(status_code=502, detail="Schwab response did not include a refresh token.")
 
-    # Return the value in this response rather than redirecting to an in-memory
-    # handoff. This avoids prefetch consumption and loss across restarts/instances.
-    safe_token = html.escape(refresh_token)
-    page = f"""<!doctype html><html><head><meta charset="utf-8"><meta name="referrer" content="no-referrer">
+    try:
+        write_secret("SCHWAB_REFRESH_TOKEN", refresh_token)
+    except InfisicalError:
+        raise HTTPException(
+            status_code=503,
+            detail="Schwab authorized the app, but Infisical could not securely store the token. Restart OAuth after fixing vault access.",
+        ) from None
+
+    response = _private_html("""<!doctype html><html><head><meta charset="utf-8">
     <meta name="viewport" content="width=device-width,initial-scale=1"><title>TradeScanner OAuth</title></head>
     <body style="font-family:system-ui;max-width:760px;margin:40px auto;padding:0 18px">
-    <h2>Autorización Schwab completada</h2>
-    <p>Copia el valor que aparece abajo y guárdalo en Render como <b>SCHWAB_REFRESH_TOKEN</b>.
-    Este valor se muestra en esta respuesta privada. No lo compartas ni lo envíes por chat.</p>
-    <textarea readonly rows="5" style="width:100%;box-sizing:border-box">{safe_token}</textarea>
-    <p>Después de guardarlo en Render, elimina esta pestaña. Mantén el escáner automático desactivado hasta verificar la conexión.</p>
-    </body></html>"""
-    response = _private_html(page)
+    <h2>Schwab conectado correctamente</h2>
+    <p>TradeScanner guardó la autorización en el almacén seguro. No necesitas copiar ni pegar tokens.</p>
+    <p>Los tokens de acceso se renovarán automáticamente y los cambios de refresh token se guardarán en el almacén.</p>
+    <p>Puedes volver a la pestaña de TradeScanner.</p></body></html>""")
     response.delete_cookie("tradescanner_oauth_state", path="/oauth")
     return response
