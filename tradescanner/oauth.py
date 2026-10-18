@@ -143,10 +143,30 @@ def oauth_callback(request: Request, code: str | None = None, state: str | None 
 
 @router.get("/oauth/token-ready", include_in_schema=False, response_class=HTMLResponse)
 def oauth_token_ready(request: Request):
+    # GET must be safe to repeat: browsers and link scanners may prefetch it.
+    # Do not consume the one-time token until the user submits the form.
+    session_key = request.cookies.get("tradescanner_oauth_session", "")
+    if not session_key:
+        raise HTTPException(status_code=410, detail="OAuth session unavailable. Restart OAuth.")
+    page = """<!doctype html><html><head><meta charset="utf-8"><meta name="referrer" content="no-referrer">
+    <meta name="viewport" content="width=device-width,initial-scale=1"><title>TradeScanner OAuth</title></head>
+    <body style="font-family:system-ui;max-width:760px;margin:40px auto;padding:0 18px">
+    <h2>Autorización Schwab completada</h2>
+    <p>Pulsa el botón para mostrar tu token de actualización. Solo entonces se consumirá el valor de un solo uso.</p>
+    <form method="post" action="/oauth/token-ready">
+    <button type="submit" style="padding:12px 18px;font-size:1rem">Mostrar token de Schwab</button>
+    </form>
+    <p>Cuando aparezca, guárdalo en Render como <b>SCHWAB_REFRESH_TOKEN</b>. No lo compartas ni lo envíes por chat.</p>
+    </body></html>"""
+    return HTMLResponse(page, headers={"Cache-Control": "no-store, no-cache, must-revalidate", "Pragma": "no-cache", "Referrer-Policy": "no-referrer"})
+
+
+@router.post("/oauth/token-ready", include_in_schema=False, response_class=HTMLResponse)
+def oauth_token_ready_post(request: Request):
     session_key = request.cookies.get("tradescanner_oauth_session", "")
     refresh_token = _consume_pending_token(session_key)
     if not refresh_token:
-        raise HTTPException(status_code=410, detail="Token unavailable or already viewed. Restart OAuth.")
+        raise HTTPException(status_code=410, detail="Token unavailable or expired. Restart OAuth.")
     safe_token = html.escape(refresh_token)
     page = f"""<!doctype html><html><head><meta charset="utf-8"><meta name="referrer" content="no-referrer">
     <meta name="viewport" content="width=device-width,initial-scale=1"><title>TradeScanner OAuth</title></head>
