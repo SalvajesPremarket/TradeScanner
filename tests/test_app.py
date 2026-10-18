@@ -47,7 +47,7 @@ class AppEntrypointTests(unittest.TestCase):
         paths = {route.path for route in oauth_router.routes if hasattr(route, "path")}
         self.assertIn("/oauth/start", paths)
         self.assertIn("/oauth/callback", paths)
-        self.assertIn("/oauth/token-ready", paths)
+        self.assertNotIn("/oauth/token-ready", paths)
 
     def test_oauth_callback_rejects_state_mismatch_before_token_exchange(self):
         request = Request({
@@ -80,66 +80,35 @@ class AppEntrypointTests(unittest.TestCase):
         self.assertIn("durable mounted volume", result["durability_note"])
 
 
-    def test_token_ready_get_is_repeatable_and_does_not_consume_token(self):
-        oauth_module._PENDING.clear()
-        with patch("tradescanner.oauth.time.monotonic", return_value=100.0):
-            oauth_module._store_pending_token("session-get-test", "test-refresh-value")
+    def test_oauth_callback_returns_token_without_in_memory_handoff(self):
         request = Request({
             "type": "http",
             "method": "GET",
-            "path": "/oauth/token-ready",
-            "headers": [(b"cookie", b"tradescanner_oauth_session=session-get-test")],
+            "path": "/oauth/callback",
+            "headers": [(b"cookie", b"tradescanner_oauth_state=expected-state")],
             "query_string": b"",
             "server": ("test", 443),
             "scheme": "https",
             "client": ("test", 12345),
             "root_path": "",
         })
-        first = oauth_module.oauth_token_ready(request)
-        second = oauth_module.oauth_token_ready(request)
-        self.assertEqual(first.status_code, 200)
-        self.assertEqual(second.status_code, 200)
-        self.assertIn(b"Mostrar token de Schwab", first.body)
-        self.assertNotIn(b"test-refresh-value", first.body)
-        self.assertEqual(
-            oauth_module._PENDING["session-get-test"][0], "test-refresh-value"
-        )
-        oauth_module._PENDING.clear()
-
-    def test_token_ready_post_consumes_token_after_explicit_submission(self):
-        oauth_module._PENDING.clear()
-        with patch("tradescanner.oauth.time.monotonic", return_value=100.0):
-            oauth_module._store_pending_token("session-post-test", "test-refresh-value")
-        request = Request({
-            "type": "http",
-            "method": "POST",
-            "path": "/oauth/token-ready",
-            "headers": [(b"cookie", b"tradescanner_oauth_session=session-post-test")],
-            "query_string": b"",
-            "server": ("test", 443),
-            "scheme": "https",
-            "client": ("test", 12345),
-            "root_path": "",
-        })
-        response = oauth_module.oauth_token_ready_post(request)
+        with patch.dict(os.environ, {
+            "SCHWAB_CLIENT_ID": "test-client",
+            "SCHWAB_CLIENT_SECRET": "test-secret",
+            "SCHWAB_REDIRECT_URI": "https://example.onrender.com/oauth/callback",
+        }), patch("tradescanner.oauth.urllib.request.urlopen") as upstream:
+            upstream.return_value.__enter__.return_value.read.return_value = (
+                b'{"refresh_token":"test-refresh-value"}'
+            )
+            response = oauth_module.oauth_callback(
+                request, code="test-code", state="expected-state"
+            )
         self.assertEqual(response.status_code, 200)
         self.assertIn(b"test-refresh-value", response.body)
-        self.assertNotIn("session-post-test", oauth_module._PENDING)
-        oauth_module._PENDING.clear()
-
-    def test_pending_refresh_tokens_expire_and_are_single_use(self):
-        oauth_module._PENDING.clear()
-        with patch("tradescanner.oauth.time.monotonic", return_value=100.0):
-            oauth_module._store_pending_token("session-a", "test-refresh")
-        with patch("tradescanner.oauth.time.monotonic", return_value=200.0):
-            self.assertEqual(oauth_module._consume_pending_token("session-a"), "test-refresh")
-            self.assertIsNone(oauth_module._consume_pending_token("session-a"))
-
-        with patch("tradescanner.oauth.time.monotonic", return_value=300.0):
-            oauth_module._store_pending_token("session-b", "expired-refresh")
-        with patch("tradescanner.oauth.time.monotonic", return_value=901.0):
-            self.assertIsNone(oauth_module._consume_pending_token("session-b"))
-        oauth_module._PENDING.clear()
+        self.assertEqual(response.headers["cache-control"], "no-store, no-cache, must-revalidate")
+        self.assertEqual(response.headers["referrer-policy"], "no-referrer")
+        self.assertIn("tradescanner_oauth_state", response.headers.get("set-cookie", ""))
+        self.assertFalse(hasattr(oauth_module, "_PENDING"))
 
     def test_manual_scan_rejects_more_than_one_provider_batch(self):
         symbols = ",".join(f"SYM{i:03d}" for i in range(101))
