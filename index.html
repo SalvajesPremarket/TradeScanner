@@ -21,9 +21,12 @@
     h2{margin:0;color:var(--navy);font-size:15px}
     .filters-title{padding:12px 15px 8px;color:var(--muted);font-size:10px;font-weight:700}
     .filters{display:flex;align-items:center;flex-wrap:wrap;gap:8px;padding:0 15px 14px;border-bottom:1px solid var(--line)}
-    .filter{display:flex;align-items:center;gap:8px;min-height:32px;padding:7px 9px;background:#fff;border:1px solid #cbd5df;border-radius:3px;color:#34495e;font-size:11px}
+    .filter{display:flex;align-items:center;gap:6px;min-height:34px;padding:6px 8px;background:#fff;border:1px solid #cbd5df;border-radius:3px;color:#34495e;font-size:11px}
     .filter b{color:var(--navy);font-size:10px}
-    .range{width:34px;height:13px;border-bottom:1px solid #aebbc8}
+    .filter input{width:62px;min-width:0;padding:5px 4px;border:1px solid #cbd5df;border-radius:2px;font-size:11px}
+    .filter input:disabled{background:#edf1f5;color:#8795a5}
+    .toggle{padding:5px 8px;border:1px solid #aebbc8;border-radius:3px;background:#edf1f5;color:#526579;font-size:10px;font-weight:700;cursor:pointer}
+    .toggle[aria-pressed="true"]{background:var(--navy);border-color:var(--navy);color:#fff}
     .tools{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;padding:12px 15px}
     .muted{color:var(--muted);font-size:11px}
     .table-wrap{overflow-x:auto}
@@ -32,7 +35,7 @@
     tbody td{height:43px;padding:10px;border-bottom:1px solid #e9eef3}
     .empty{padding:27px 15px;text-align:center;color:var(--muted);font-size:12px}
     footer{padding:12px 15px;border-top:1px solid var(--line);color:var(--muted);font-size:10px}
-    @media(max-width:800px){main{padding:12px}header{padding:15px}h1{font-size:23px}}
+    @media(max-width:800px){main{padding:12px}header{padding:15px}h1{font-size:23px}.filter input{width:54px}}
   </style>
 </head>
 <body>
@@ -42,29 +45,190 @@
   </header>
   <main>
     <section class="heading">
-      <div><h1>Radar de acciones</h1><div class="subtitle">Interfaz base limpia de TradeScanner</div></div>
-      <div class="status">Motor nuevo en desarrollo</div>
+      <div><h1>Radar de acciones</h1><div class="subtitle">Interfaz limpia · cotizaciones observadas de Schwab</div></div>
+      <div class="status" id="engine-status" role="status">Conectando con el motor…</div>
     </section>
     <section class="panel" aria-label="Radar de acciones">
       <div class="panel-head"><h2>ACCIONES</h2></div>
-      <div class="filters-title">FILTROS</div>
-      <div class="filters" aria-label="Estructura de filtros">
-        <div class="filter"><b>PRECIO</b><span class="range"></span><span>–</span><span class="range"></span></div>
-        <div class="filter"><b>GAP</b><span>ON / OFF</span></div>
-        <div class="filter"><b>FLOAT</b><span>ON / OFF</span></div>
-        <div class="filter"><b>RVOL</b><span class="range"></span></div>
-        <div class="filter"><b>VOLUMEN</b><span class="range"></span></div>
-        <div class="filter"><b>CAMBIO %</b><span class="range"></span></div>
+      <div class="filters-title">FILTROS · SE APLICAN A LOS SNAPSHOTS DISPONIBLES</div>
+      <div class="filters" aria-label="Filtros funcionales">
+        <label class="filter"><b>PRECIO</b><input id="price-min" type="number" min="0" step="0.01" placeholder="MIN" aria-label="Precio mínimo"><span>–</span><input id="price-max" type="number" min="0" step="0.01" placeholder="MAX" aria-label="Precio máximo"></label>
+        <div class="filter"><b>GAP</b><button class="toggle" id="gap-toggle" type="button" aria-pressed="false">OFF</button><input id="gap-min" type="number" step="0.1" placeholder="MIN %" aria-label="GAP mínimo" disabled><input id="gap-max" type="number" step="0.1" placeholder="MAX %" aria-label="GAP máximo" disabled></div>
+        <div class="filter"><b>FLOAT</b><button class="toggle" id="float-toggle" type="button" aria-pressed="false">OFF</button><span class="muted">solo datos conocidos</span></div>
+        <label class="filter"><b>RVOL ≥</b><input id="rvol-min" type="number" min="0" step="0.1" placeholder="MIN" aria-label="RVOL mínimo"></label>
+        <label class="filter"><b>VOLUMEN ≥</b><input id="volume-min" type="number" min="0" step="1000" placeholder="MIN" aria-label="Volumen mínimo"></label>
+        <label class="filter"><b>CAMBIO %</b><input id="change-min" type="number" step="0.1" placeholder="MIN" aria-label="Cambio porcentual mínimo"><span>–</span><input id="change-max" type="number" step="0.1" placeholder="MAX" aria-label="Cambio porcentual máximo"></label>
+        <button class="toggle" id="reset-filters" type="button">LIMPIAR</button>
       </div>
-      <div class="tools"><span class="muted">Resultados</span><span class="muted">Datos pendientes de conexión al motor nuevo</span></div>
+      <div class="tools"><span class="muted" id="result-count">Resultados: 0</span><span class="muted" id="engine-message">Esperando estado del motor.</span></div>
       <div class="table-wrap">
         <table aria-label="Resultados del radar">
           <thead><tr><th>TICKER</th><th>EMPRESA</th><th>PRECIO</th><th>CAMBIO %</th><th>GAP %</th><th>FLOAT</th><th>RVOL</th><th>VOLUMEN</th><th>SECTOR</th><th>GRÁFICO</th></tr></thead>
-          <tbody><tr><td colspan="10"><div class="empty">Sin resultados hasta conectar el motor nuevo.</div></td></tr></tbody>
+          <tbody id="result-rows"><tr><td colspan="10"><div class="empty">Esperando primeras cotizaciones reales de Schwab.</div></td></tr></tbody>
         </table>
       </div>
-      <footer>Interfaz limpia. Sin fórmulas, datos simulados ni conexiones al sistema anterior.</footer>
+      <footer>Los filtros no generan ni completan datos faltantes. RVOL y FLOAT solo filtran filas cuando hay valores reales almacenados.</footer>
     </section>
   </main>
+  <script>
+    const statusNode = document.getElementById("engine-status");
+    const messageNode = document.getElementById("engine-message");
+    const countNode = document.getElementById("result-count");
+    const rowsNode = document.getElementById("result-rows");
+    let allResults = [];
+    const filterIds = ["price-min","price-max","gap-min","gap-max","rvol-min","volume-min","change-min","change-max"];
+
+    function numericInput(id) {
+      const raw = document.getElementById(id).value.trim();
+      if (!raw) return null;
+      const value = Number(raw);
+      return Number.isFinite(value) ? value : null;
+    }
+
+    function displayNumber(value, digits = 2) {
+      if (value === null || value === undefined || value === "") return "—";
+      const number = Number(value);
+      return Number.isFinite(number) ? number.toLocaleString("en-US", {
+        minimumFractionDigits: digits, maximumFractionDigits: digits
+      }) : "—";
+    }
+
+    function cell(row, value) {
+      const td = document.createElement("td");
+      td.textContent = value === null || value === undefined || value === "" ? "—" : String(value);
+      row.appendChild(td);
+    }
+
+    function filteredResults() {
+      const minPrice = numericInput("price-min"), maxPrice = numericInput("price-max");
+      const gapOn = document.getElementById("gap-toggle").getAttribute("aria-pressed") === "true";
+      const floatOn = document.getElementById("float-toggle").getAttribute("aria-pressed") === "true";
+      const minGap = gapOn ? numericInput("gap-min") : null;
+      const maxGap = gapOn ? numericInput("gap-max") : null;
+      const minRvol = numericInput("rvol-min"), minVolume = numericInput("volume-min");
+      const minChange = numericInput("change-min"), maxChange = numericInput("change-max");
+      return allResults.filter(item => {
+        const checks = [
+          [minPrice, item.price, "min"], [maxPrice, item.price, "max"],
+          [minGap, item.gap_pct, "min"], [maxGap, item.gap_pct, "max"],
+          [minRvol, item.rvol, "min"], [minVolume, item.volume, "min"],
+          [minChange, item.change_pct, "min"], [maxChange, item.change_pct, "max"]
+        ];
+        if (floatOn && (item.float_shares === null || item.float_shares === undefined)) return false;
+        for (const [threshold, actual, mode] of checks) {
+          if (threshold === null) continue;
+          if (actual === null || actual === undefined || !Number.isFinite(Number(actual))) return false;
+          if (mode === "min" && Number(actual) < threshold) return false;
+          if (mode === "max" && Number(actual) > threshold) return false;
+        }
+        return true;
+      });
+    }
+
+    function renderRows(results) {
+      rowsNode.replaceChildren();
+      if (!results.length) {
+        const tr = document.createElement("tr");
+        const td = document.createElement("td");
+        td.colSpan = 10;
+        const empty = document.createElement("div");
+        empty.className = "empty";
+        empty.textContent = allResults.length
+          ? "Ninguna cotización disponible cumple los filtros activos."
+          : "Todavía no hay cotizaciones guardadas. No se muestran datos simulados.";
+        td.appendChild(empty); tr.appendChild(td); rowsNode.appendChild(tr);
+        return;
+      }
+      for (const item of results) {
+        const tr = document.createElement("tr");
+        cell(tr, item.symbol);
+        cell(tr, item.company);
+        cell(tr, item.price == null ? "—" : "$" + displayNumber(item.price));
+        cell(tr, item.change_pct == null ? "—" : displayNumber(item.change_pct) + "%");
+        cell(tr, item.gap_pct == null ? "—" : displayNumber(item.gap_pct) + "%");
+        cell(tr, item.float_shares == null ? "—" : displayNumber(item.float_shares, 0));
+        cell(tr, item.rvol == null ? "—" : displayNumber(item.rvol) + "x");
+        cell(tr, item.volume == null ? "—" : displayNumber(item.volume, 0));
+        cell(tr, item.sector);
+        cell(tr, "—");
+        rowsNode.appendChild(tr);
+      }
+    }
+
+    function applyFilters() {
+      const filtered = filteredResults();
+      countNode.textContent = "Resultados: " + filtered.length + " / " + allResults.length;
+      renderRows(filtered);
+    }
+
+    function setToggle(id, enabled) {
+      const button = document.getElementById(id);
+      button.setAttribute("aria-pressed", String(enabled));
+      button.textContent = enabled ? "ON" : "OFF";
+      if (id === "gap-toggle") {
+        document.getElementById("gap-min").disabled = !enabled;
+        document.getElementById("gap-max").disabled = !enabled;
+      }
+      applyFilters();
+    }
+
+    for (const id of filterIds) document.getElementById(id).addEventListener("input", applyFilters);
+    document.getElementById("gap-toggle").addEventListener("click", () => {
+      setToggle("gap-toggle", document.getElementById("gap-toggle").getAttribute("aria-pressed") !== "true");
+    });
+    document.getElementById("float-toggle").addEventListener("click", () => {
+      setToggle("float-toggle", document.getElementById("float-toggle").getAttribute("aria-pressed") !== "true");
+    });
+    document.getElementById("reset-filters").addEventListener("click", () => {
+      for (const id of filterIds) document.getElementById(id).value = "";
+      setToggle("gap-toggle", false);
+      setToggle("float-toggle", false);
+      applyFilters();
+    });
+
+    async function refreshScanner() {
+      try {
+        const [engineResponse, snapshotsResponse] = await Promise.all([
+          fetch("/api/engine/status", { cache: "no-store" }),
+          fetch("/api/snapshots/latest?limit=1000", { cache: "no-store" })
+        ]);
+        if (!engineResponse.ok || !snapshotsResponse.ok) throw new Error("API unavailable");
+        const enginePayload = await engineResponse.json();
+        const snapshotPayload = await snapshotsResponse.json();
+        const state = enginePayload.state || {};
+        allResults = Array.isArray(snapshotPayload.results) ? snapshotPayload.results : [];
+        applyFilters();
+        if (state.status === "waiting_for_credentials") {
+          statusNode.textContent = "Esperando credenciales Schwab";
+        } else if (state.status === "error") {
+          statusNode.textContent = "Motor con error";
+        } else if (state.last_quote_received_at) {
+          statusNode.textContent = "Motor automático · cotizaciones recibidas";
+        } else {
+          statusNode.textContent = enginePayload.automatic_scan_enabled ? "Motor iniciando" : "Motor automático desactivado";
+        }
+        const details = [];
+        if (state.universe_count) details.push("Universo: " + Number(state.universe_count).toLocaleString("en-US"));
+        if (state.cycles_completed != null) details.push("Ciclos: " + state.cycles_completed);
+        if (state.received_count != null) details.push("Recibidas en último lote: " + state.received_count);
+        if (state.candle_symbol) details.push("Velas: " + state.candle_symbol + " (" + (state.candles_saved || 0) + ")");
+        if (state.rvol_sessions_used != null && state.candle_symbol) details.push("Sesiones RVOL: " + state.rvol_sessions_used);
+        if (state.float_symbol) details.push("FLOAT: " + state.float_symbol);
+        if (state.last_error) details.push("Error motor: " + state.last_error);
+        if (state.candle_error) details.push("Error velas: " + state.candle_error);
+        if (state.float_error) details.push("Error FLOAT: " + state.float_error);
+        if (enginePayload.float_provider) details.push("FLOAT: " + enginePayload.float_provider);
+        if (!details.length && state.status === "waiting_for_credentials") details.push("Configurar credenciales seguras de Schwab en el servicio.");
+        if (!details.length) details.push("Esperando el primer lote real.");
+        messageNode.textContent = details.join(" · ");
+      } catch (_) {
+        statusNode.textContent = "API temporalmente no disponible";
+        messageNode.textContent = "No se pudo actualizar el estado. Se reintentará automáticamente.";
+      }
+    }
+
+    refreshScanner();
+    window.setInterval(refreshScanner, 15000);
+  </script>
 </body>
 </html>

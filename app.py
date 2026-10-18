@@ -1,21 +1,68 @@
+import asyncio
 import os
 import sqlite3
 import time
+from datetime import datetime, timezone
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse
 
+from tradescanner.candles import CandleStore
 from tradescanner.core import apply_filters, normalize_schwab_quotes
+from tradescanner.engine import get_engine_status, record_engine_status, run_scan_cycle
 from tradescanner.snapshots import SnapshotStore, collect_snapshots
-from tradescanner.universe import UniverseUnavailableError, load_symbol_universe\nfrom tradescanner.schwab import (
+from tradescanner.universe import UniverseUnavailableError, load_symbol_universe
+from tradescanner.oauth import router as oauth_router
+from tradescanner.schwab import (
     SchwabAPIError,
     SchwabConfigurationError,
     get_quotes,
 )
 
 ROOT = Path(__file__).resolve().parent
-app = FastAPI(title="TradeScanner", version="0.2.0")
+
+
+async def _automatic_scan_loop(stop: asyncio.Event) -> None:
+    enabled = os.getenv("TRADESCANNER_AUTO_SCAN_ENABLED", "false").strip().lower()
+    if enabled not in {"1", "true", "yes", "on"}:
+        return
+    try:
+        interval = max(10, int(os.getenv("TRADESCANNER_SCAN_INTERVAL_SECONDS", "30")))
+    except ValueError:
+        interval = 30
+
+    while not stop.is_set():
+        try:
+            await asyncio.to_thread(run_scan_cycle)
+        except Exception as exc:
+            # Store only the exception class; never leak provider responses or secrets.
+            try:
+                record_engine_status(SnapshotStore(), status="error", last_error=type(exc).__name__)
+            except (OSError, RuntimeError, sqlite3.Error):
+                pass
+        try:
+            await asyncio.wait_for(stop.wait(), timeout=interval)
+        except asyncio.TimeoutError:
+            pass
+
+
+@asynccontextmanager
+async def lifespan(application: FastAPI):
+    stop = asyncio.Event()
+    task = asyncio.create_task(_automatic_scan_loop(stop))
+    application.state.scan_task = task
+    try:
+        yield
+    finally:
+        stop.set()
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
+
+app = FastAPI(title="TradeScanner", version="0.3.1", lifespan=lifespan)
+app.include_router(oauth_router)
 
 
 @app.get("/", include_in_schema=False)
@@ -34,17 +81,52 @@ def status():
         os.getenv(name)
         for name in ("SCHWAB_CLIENT_ID", "SCHWAB_CLIENT_SECRET", "SCHWAB_REFRESH_TOKEN")
     )
+    engine = get_engine_status()
+    last_quote_at = engine.get("last_quote_received_at")
+    connected = False
+    if isinstance(last_quote_at, str):
+        try:
+            parsed_quote_at = datetime.fromisoformat(last_quote_at)
+            if parsed_quote_at.tzinfo is None:
+                parsed_quote_at = parsed_quote_at.replace(tzinfo=timezone.utc)
+            quote_age_seconds = (datetime.now(timezone.utc) - parsed_quote_at.astimezone(timezone.utc)).total_seconds()
+            connected = -30 <= quote_age_seconds <= 300
+        except (TypeError, ValueError, OverflowError):
+            connected = False
     return {
         "service": "TradeScanner",
         "provider": "Schwab",
         "provider_configured": configured,
-        "market_data_connected": False,
+        "market_data_connected": connected,
         "results_published": 0,
+        "engine_status": engine.get("status", "starting"),
         "message": (
-            "Credentials configured; connection is verified only after a successful quote request."
+            "Schwab quotes were received within the last five minutes."
+            if connected
+            else "No recent successful Schwab quote batch has been verified."
             if configured
             else "Schwab credentials are not configured."
         ),
+    }
+
+
+@app.get("/api/engine/status")
+def engine_status():
+    state = get_engine_status()
+    enabled = os.getenv("TRADESCANNER_AUTO_SCAN_ENABLED", "false").strip().lower() in {
+        "1", "true", "yes", "on"
+    }
+    try:
+        interval = max(10, int(os.getenv("TRADESCANNER_SCAN_INTERVAL_SECONDS", "30")))
+    except ValueError:
+        interval = 30
+    return {
+        "automatic_scan_enabled": enabled,
+        "cycle_interval_seconds": interval,
+        "batch_size": 100,
+        "provider": "Schwab",
+        "float_provider": "Schwab (only if explicit float fields are returned)",
+        "state": state or {"status": "starting"},
     }
 
 
@@ -72,6 +154,11 @@ def snapshots_status():
         return {
             "storage": "sqlite",
             "storage_path_configured": bool(os.getenv("TRADESCANNER_DB_PATH")),
+            "durability_status": "not_verified",
+            "durability_note": (
+                "SQLite persistence is not guaranteed by setting a path alone; "
+                "verify that TRADESCANNER_DB_PATH points to a durable mounted volume."
+            ),
             **store.stats(),
         }
     except (OSError, RuntimeError, sqlite3.Error):
@@ -81,9 +168,38 @@ def snapshots_status():
 @app.get("/api/snapshots/latest")
 def snapshots_latest(limit: int = Query(100, ge=1, le=1000)):
     try:
-        return {"results": SnapshotStore().latest(limit), "limit": limit}
+        store = SnapshotStore()
+        rows = store.latest(limit)
+        candle_store = CandleStore(store.path)
+        for row in rows:
+            metrics = candle_store.rvol(row["symbol"])
+            row["rvol"] = metrics["rvol"]
+            row["rvol_sessions_used"] = metrics["sessions_used"]
+            row["rvol_as_of"] = metrics.get("as_of")
+            row.setdefault("float_shares", None)
+            row.setdefault("float_as_of", None)
+            row.setdefault("float_source", None)
+        return {"results": rows, "limit": limit}
     except (OSError, RuntimeError, sqlite3.Error, ValueError):
         raise HTTPException(status_code=503, detail="Snapshot storage is unavailable.") from None
+
+
+@app.get("/api/candles/{symbol}")
+def candles_status(symbol: str, limit: int = Query(500, ge=1, le=5000)):
+    normalized = symbol.strip().upper()
+    if not normalized or len(normalized) > 15:
+        raise HTTPException(status_code=400, detail="Invalid ticker symbol.")
+    try:
+        store = SnapshotStore()
+        candle_store = CandleStore(store.path)
+        return {
+            "symbol": normalized,
+            "provider": "Schwab",
+            "candles": candle_store.latest(normalized, limit),
+            "rvol": candle_store.rvol(normalized),
+        }
+    except (OSError, RuntimeError, sqlite3.Error, ValueError):
+        raise HTTPException(status_code=503, detail="Candle storage is unavailable.") from None
 
 
 @app.post("/api/scan")
@@ -91,8 +207,9 @@ def scan(symbols: str = Query(..., description="Comma-separated ticker symbols; 
     requested = [symbol.strip() for symbol in symbols.split(",") if symbol.strip()]
     if not requested:
         raise HTTPException(status_code=400, detail="Provide at least one ticker symbol.")
-    if len(set(symbol.upper() for symbol in requested)) > 10000:
-        raise HTTPException(status_code=400, detail="A scan is limited to 10000 unique symbols.")
+    unique_count = len(set(symbol.upper() for symbol in requested))
+    if unique_count > 100:
+        raise HTTPException(status_code=400, detail="A manual scan is limited to 100 unique symbols per request.")
 
     started = time.monotonic()
     try:
