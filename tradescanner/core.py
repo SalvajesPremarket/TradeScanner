@@ -56,9 +56,25 @@ def normalize_schwab_quotes(payload: dict[str, Any]) -> list[dict[str, Any]]:
         if last is not None and previous_close is not None and previous_close > 0:
             gap_pct = round(((last / previous_close) - 1.0) * 100.0, 10)
 
-        # Only accept an explicitly named float field from Schwab. The standard
-        # sharesOutstanding field is a different metric and must not be substituted.
+        # Prefer a directly supplied float-share count. Schwab payloads may instead
+        # expose marketCapFloat (public-float market capitalization); when present,
+        # derive an approximate share count from that value and the current price.
+        # Never substitute sharesOutstanding, which is a different metric.
         float_shares = _number(fundamental.get("floatShares"))
+        float_source = "schwab" if float_shares is not None and float_shares > 0 else None
+        float_market_cap = _number(fundamental.get("marketCapFloat"))
+        if (
+            (float_shares is None or float_shares <= 0)
+            and float_market_cap is not None
+            and float_market_cap > 0
+            and last is not None
+            and last > 0
+        ):
+            float_shares = float_market_cap / last
+            float_source = "schwab_market_cap_float_derived"
+        if float_shares is not None and float_shares <= 0:
+            float_shares = None
+            float_source = None
         rows.append({
             "symbol": str(symbol).strip().upper(),
             "company": reference.get("description"),
@@ -76,7 +92,7 @@ def normalize_schwab_quotes(payload: dict[str, Any]) -> list[dict[str, Any]]:
             "quote_age_seconds": round(quote_age_seconds, 3) if quote_age_seconds is not None else None,
             "quote_is_fresh": quote_is_fresh,
             "data_source": "schwab",
-            "float_source": "schwab" if float_shares is not None else None,
+            "float_source": float_source,
         })
     return rows
 
