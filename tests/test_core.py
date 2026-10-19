@@ -68,7 +68,7 @@ class NormalizeSchwabQuotesTests(unittest.TestCase):
         self.assertIsNone(rows[0]["volume"])
         self.assertIsNone(rows[0]["gap_pct"])
 
-    def test_uses_only_explicit_schwab_float_not_shares_outstanding(self):
+    def test_uses_float_shares_or_derives_from_schwab_float_market_cap(self):
         rows = normalize_schwab_quotes({
             "AAPL": {
                 "quote": {"lastPrice": 100, "closePrice": 99},
@@ -80,10 +80,18 @@ class NormalizeSchwabQuotesTests(unittest.TestCase):
                 "reference": {"description": "Example"},
                 "fundamental": {"floatShares": 250000},
             },
+            "DERIVED": {
+                "quote": {"lastPrice": 20, "closePrice": 19},
+                "reference": {"description": "Derived Example"},
+                "fundamental": {"marketCapFloat": 5000000, "sharesOutstanding": 9000000},
+            },
         })
         self.assertIsNone(rows[0]["float_shares"])
+        self.assertIsNone(rows[0]["float_source"])
         self.assertEqual(rows[1]["float_shares"], 250000)
         self.assertEqual(rows[1]["float_source"], "schwab")
+        self.assertEqual(rows[2]["float_shares"], 250000)
+        self.assertEqual(rows[2]["float_source"], "schwab_market_cap_float_derived")
 
     def test_missing_fields_are_not_invented(self):
         rows = normalize_schwab_quotes({"XYZ": {"quote": {}, "reference": {}}})
