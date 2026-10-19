@@ -138,5 +138,42 @@ class AutomaticEngineTests(unittest.TestCase):
 
 
 
+    def test_history_sampling_prefers_higher_volume_symbol_over_larger_gap(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = SnapshotStore(Path(directory) / "engine.sqlite3")
+            symbols = ["THIN", "LIQUID"]
+
+            def fetch(batch):
+                return {
+                    "THIN": {
+                        "quote": {"lastPrice": 20.0, "closePrice": 10.0, "totalVolume": 100},
+                        "reference": {"description": "Thin stock"},
+                    },
+                    "LIQUID": {
+                        "quote": {"lastPrice": 11.0, "closePrice": 10.0, "totalVolume": 10000},
+                        "reference": {"description": "Liquid stock"},
+                    },
+                }
+
+            requested_history = []
+            def fetch_history(symbol):
+                requested_history.append(symbol)
+                return {"candles": []}
+
+            with patch.dict(os.environ, {
+                "SCHWAB_CLIENT_ID": "test-id",
+                "SCHWAB_CLIENT_SECRET": "test-secret",
+                "SCHWAB_REFRESH_TOKEN": "test-refresh",
+            }):
+                run_scan_cycle(
+                    store,
+                    universe_loader=lambda: {"symbols": symbols},
+                    quote_fetcher=fetch,
+                    candle_fetcher=fetch_history,
+                )
+
+            self.assertEqual(requested_history, ["LIQUID"])
+
+
 if __name__ == "__main__":
     unittest.main()
