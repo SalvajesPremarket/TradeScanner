@@ -67,13 +67,16 @@ class CandleTests(unittest.TestCase):
             self.assertEqual(result["sessions_used"], 2)
             self.assertEqual(result["rvol"], 2.6667)
 
-    def test_rvol_excludes_history_missing_current_minute_buckets(self):
+    def test_rvol_allows_missing_interior_minute_buckets(self):
         with tempfile.TemporaryDirectory() as directory:
             store = CandleStore(Path(directory) / "candles.sqlite3")
             rows = [
-                # Historical session 12 is missing minute 09:31 and must be excluded.
+                # Historical session 12 skips 09:31 but has a later bar proving
+                # that the session reached the current 09:31 comparison cutoff.
                 {"symbol": "AAPL", "candle_time_ms": ms(12, 9, 30),
                  "open": 10.0, "high": 10.5, "low": 9.5, "close": 10.2, "volume": 10},
+                {"symbol": "AAPL", "candle_time_ms": ms(12, 9, 32),
+                 "open": 10.0, "high": 10.5, "low": 9.5, "close": 10.2, "volume": 20},
                 {"symbol": "AAPL", "candle_time_ms": ms(13, 9, 30),
                  "open": 10.0, "high": 10.5, "low": 9.5, "close": 10.2, "volume": 100},
                 {"symbol": "AAPL", "candle_time_ms": ms(13, 9, 31),
@@ -85,8 +88,10 @@ class CandleTests(unittest.TestCase):
             ]
             store.save(rows)
             result = store.rvol("AAPL")
-            self.assertEqual(result["sessions_used"], 0)
-            self.assertIsNone(result["rvol"])
+            self.assertEqual(result["sessions_used"], 2)
+            self.assertEqual(result["current_volume"], 400)
+            self.assertEqual(result["average_volume"], 105)
+            self.assertEqual(result["rvol"], 3.8095)
 
     def test_rvol_is_unavailable_without_prior_sessions(self):
         with tempfile.TemporaryDirectory() as directory:
