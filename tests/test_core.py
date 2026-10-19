@@ -95,10 +95,17 @@ class NormalizeSchwabQuotesTests(unittest.TestCase):
 
     def test_missing_fields_are_not_invented(self):
         rows = normalize_schwab_quotes({"XYZ": {"quote": {}, "reference": {}}})
-        self.assertIsNone(rows[0]["price"])
-        self.assertIsNone(rows[0]["gap_pct"])
-        self.assertIsNone(rows[0]["volume"])
-        self.assertIsNone(rows[0]["rvol"])
+        self.assertEqual(rows, [])
+
+    def test_ignores_provider_error_metadata_without_market_quote(self):
+        rows = normalize_schwab_quotes({
+            "ERRORS": {"errors": [{"message": "provider error"}]},
+            "AAPL": {
+                "quote": {"lastPrice": 100, "closePrice": 99, "totalVolume": 1000},
+                "reference": {"description": "Apple Inc."},
+            },
+        })
+        self.assertEqual([row["symbol"] for row in rows], ["AAPL"])
 
     def test_filters_exclude_missing_values_only_when_filter_enabled(self):
         rows = [
