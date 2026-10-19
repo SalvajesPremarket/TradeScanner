@@ -52,9 +52,16 @@ Abrir `http://localhost:8000`; documentación API en `http://localhost:8000/docs
 
 - `SCHWAB_CLIENT_ID`
 - `SCHWAB_CLIENT_SECRET`
-- `SCHWAB_REFRESH_TOKEN`
+- `SCHWAB_REFRESH_TOKEN` (solo bootstrap inicial; con Infisical configurado, el valor del vault prevalece)
+- `INFISICAL_CLIENT_ID` (ID de la identidad de máquina)
+- `INFISICAL_CLIENT_SECRET` (secreto de la identidad de máquina; solo en variables privadas de Render)
+- `INFISICAL_PROJECT_ID` (ID del proyecto TradeScanner en Infisical)
+- `INFISICAL_ENVIRONMENT` (obligatorio: slug exacto del entorno Infisical; confirmar si es `production`, `prod` u otro valor)
+- `INFISICAL_SECRET_PATH` (ruta de secretos; por defecto `/`)
 - `TRADESCANNER_DB_PATH` (recomendado en producción, apuntando a almacenamiento persistente)
-- `TRADESCANNER_AUTO_SCAN_ENABLED` (predeterminado `false`; establecer `true` explícitamente solo después de validar Schwab y almacenamiento persistente)
+- `TRADESCANNER_AUTO_SCAN_ENABLED` (predeterminado `false`; mantener desactivado hasta validar cotizaciones reales)
+
+Con Infisical configurado, el callback OAuth guarda el refresh token directamente en el vault y nunca lo muestra en la página. El adaptador lee el token del vault, conserva temporalmente el access token en memoria y persiste cualquier refresh token rotado. Sin Infisical configurado, el callback OAuth no comienza.
 - `TRADESCANNER_SCAN_INTERVAL_SECONDS` (predeterminado 30; mínimo 10)
 
 No publicar claves o tokens en GitHub ni en el chat. Si una credencial se compartió previamente en texto, rotarla antes de utilizarla.

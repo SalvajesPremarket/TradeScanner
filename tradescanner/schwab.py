@@ -12,10 +12,13 @@ import urllib.parse
 import urllib.request
 from typing import Any
 
+from .infisical_vault import InfisicalError, is_configured as infisical_is_configured
+from .infisical_vault import read_secret, write_secret
+
 TOKEN_URL = "https://api.schwabapi.com/v1/oauth/token"
 QUOTES_URL = "https://api.schwabapi.com/marketdata/v1/quotes"
 PRICE_HISTORY_URL = "https://api.schwabapi.com/marketdata/v1/pricehistory"
-_SYMBOL_RE = re.compile(r"^[A-Z][A-Z0-9.\-]{0,14}$")
+_SYMBOL_RE = re.compile(r"^[A-Z][A-Z0-9.-]{0,14}$")
 
 _TOKEN_LOCK = threading.Lock()
 _CACHED_TOKEN: str | None = None
@@ -34,10 +37,34 @@ class SchwabAPIError(RuntimeError):
 def _credentials() -> tuple[str, str, str]:
     client_id = os.getenv("SCHWAB_CLIENT_ID", "").strip()
     client_secret = os.getenv("SCHWAB_CLIENT_SECRET", "").strip()
-    refresh_token = os.getenv("SCHWAB_REFRESH_TOKEN", "").strip()
-    if not all((client_id, client_secret, refresh_token)):
+    env_refresh_token = os.getenv("SCHWAB_REFRESH_TOKEN", "").strip()
+    if not all((client_id, client_secret)):
         raise SchwabConfigurationError(
-            "Configure SCHWAB_CLIENT_ID, SCHWAB_CLIENT_SECRET and SCHWAB_REFRESH_TOKEN."
+            "Configure SCHWAB_CLIENT_ID and SCHWAB_CLIENT_SECRET."
+        )
+
+    refresh_token = env_refresh_token
+    if infisical_is_configured():
+        try:
+            stored_token = read_secret("SCHWAB_REFRESH_TOKEN")
+            if stored_token:
+                refresh_token = stored_token
+            elif env_refresh_token:
+                # Bootstrap the vault from the existing Render variable once.
+                write_secret("SCHWAB_REFRESH_TOKEN", env_refresh_token)
+                refresh_token = env_refresh_token
+            else:
+                raise SchwabConfigurationError(
+                    "Schwab refresh token is missing from the configured Infisical vault."
+                )
+        except InfisicalError:
+            raise SchwabConfigurationError(
+                "Could not read or initialize the Schwab token in Infisical."
+            ) from None
+
+    if not refresh_token:
+        raise SchwabConfigurationError(
+            "Configure SCHWAB_REFRESH_TOKEN or connect the Infisical token vault."
         )
     return client_id, client_secret, refresh_token
 
@@ -93,13 +120,29 @@ def _access_token() -> str:
         token = payload.get("access_token") if isinstance(payload, dict) else None
         if not token:
             raise SchwabAPIError("Schwab token response did not contain an access token.")
+
+        rotated_token = payload.get("refresh_token") if isinstance(payload, dict) else None
+        if isinstance(rotated_token, str) and rotated_token.strip() and rotated_token != refresh_token:
+            if infisical_is_configured():
+                try:
+                    write_secret("SCHWAB_REFRESH_TOKEN", rotated_token)
+                    credentials = (client_id, client_secret, rotated_token)
+                except InfisicalError:
+                    raise SchwabAPIError(
+                        "Schwab issued a rotated refresh token but Infisical could not persist it."
+                    ) from None
+            else:
+                # Without a durable vault, never silently lose a rotated token.
+                raise SchwabAPIError(
+                    "Schwab rotated its refresh token; configure Infisical persistence before continuing."
+                )
+
         try:
             lifetime = max(60.0, float(payload.get("expires_in", 1800)))
         except (TypeError, ValueError):
             lifetime = 1800.0
         _CACHED_TOKEN = str(token)
         _CACHED_CREDENTIALS = credentials
-        # Refresh one minute before provider expiry to avoid edge-of-expiry calls.
         _CACHED_TOKEN_EXPIRES_AT = time.monotonic() + max(1.0, lifetime - 60.0)
         return _CACHED_TOKEN
 
@@ -111,6 +154,7 @@ def _clear_token_cache() -> None:
         _CACHED_TOKEN = None
         _CACHED_TOKEN_EXPIRES_AT = 0.0
         _CACHED_CREDENTIALS = None
+
 
 def get_quotes(symbols: list[str]) -> dict[str, Any]:
     """Fetch real quotes for a bounded list of validated symbols."""
@@ -139,8 +183,8 @@ def get_quotes(symbols: list[str]) -> dict[str, Any]:
         raise SchwabAPIError(f"Schwab market-data quotes request failed: {exc}") from None
     if not isinstance(payload, dict):
         raise SchwabAPIError("Schwab quotes response was not an object.")
-    # Return provider data unchanged; do not synthesize missing quotes.
     return payload
+
 
 def get_price_history(
     symbol: str,
