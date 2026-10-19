@@ -146,7 +146,6 @@ class CandleStore:
         current_by_minute = {
             minute: volume for minute, volume in current_bars if minute <= cutoff
         }
-        current_minutes = set(current_by_minute)
         current_volume = sum(current_by_minute.values())
 
         previous_days = sorted((day for day in sessions if day < current_day), reverse=True)[:5]
