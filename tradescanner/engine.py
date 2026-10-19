@@ -122,9 +122,16 @@ def run_scan_cycle(
                     if isinstance(row.get("price"), (int, float)) and row["price"] > 0
                 ]
                 if eligible:
+                    # Prefer the most actively traded symbol so the bounded
+                    # history request is more likely to return enough candles for RVOL.
+                    # Use absolute GAP only as a tie-breaker; thin/illiquid names often
+                    # have sparse histories and cannot establish a reliable baseline.
                     candidate = max(
                         eligible,
-                        key=lambda row: abs(row.get("gap_pct") or 0.0),
+                        key=lambda row: (
+                            row.get("volume") if isinstance(row.get("volume"), (int, float)) else -1,
+                            abs(row.get("gap_pct") or 0.0),
+                        ),
                     )
                     candle_payload = history_fetch(candidate["symbol"])
                     candles = normalize_price_history(candidate["symbol"], candle_payload)
