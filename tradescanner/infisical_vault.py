@@ -143,6 +143,22 @@ def read_secret(name: str) -> str | None:
     return value
 
 
+def _safe_http_error_detail(exc: urllib.error.HTTPError, secret_value: str) -> str:
+    """Extract a short API error message without logging response bodies or secrets."""
+    try:
+        payload = json.loads(exc.read().decode("utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError, OSError):
+        return ""
+    if not isinstance(payload, dict):
+        return ""
+    detail = payload.get("message") or payload.get("error")
+    if not isinstance(detail, str):
+        return ""
+    # Avoid reflecting a secret if an upstream error happens to echo request data.
+    detail = detail.replace(secret_value, "[REDACTED]").strip()
+    return detail[:240]
+
+
 def write_secret(name: str, value: str) -> None:
     if not isinstance(value, str) or not value.strip():
         raise InfisicalError("Refusing to store an empty secret.")
@@ -164,14 +180,22 @@ def write_secret(name: str, value: str) -> None:
     }
     exists = read_secret(name) is not None
     # v4 create/update accept project, environment and path in the JSON body.
-    url = base
     request = urllib.request.Request(
-        url,
+        base,
         data=json.dumps(body).encode(),
         headers=headers,
         method="PATCH" if exists else "POST",
     )
-    _json_request(request)
+    try:
+        _json_request(request)
+    except urllib.error.HTTPError as exc:
+        if exc.code != 404:
+            raise
+        detail = _safe_http_error_detail(exc, value.strip())
+        message = f"Infisical secret write returned HTTP 404 for {name}."
+        if detail:
+            message += f" API detail: {detail}"
+        raise InfisicalError(message) from None
     _SECRET_CACHE[name] = (value.strip(), time.monotonic() + 15.0)
 
 
