@@ -153,16 +153,14 @@ class CandleStore:
         historical_totals: list[int] = []
         for day in previous_days:
             bars = sessions[day]
-            historical_by_minute = {
-                minute: volume for minute, volume in bars if minute <= cutoff
-            }
-            # Compare only sessions containing every minute bucket observed in
-            # the current session; a missing historical interval would distort
-            # the time-of-day baseline and could inflate RVOL.
-            if not current_minutes.issubset(historical_by_minute):
+            # Compare cumulative volume at the same clock time. Providers may omit
+            # one-minute candles for intervals with no trades, so requiring every
+            # exact minute key would reject otherwise usable liquid-session history.
+            # Still reject a historical session that ends before the current cutoff.
+            if not bars or max(minute for minute, _ in bars) < cutoff:
                 continue
             historical_totals.append(sum(
-                historical_by_minute[minute] for minute in current_minutes
+                volume for minute, volume in bars if minute <= cutoff
             ))
         # One prior session is too fragile to establish a reliable baseline.
         # Keep RVOL unavailable until at least two comparable historical sessions exist.
