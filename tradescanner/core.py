@@ -52,6 +52,10 @@ def normalize_schwab_quotes(payload: dict[str, Any]) -> list[dict[str, Any]]:
             quote_age_seconds is not None
             and -30 <= quote_age_seconds <= 300
         )
+        # Ignore provider metadata/error entries that contain no market quote.
+        # Keep partial but meaningful quotes (e.g. halted symbols with a timestamp).
+        if last is None and previous_close is None and volume is None and quote_time_ms is None:
+            continue
         gap_pct = None
         if last is not None and previous_close is not None and previous_close > 0:
             gap_pct = round(((last / previous_close) - 1.0) * 100.0, 10)
