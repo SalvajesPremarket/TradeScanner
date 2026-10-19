@@ -32,7 +32,11 @@ def normalize_schwab_quotes(payload: dict[str, Any]) -> list[dict[str, Any]]:
         last = _number(quote.get("lastPrice"))
         previous_close = _number(quote.get("closePrice"))
         volume = _number(quote.get("totalVolume"))
-        quote_time_ms = _number(quote.get("quoteTimeInLong"))
+        # Schwab REST quote responses document `quoteTime` (epoch milliseconds).
+        # Keep compatibility with payloads that expose the older `quoteTimeInLong` name.
+        quote_time_ms = _number(quote.get("quoteTime"))
+        if quote_time_ms is None:
+            quote_time_ms = _number(quote.get("quoteTimeInLong"))
         if last is not None and last <= 0:
             last = None
         if previous_close is not None and previous_close <= 0:
