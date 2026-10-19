@@ -38,6 +38,27 @@ class NormalizeSchwabQuotesTests(unittest.TestCase):
         self.assertFalse(rows[1]["quote_is_fresh"])
         self.assertFalse(rows[2]["quote_is_fresh"])
 
+    def test_uses_schwab_rest_quote_time_field_for_freshness(self):
+        import time
+        now_ms = int(time.time() * 1000)
+        rows = normalize_schwab_quotes({
+            "FRESH": {"quote": {"lastPrice": 10, "closePrice": 9, "quoteTime": now_ms}, "reference": {}},
+            "STALE": {"quote": {"lastPrice": 10, "closePrice": 9, "quoteTime": now_ms - 600_000}, "reference": {}},
+        })
+        self.assertEqual(rows[0]["quote_time_ms"], now_ms)
+        self.assertTrue(rows[0]["quote_is_fresh"])
+        self.assertFalse(rows[1]["quote_is_fresh"])
+
+    def test_quote_time_prefers_current_rest_field_then_legacy_field(self):
+        import time
+        now_ms = int(time.time() * 1000)
+        rows = normalize_schwab_quotes({
+            "CURRENT": {"quote": {"lastPrice": 10, "quoteTime": now_ms, "quoteTimeInLong": now_ms - 600_000}, "reference": {}},
+            "LEGACY": {"quote": {"lastPrice": 10, "quoteTimeInLong": now_ms}, "reference": {}},
+        })
+        self.assertTrue(rows[0]["quote_is_fresh"])
+        self.assertTrue(rows[1]["quote_is_fresh"])
+
     def test_non_finite_and_non_positive_quote_values_are_not_used(self):
         rows = normalize_schwab_quotes({
             "BAD": {"quote": {"lastPrice": float("nan"), "closePrice": 0, "totalVolume": float("inf")}, "reference": {}}
