@@ -119,6 +119,8 @@
           [minChange, item.change_pct, "min"], [maxChange, item.change_pct, "max"]
         ];
         if (floatOn && (item.float_shares === null || item.float_shares === undefined)) return false;
+        // Do not present explicitly stale provider quotes as current radar results.
+        if (item.quote_is_fresh === false) return false;
         for (const [threshold, actual, mode] of checks) {
           if (threshold === null) continue;
           if (actual === null || actual === undefined || !Number.isFinite(Number(actual))) return false;
