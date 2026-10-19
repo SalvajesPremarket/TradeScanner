@@ -57,9 +57,9 @@ def _credentials() -> tuple[str, str, str]:
                 raise SchwabConfigurationError(
                     "Schwab refresh token is missing from the configured Infisical vault."
                 )
-        except InfisicalError:
+        except InfisicalError as exc:
             raise SchwabConfigurationError(
-                "Could not read or initialize the Schwab token in Infisical."
+                f"Could not read or initialize the Schwab token in Infisical: {exc}"
             ) from None
 
     if not refresh_token:
