@@ -208,5 +208,26 @@ class AppEntrypointTests(unittest.TestCase):
         self.assertIn('name === "settings"', html)
 
 
+    def test_secondary_tabs_have_real_controls_and_data_endpoints(self):
+        html = (app_module.ROOT / "index.html").read_text(encoding="utf-8")
+        required = [
+            'id="chart-form"',
+            'fetch("/api/candles/"',
+            'id="watchlist-form"',
+            'localStorage.getItem("tradescanner_watchlist")',
+            'localStorage.setItem("tradescanner_watchlist"',
+            'id="refresh-settings"',
+            'fetch("/api/snapshots/status"',
+            'fetch("/api/engine/status"',
+            'fetch("/api/universe/status"',
+            'id="strategy-form"',
+            'fetch("/api/strategies"',
+            'function drawCandles(candles)',
+        ]
+        for fragment in required:
+            with self.subTest(fragment=fragment):
+                self.assertIn(fragment, html)
+
+
 if __name__ == "__main__":
     unittest.main()
