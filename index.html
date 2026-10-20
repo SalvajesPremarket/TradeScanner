@@ -38,7 +38,8 @@
     thead th{padding:11px 10px;background:var(--head);border-top:1px solid var(--line);border-bottom:1px solid var(--line);color:#4a5e72;text-align:left;white-space:nowrap;font-size:10px}
     tbody td{height:43px;padding:10px;border-bottom:1px solid #e9eef3}
     .empty{padding:27px 15px;text-align:center;color:var(--muted);font-size:12px}
-    footer{padding:12px 15px;border-top:1px solid var(--line);color:var(--muted);font-size:10px}\n    [hidden]{display:none!important}.tab-panel{margin-top:16px}.tab-body{padding:16px}.field{display:flex;flex-direction:column;gap:6px;margin-bottom:12px}.field input,.field select,.field textarea{width:100%;padding:9px;border:1px solid #cbd5df;border-radius:3px;font:12px Arial,sans-serif;color:var(--ink);background:#fff}.field textarea{min-height:220px;font:12px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace;tab-size:2}.action{padding:8px 11px;border:1px solid #245879;border-radius:3px;background:var(--blue);color:#fff;font-size:11px;font-weight:700;cursor:pointer}.action.secondary{background:#fff;color:var(--navy);border-color:#b7c4d0}.action.danger{background:#fff;color:#a22;border-color:#d9b4b4}.strategy-item,.data-card{padding:12px;border:1px solid var(--line);border-radius:4px;margin-bottom:8px;background:#fff}.strategy-actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}.grid-two{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:14px}.code-hint{font-size:11px;color:var(--muted);line-height:1.5}.tab-message{margin:8px 0;color:var(--muted);font-size:11px;white-space:pre-wrap}.simple-table{width:100%;min-width:500px;border-collapse:collapse}.simple-table td,.simple-table th{padding:8px;border-bottom:1px solid var(--line);text-align:left;font-size:11px}@media(max-width:800px){.grid-two{grid-template-columns:1fr}}
+    footer{padding:12px 15px;border-top:1px solid var(--line);color:var(--muted);font-size:10px}
+    [hidden]{display:none!important}.tab-panel{margin-top:16px}.tab-body{padding:16px}.field{display:flex;flex-direction:column;gap:6px;margin-bottom:12px}.field input,.field select,.field textarea{width:100%;padding:9px;border:1px solid #cbd5df;border-radius:3px;font:12px Arial,sans-serif;color:var(--ink);background:#fff}.field textarea{min-height:220px;font:12px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace;tab-size:2}.action{padding:8px 11px;border:1px solid #245879;border-radius:3px;background:var(--blue);color:#fff;font-size:11px;font-weight:700;cursor:pointer}.action.secondary{background:#fff;color:var(--navy);border-color:#b7c4d0}.action.danger{background:#fff;color:#a22;border-color:#d9b4b4}.strategy-item,.data-card{padding:12px;border:1px solid var(--line);border-radius:4px;margin-bottom:8px;background:#fff}.strategy-actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}.grid-two{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:14px}.code-hint{font-size:11px;color:var(--muted);line-height:1.5}.tab-message{margin:8px 0;color:var(--muted);font-size:11px;white-space:pre-wrap}.simple-table{width:100%;min-width:500px;border-collapse:collapse}.simple-table td,.simple-table th{padding:8px;border-bottom:1px solid var(--line);text-align:left;font-size:11px}@media(max-width:800px){.grid-two{grid-template-columns:1fr}}
     @media(max-width:800px){main{padding:12px}header{padding:15px}h1{font-size:23px}.filter input{width:54px}}
   </style>
 </head>
@@ -76,8 +77,9 @@
 
     <section id="tab-strategies" class="panel tab-panel" hidden aria-label="Editor de estrategias">
       <div class="panel-head"><h2>EDITOR DE ESTRATEGIAS · ESTILO THINKORSWIM</h2><span class="muted">Una sola estrategia activa a la vez</span></div>
-      <div class="tab-body grid-two">
-        <div>
+      <div class="tab-body">
+        <div class="field" style="max-width:520px"><label for="strategy-token">Clave privada del editor</label><input id="strategy-token" type="password" autocomplete="off" placeholder="Configura esta clave en Render como TRADESCANNER_STRATEGY_ADMIN_TOKEN"><div class="code-hint">Por seguridad, la API permanece bloqueada hasta configurar la variable secreta en el servicio. La clave no se guarda en el navegador.</div></div>
+        <div class="grid-two"><div>
           <h2>Mis estrategias</h2>
           <p class="code-hint">Cada estrategia se guarda por separado. Solo la estrategia activada se aplica a los resultados, después de los filtros fijos.</p>
           <div id="strategy-list" aria-live="polite"><div class="empty">Cargando estrategias guardadas…</div></div>
@@ -87,13 +89,14 @@
           <form id="strategy-form">
             <input type="hidden" id="strategy-id">
             <label class="field">Nombre que tú elijas<input id="strategy-name" maxlength="80" required placeholder="Ej. GAP + volumen fuerte"></label>
-            <label class="field">Lenguaje<select id="strategy-language"><option value="formula">Fórmula segura (ejecutable)</option><option value="python">Python (guardar; ejecución aislada pendiente)</option><option value="thinkscript">ThinkScript (guardar; compatibilidad pendiente)</option></select></label>
+            <label class="field">Lenguaje<select id="strategy-language"><option value="formula">Fórmula segura (ejecutable)</option><option value="python">Python seguro (subconjunto validado)</option><option value="thinkscript">ThinkScript (expresión de escaneo compatible)</option></select></label>
             <label class="field">Pega tu fórmula o script<textarea id="strategy-source" maxlength="50000" required spellcheck="false" placeholder="Ejemplo: gap_pct >= 3 and volume >= 500000"></textarea></label>
             <div id="formula-help" class="code-hint">Campos disponibles: price, previous_close, change, change_pct, gap_pct, float_shares, rvol, volume, sector, symbol. Operadores: and, or, not; comparaciones; +, -, *, /, %. Funciones: abs(), min(), max().</div>
             <div class="strategy-actions"><button class="action" type="submit">Guardar estrategia</button><button class="action secondary" type="button" id="strategy-new">Nueva / limpiar</button></div>
             <div id="strategy-message" class="tab-message" role="status"></div>
           </form>
         </div>
+        </div></div>
       </div>
     </section>
 
@@ -294,6 +297,7 @@
     let activeStrategyId = null;
     let activeStrategySymbols = null;
     let savedStrategies = [];
+    let strategyToken = "";
     let chartRows = [];
     let watchlist = [];
 
@@ -323,14 +327,18 @@
     }
     document.querySelectorAll("nav [data-tab]").forEach(button => button.addEventListener("click", () => showTab(button.dataset.tab)));
 
+    function strategyHeaders(extra = {}) {
+      strategyToken = document.getElementById("strategy-token").value.trim();
+      return Object.assign({"X-Strategy-Admin-Token":strategyToken}, extra);
+    }
     async function loadStrategies() {
       const list = document.getElementById("strategy-list");
       try {
-        const payload = await readJson(await fetch("/api/strategies", {cache:"no-store"}));
+        const payload = await readJson(await fetch("/api/strategies", {cache:"no-store",headers:strategyHeaders()}));
         savedStrategies = payload.strategies || [];
         const active = savedStrategies.find(item => item.enabled);
         activeStrategyId = active ? active.id : null;
-        const matchPayload = await readJson(await fetch("/api/strategies/active-matches", {cache:"no-store"}));
+        const matchPayload = await readJson(await fetch("/api/strategies/active-matches", {cache:"no-store",headers:strategyHeaders()}));
         activeStrategySymbols = matchPayload.strategy ? new Set(matchPayload.symbols || []) : null;
         applyFilters();
         renderStrategies();
@@ -350,7 +358,7 @@
         const card = document.createElement("div"); card.className = "strategy-item";
         const title = document.createElement("strong"); title.textContent = strategy.name; card.appendChild(title);
         const details = document.createElement("div"); details.className = "muted";
-        details.textContent = strategy.language.toUpperCase() + (strategy.enabled ? " · ACTIVA" : " · INACTIVA") + (strategy.execution_ready ? " · EJECUTABLE" : " · SOLO GUARDADA");
+        details.textContent = strategy.language.toUpperCase() + (strategy.enabled ? " · ACTIVA" : " · INACTIVA") + (strategy.execution_ready ? " · EJECUTABLE (SUBCONJUNTO SEGURO)" : " · SOLO GUARDADA");
         card.appendChild(details);
         const actions = document.createElement("div"); actions.className = "strategy-actions";
         const toggle = document.createElement("button"); toggle.className = "action " + (strategy.enabled ? "secondary" : "");
@@ -358,7 +366,7 @@
         toggle.addEventListener("click", async () => {
           try {
             await readJson(await fetch("/api/strategies/" + encodeURIComponent(strategy.id) + "/activate", {
-              method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({enabled:!strategy.enabled})
+              method:"POST", headers:strategyHeaders({"Content-Type":"application/json"}), body:JSON.stringify({enabled:!strategy.enabled})
             }));
             document.getElementById("strategy-message").textContent = strategy.enabled ? "Estrategia desactivada." : "Estrategia activada. Solo esta estrategia filtrará los resultados.";
             await loadStrategies();
@@ -379,7 +387,7 @@
         del.addEventListener("click", async () => {
           if (!confirm("¿Eliminar la estrategia «" + strategy.name + "»?")) return;
           try {
-            await readJson(await fetch("/api/strategies/" + encodeURIComponent(strategy.id), {method:"DELETE"}));
+            await readJson(await fetch("/api/strategies/" + encodeURIComponent(strategy.id), {method:"DELETE",headers:strategyHeaders()}));
             document.getElementById("strategy-message").textContent = "Estrategia eliminada.";
             if (document.getElementById("strategy-id").value === strategy.id) clearStrategyForm();
             await loadStrategies();
@@ -394,8 +402,8 @@
       help.textContent = language === "formula"
         ? "Fórmula ejecutable segura. Campos: price, previous_close, change, change_pct, gap_pct, float_shares, rvol, volume, sector, symbol. Operadores: and, or, not; comparaciones; +, -, *, /, %. Funciones: abs(), min(), max()."
         : language === "python"
-          ? "El código se guarda, pero no se ejecuta todavía. La ejecución Python requiere un entorno aislado y pruebas de seguridad; no actives scripts como si ya fueran operativos."
-          : "El código se guarda, pero ThinkScript no se ejecuta directamente en Python. La compatibilidad y conversión deben implementarse y validarse antes de activar.";
+          ? "Subconjunto seguro: una expresión, o def evaluate(stock): return expresión. Acceso solo mediante stock['gap_pct'], stock['volume'], etc. No se permiten imports, loops, asignaciones ni acceso al sistema."
+          : "Subconjunto compatible: plot scan = close > 5; o expresión simple. close/last se mapean al precio y volume al volumen. No admite Average(), datos históricos ni bloques ThinkScript.";
     }
     document.getElementById("strategy-language").addEventListener("change", updateLanguageHelp);
     function clearStrategyForm() {
@@ -405,6 +413,7 @@
       updateLanguageHelp();
     }
     document.getElementById("strategy-new").addEventListener("click", clearStrategyForm);
+    document.getElementById("strategy-token").addEventListener("change", loadStrategies);
     document.getElementById("strategy-form").addEventListener("submit", async event => {
       event.preventDefault();
       const payload = {
@@ -415,7 +424,7 @@
       };
       try {
         const result = await readJson(await fetch("/api/strategies", {
-          method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(payload)
+          method:"POST", headers:strategyHeaders({"Content-Type":"application/json"}), body:JSON.stringify(payload)
         }));
         document.getElementById("strategy-id").value = result.strategy.id;
         document.getElementById("strategy-message").textContent = result.strategy.execution_ready
