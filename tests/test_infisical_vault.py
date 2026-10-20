@@ -46,6 +46,16 @@ class InfisicalVaultTests(unittest.TestCase):
         self.assertEqual(form["clientId"], ["client-id"])
         self.assertEqual(form["clientSecret"], ["client-secret"])
 
+    def test_auth_http_404_is_wrapped_as_safe_infisical_error(self):
+        error = __import__("urllib.error").error.HTTPError(
+            vault._AUTH_URL, 404, "not found", {}, None
+        )
+        with patch.object(vault, "_json_request", side_effect=error):
+            with self.assertRaises(vault.InfisicalError) as caught:
+                vault._access_token()
+        self.assertIn("HTTP 404", str(caught.exception))
+        self.assertNotIsInstance(caught.exception, __import__("urllib.error").error.HTTPError)
+
     def test_read_secret_returns_value_without_logging_it(self):
         with patch.object(vault, "_access_token", return_value="test-access"), patch.object(
             vault, "_json_request", return_value={"secret": {"secretValue": "private-value"}}
