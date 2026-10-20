@@ -1,5 +1,6 @@
 import asyncio
 import hmac
+import logging
 import os
 import sqlite3
 import time
@@ -26,22 +27,34 @@ from tradescanner.schwab import (
 )
 
 ROOT = Path(__file__).resolve().parent
+logger = logging.getLogger(__name__)
 
 
 async def _automatic_scan_loop(stop: asyncio.Event) -> None:
     enabled = os.getenv("TRADESCANNER_AUTO_SCAN_ENABLED", "false").strip().lower()
     if enabled not in {"1", "true", "yes", "on"}:
+        logger.warning("Automatic scan loop disabled: TRADESCANNER_AUTO_SCAN_ENABLED is false")
         return
     try:
         interval = max(10, int(os.getenv("TRADESCANNER_SCAN_INTERVAL_SECONDS", "30")))
     except ValueError:
         interval = 30
+    logger.info("Automatic scan loop enabled; interval_seconds=%s", interval)
 
     while not stop.is_set():
+        started = time.monotonic()
         try:
-            await asyncio.to_thread(run_scan_cycle)
+            result = await asyncio.to_thread(run_scan_cycle)
+            logger.info(
+                "Automatic scan cycle finished; status=%s cycles_completed=%s snapshots_saved=%s duration_seconds=%.3f",
+                result.get("status", "unknown"),
+                result.get("cycles_completed", "unknown"),
+                result.get("snapshots_saved", 0),
+                time.monotonic() - started,
+            )
         except Exception as exc:
-            # Store only the exception class; never leak provider responses or secrets.
+            # Store and log only the exception class; never leak provider responses or secrets.
+            logger.error("Automatic scan cycle failed; error_type=%s", type(exc).__name__)
             try:
                 record_engine_status(SnapshotStore(), status="error", last_error=type(exc).__name__)
             except (OSError, RuntimeError, sqlite3.Error):
