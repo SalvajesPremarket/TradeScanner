@@ -1,4 +1,5 @@
 import asyncio
+import hmac
 import os
 import sqlite3
 import time
@@ -6,13 +7,15 @@ from datetime import datetime, timezone
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Body, Request
 from fastapi.responses import FileResponse
 
 from tradescanner.candles import CandleStore
 from tradescanner.core import apply_filters, normalize_schwab_quotes
+from tradescanner.float_provider import apply_cached_float
 from tradescanner.engine import get_engine_status, record_engine_status, run_scan_cycle
 from tradescanner.snapshots import SnapshotStore, collect_snapshots
+from tradescanner.strategies import (active_strategy, delete_strategy, strategy_matches, list_strategies, save_strategy, set_strategy_enabled)
 from tradescanner.universe import UniverseUnavailableError, load_symbol_universe
 from tradescanner.oauth import router as oauth_router
 from tradescanner.schwab import (
@@ -125,7 +128,7 @@ def engine_status():
         "cycle_interval_seconds": interval,
         "batch_size": 100,
         "provider": "Schwab",
-        "float_provider": "Schwab (only if explicit float fields are returned)",
+        "float_provider": "Schwab first; FMP cache for FLOAT only when FMP_API_KEY is configured",
         "state": state or {"status": "starting"},
     }
 
@@ -179,9 +182,107 @@ def snapshots_latest(limit: int = Query(100, ge=1, le=1000)):
             row.setdefault("float_shares", None)
             row.setdefault("float_as_of", None)
             row.setdefault("float_source", None)
-        return {"results": rows, "limit": limit}
+        # Fill missing FLOAT from the local FMP cache; never call FMP from UI requests.
+        apply_cached_float(rows, store)
+        selected_strategy = active_strategy()
+        if selected_strategy:
+            rows = [
+                row for row in rows
+                if row.get("quote_is_fresh") is True
+                and strategy_matches(selected_strategy, row)
+            ]
+        return {
+            "results": rows,
+            "limit": limit,
+            "active_strategy": (
+                {"id": selected_strategy["id"], "name": selected_strategy["name"]}
+                if selected_strategy else None
+            ),
+        }
     except (OSError, RuntimeError, sqlite3.Error, ValueError):
         raise HTTPException(status_code=503, detail="Snapshot storage is unavailable.") from None
+
+
+def _authorize_strategy_access(request: Request) -> None:
+    expected = os.getenv("TRADESCANNER_STRATEGY_ADMIN_TOKEN", "").strip()
+    if len(expected) < 32:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Editor de estrategias bloqueado: configura TRADESCANNER_STRATEGY_ADMIN_TOKEN "
+                "con al menos 32 caracteres aleatorios en el entorno privado del servicio."
+            ),
+        )
+    supplied = request.headers.get("x-strategy-admin-token", "")
+    if not supplied or not hmac.compare_digest(supplied, expected):
+        raise HTTPException(status_code=401, detail="Clave del editor incorrecta o ausente.")
+
+
+@app.get("/api/strategies")
+def strategies_list(request: Request):
+    _authorize_strategy_access(request)
+    """List saved strategies without exposing any execution environment."""
+    return {"strategies": list_strategies()}
+
+
+@app.post("/api/strategies")
+def strategies_save(request: Request, payload: dict = Body(...)):
+    _authorize_strategy_access(request)
+    try:
+        strategy = save_strategy(
+            name=payload.get("name", ""),
+            language=payload.get("language", ""),
+            source=payload.get("source", ""),
+            strategy_id=payload.get("id"),
+        )
+        return {"strategy": strategy}
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc).strip("'")) from None
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
+
+
+@app.post("/api/strategies/{strategy_id}/activate")
+def strategies_activate(strategy_id: str, request: Request, payload: dict = Body(...)):
+    _authorize_strategy_access(request)
+    enabled = payload.get("enabled")
+    if not isinstance(enabled, bool):
+        raise HTTPException(status_code=400, detail="enabled debe ser true o false.")
+    try:
+        return {"strategy": set_strategy_enabled(strategy_id, enabled)}
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc).strip("'")) from None
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
+
+
+@app.delete("/api/strategies/{strategy_id}")
+def strategies_delete(strategy_id: str, request: Request):
+    _authorize_strategy_access(request)
+    try:
+        delete_strategy(strategy_id)
+        return {"deleted": True, "id": strategy_id}
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc).strip("'")) from None
+
+
+@app.get("/api/strategies/active-matches")
+def strategies_active_matches(request: Request):
+    _authorize_strategy_access(request)
+    strategy = active_strategy()
+    if not strategy:
+        return {"strategy": None, "symbols": []}
+    store = SnapshotStore()
+    rows = store.latest(1000)
+    candle_store = CandleStore(store.path)
+    for row in rows:
+        row["rvol"] = candle_store.rvol(row["symbol"])["rvol"]
+    matches = [
+        row.get("symbol") for row in rows
+        if row.get("symbol") and row.get("quote_is_fresh") is True
+        and strategy_matches(strategy, row)
+    ]
+    return {"strategy": {"id": strategy["id"], "name": strategy["name"]}, "symbols": matches}
 
 
 @app.get("/api/candles/{symbol}")

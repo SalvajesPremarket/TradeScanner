@@ -11,7 +11,7 @@
     body{margin:0;background:var(--page);color:var(--ink);font:13px Arial,Helvetica,sans-serif}
     header{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;background:var(--navy);color:#fff;padding:17px 24px;border-bottom:3px solid var(--blue)}
     .brand{font-size:25px;font-weight:800;letter-spacing:.2px}.brand span{color:#a9d6b8}
-    nav{display:flex;gap:18px;flex-wrap:wrap;color:#e2eaf2;font-size:11px;font-weight:700}
+    nav{display:flex;gap:8px;flex-wrap:wrap;color:#e2eaf2;font-size:11px;font-weight:700} nav button{border:1px solid #4b607b;border-radius:3px;background:transparent;color:#e2eaf2;padding:8px 10px;font-size:10px;font-weight:700;cursor:pointer} nav button[aria-current="page"]{background:#fff;color:var(--navy);border-color:#fff}
     main{max-width:1600px;margin:0 auto;padding:22px}
     .heading{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:17px}
     h1{margin:0;color:var(--navy);font-size:26px}.subtitle{margin-top:5px;color:var(--muted);font-size:12px}
@@ -39,13 +39,14 @@
     tbody td{height:43px;padding:10px;border-bottom:1px solid #e9eef3}
     .empty{padding:27px 15px;text-align:center;color:var(--muted);font-size:12px}
     footer{padding:12px 15px;border-top:1px solid var(--line);color:var(--muted);font-size:10px}
+    [hidden]{display:none!important}.tab-panel{margin-top:16px}.tab-body{padding:16px}.field{display:flex;flex-direction:column;gap:6px;margin-bottom:12px}.field input,.field select,.field textarea{width:100%;padding:9px;border:1px solid #cbd5df;border-radius:3px;font:12px Arial,sans-serif;color:var(--ink);background:#fff}.field textarea{min-height:220px;font:12px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace;tab-size:2}.action{padding:8px 11px;border:1px solid #245879;border-radius:3px;background:var(--blue);color:#fff;font-size:11px;font-weight:700;cursor:pointer}.action.secondary{background:#fff;color:var(--navy);border-color:#b7c4d0}.action.danger{background:#fff;color:#a22;border-color:#d9b4b4}.strategy-item,.data-card{padding:12px;border:1px solid var(--line);border-radius:4px;margin-bottom:8px;background:#fff}.strategy-actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}.grid-two{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:14px}.code-hint{font-size:11px;color:var(--muted);line-height:1.5}.tab-message{margin:8px 0;color:var(--muted);font-size:11px;white-space:pre-wrap}.simple-table{width:100%;min-width:500px;border-collapse:collapse}.simple-table td,.simple-table th{padding:8px;border-bottom:1px solid var(--line);text-align:left;font-size:11px}@media(max-width:800px){.grid-two{grid-template-columns:1fr}}
     @media(max-width:800px){main{padding:12px}header{padding:15px}h1{font-size:23px}.filter input{width:54px}}
   </style>
 </head>
 <body>
   <header>
     <div class="brand">Trade<span>Scanner</span></div>
-    <nav aria-label="Navegación"><span>SCREENER</span><span>ACCIONES</span><span>GRÁFICOS</span><span>LISTAS</span><span>CONFIGURACIÓN</span></nav>
+    <nav aria-label="Navegación"><button type="button" data-tab="screener" aria-current="page">SCREENER / ACCIONES</button><button type="button" data-tab="strategies">ESTRATEGIAS</button><button type="button" data-tab="charts">GRÁFICOS</button><button type="button" data-tab="lists">LISTAS</button><button type="button" data-tab="settings">CONFIGURACIÓN</button></nav>
   </header>
   <main>
     <section class="heading">
@@ -72,6 +73,59 @@
         </table>
       </div>
       <footer>Los filtros no generan ni completan datos faltantes. RVOL y FLOAT solo filtran filas cuando hay valores reales almacenados.</footer>
+    </section>
+
+    <section id="tab-strategies" class="panel tab-panel" hidden aria-label="Editor de estrategias">
+      <div class="panel-head"><h2>EDITOR DE ESTRATEGIAS · ESTILO THINKORSWIM</h2><span class="muted">Una sola estrategia activa a la vez</span></div>
+      <div class="tab-body">
+        <div class="field" style="max-width:520px"><label for="strategy-token">Clave privada del editor</label><input id="strategy-token" type="password" autocomplete="off" placeholder="Configura esta clave en Render como TRADESCANNER_STRATEGY_ADMIN_TOKEN"><div class="code-hint">Por seguridad, la API permanece bloqueada hasta configurar la variable secreta en el servicio. La clave no se guarda en el navegador.</div></div>
+        <div class="grid-two"><div>
+          <h2>Mis estrategias</h2>
+          <p class="code-hint">Cada estrategia se guarda por separado. Solo la estrategia activada se aplica a los resultados, después de los filtros fijos.</p>
+          <div id="strategy-list" aria-live="polite"><div class="empty">Cargando estrategias guardadas…</div></div>
+        </div>
+        <div>
+          <h2 id="strategy-editor-title">Crear estrategia</h2>
+          <form id="strategy-form">
+            <input type="hidden" id="strategy-id">
+            <label class="field">Nombre que tú elijas<input id="strategy-name" maxlength="80" required placeholder="Ej. GAP + volumen fuerte"></label>
+            <label class="field">Lenguaje<select id="strategy-language"><option value="formula">Fórmula segura (ejecutable)</option><option value="python">Python seguro (subconjunto validado)</option><option value="thinkscript">ThinkScript (expresión de escaneo compatible)</option></select></label>
+            <label class="field">Pega tu fórmula o script<textarea id="strategy-source" maxlength="50000" required spellcheck="false" placeholder="Ejemplo: gap_pct >= 3 and volume >= 500000"></textarea></label>
+            <div id="formula-help" class="code-hint">Campos disponibles: price, previous_close, change, change_pct, gap_pct, float_shares, rvol, volume, sector, symbol. Operadores: and, or, not; comparaciones; +, -, *, /, %. Funciones: abs(), min(), max().</div>
+            <div class="strategy-actions"><button class="action" type="submit">Guardar estrategia</button><button class="action secondary" type="button" id="strategy-new">Nueva / limpiar</button></div>
+            <div id="strategy-message" class="tab-message" role="status"></div>
+          </form>
+        </div>
+        </div></div>
+      </div>
+    </section>
+
+    <section id="tab-charts" class="panel tab-panel" hidden aria-label="Gráficos">
+      <div class="panel-head"><h2>GRÁFICOS · VELAS REALES DE SCHWAB</h2></div>
+      <div class="tab-body">
+        <form id="chart-form" class="tools"><label class="field" style="min-width:180px;flex:1">Ticker<input id="chart-symbol" maxlength="15" value="AAPL" required></label><label class="field" style="width:140px">Velas<input id="chart-limit" type="number" min="10" max="500" value="100"></label><button class="action" type="submit">Cargar velas</button></form>
+        <div id="chart-message" class="tab-message">El gráfico mostrará únicamente velas que estén guardadas. No se inventarán precios.</div>
+        <svg id="chart-svg" viewBox="0 0 1000 320" width="100%" role="img" aria-label="Gráfico de velas de Schwab" style="display:block;min-height:160px;border:1px solid var(--line);background:#fff;margin-bottom:14px"><text x="500" y="160" text-anchor="middle" fill="#718096" font-size="14">Carga velas guardadas para mostrar el gráfico</text></svg>
+        <div class="table-wrap"><table class="simple-table"><thead><tr><th>FECHA</th><th>OPEN</th><th>HIGH</th><th>LOW</th><th>CLOSE</th><th>VOLUMEN</th></tr></thead><tbody id="chart-rows"><tr><td colspan="6">Introduce un ticker y carga sus velas.</td></tr></tbody></table></div>
+      </div>
+    </section>
+
+    <section id="tab-lists" class="panel tab-panel" hidden aria-label="Listas de seguimiento">
+      <div class="panel-head"><h2>LISTAS · SEGUIMIENTO PERSONAL</h2></div>
+      <div class="tab-body">
+        <form id="watchlist-form" class="tools"><label class="field" style="min-width:180px;flex:1">Agregar ticker<input id="watchlist-symbol" maxlength="15" placeholder="Ej. AAPL" required></label><button class="action" type="submit">Agregar a mi lista</button></form>
+        <p class="code-hint">La lista se guarda en este navegador. Las cotizaciones, cuando estén disponibles, provienen de los snapshots reales del scanner.</p>
+        <div id="watchlist-message" class="tab-message"></div>
+        <div class="table-wrap"><table class="simple-table"><thead><tr><th>TICKER</th><th>PRECIO</th><th>CAMBIO %</th><th>GAP %</th><th>ESTADO</th><th>ACCIÓN</th></tr></thead><tbody id="watchlist-rows"></tbody></table></div>
+      </div>
+    </section>
+
+    <section id="tab-settings" class="panel tab-panel" hidden aria-label="Configuración y estado">
+      <div class="panel-head"><h2>CONFIGURACIÓN · ESTADO DE DATOS</h2><button class="action secondary" id="refresh-settings" type="button">Actualizar estado</button></div>
+      <div class="tab-body">
+        <p class="code-hint">Panel de solo lectura. Las credenciales, variables de Render y el escaneo automático no se modifican desde aquí.</p>
+        <div id="settings-cards" class="grid-two"><div class="empty">Consultando estado del servicio…</div></div>
+      </div>
     </section>
   </main>
   <script>
@@ -112,6 +166,7 @@
       const minRvol = numericInput("rvol-min"), minVolume = numericInput("volume-min");
       const minChange = numericInput("change-min"), maxChange = numericInput("change-max");
       return allResults.filter(item => {
+        if (activeStrategySymbols && !activeStrategySymbols.has(item.symbol)) return false;
         const checks = [
           [minPrice, item.price, "min"], [maxPrice, item.price, "max"],
           [minGap, item.gap_pct, "min"], [maxGap, item.gap_pct, "max"],
@@ -120,7 +175,7 @@
         ];
         if (floatOn && (item.float_shares === null || item.float_shares === undefined)) return false;
         // Do not present explicitly stale provider quotes as current radar results.
-        if (item.quote_is_fresh === false) return false;
+        if (item.quote_is_fresh !== true) return false;
         for (const [threshold, actual, mode] of checks) {
           if (threshold === null) continue;
           if (actual === null || actual === undefined || !Number.isFinite(Number(actual))) return false;
@@ -207,8 +262,9 @@
         // rows that are not actual tickers. Unknown freshness is preserved for
         // backwards compatibility with older snapshots.
         allResults = (Array.isArray(snapshotPayload.results) ? snapshotPayload.results : [])
-          .filter(item => item && item.symbol !== "ERROR" && item.symbol !== "ERRORS" && item.quote_is_fresh !== false);
+          .filter(item => item && item.symbol !== "ERROR" && item.symbol !== "ERRORS" && item.quote_is_fresh === true);
         applyFilters();
+        if (activeStrategyId) loadStrategies();
         if (state.status === "waiting_for_credentials") {
           statusNode.textContent = "Esperando credenciales Schwab";
         } else if (state.status === "error") {
@@ -238,8 +294,259 @@
       }
     }
 
+    let activeStrategyId = null;
+    let activeStrategySymbols = null;
+    let savedStrategies = [];
+    let strategyToken = "";
+    let chartRows = [];
+    let watchlist = [];
+
+    function apiMessage(error) {
+      return error && error.message ? error.message : "Ocurrió un error al comunicarse con TradeScanner.";
+    }
+    async function readJson(response) {
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.detail || "Solicitud no completada.");
+      return payload;
+    }
+    function showTab(name) {
+      document.querySelectorAll("[data-tab]").forEach(button => {
+        if (button.tagName === "BUTTON") {
+          if (button.dataset.tab === name) button.setAttribute("aria-current", "page");
+          else button.removeAttribute("aria-current");
+        }
+      });
+      document.getElementById("tab-strategies").hidden = name !== "strategies";
+      document.getElementById("tab-charts").hidden = name !== "charts";
+      document.getElementById("tab-lists").hidden = name !== "lists";
+      document.getElementById("tab-settings").hidden = name !== "settings";
+      document.querySelector("main > .panel[aria-label='Radar de acciones']").hidden = name !== "screener";
+      if (name === "strategies") loadStrategies();
+      if (name === "lists") renderWatchlist();
+      if (name === "settings") loadSettings();
+    }
+    document.querySelectorAll("nav [data-tab]").forEach(button => button.addEventListener("click", () => showTab(button.dataset.tab)));
+
+    function strategyHeaders(extra = {}) {
+      strategyToken = document.getElementById("strategy-token").value.trim();
+      return Object.assign({"X-Strategy-Admin-Token":strategyToken}, extra);
+    }
+    async function loadStrategies() {
+      const list = document.getElementById("strategy-list");
+      try {
+        const payload = await readJson(await fetch("/api/strategies", {cache:"no-store",headers:strategyHeaders()}));
+        savedStrategies = payload.strategies || [];
+        const active = savedStrategies.find(item => item.enabled);
+        activeStrategyId = active ? active.id : null;
+        const matchPayload = await readJson(await fetch("/api/strategies/active-matches", {cache:"no-store",headers:strategyHeaders()}));
+        activeStrategySymbols = matchPayload.strategy ? new Set(matchPayload.symbols || []) : null;
+        applyFilters();
+        renderStrategies();
+      } catch (error) {
+        list.textContent = "No se pudieron cargar las estrategias: " + apiMessage(error);
+      }
+    }
+    function renderStrategies() {
+      const list = document.getElementById("strategy-list");
+      list.replaceChildren();
+      if (!savedStrategies.length) {
+        const empty = document.createElement("div"); empty.className = "empty";
+        empty.textContent = "Todavía no hay estrategias guardadas. Crea la primera en el editor.";
+        list.appendChild(empty); return;
+      }
+      for (const strategy of savedStrategies) {
+        const card = document.createElement("div"); card.className = "strategy-item";
+        const title = document.createElement("strong"); title.textContent = strategy.name; card.appendChild(title);
+        const details = document.createElement("div"); details.className = "muted";
+        details.textContent = strategy.language.toUpperCase() + (strategy.enabled ? " · ACTIVA" : " · INACTIVA") + (strategy.execution_ready ? " · EJECUTABLE (SUBCONJUNTO SEGURO)" : " · SOLO GUARDADA");
+        card.appendChild(details);
+        const actions = document.createElement("div"); actions.className = "strategy-actions";
+        const toggle = document.createElement("button"); toggle.className = "action " + (strategy.enabled ? "secondary" : "");
+        toggle.textContent = strategy.enabled ? "Desactivar" : "Activar";
+        toggle.addEventListener("click", async () => {
+          try {
+            await readJson(await fetch("/api/strategies/" + encodeURIComponent(strategy.id) + "/activate", {
+              method:"POST", headers:strategyHeaders({"Content-Type":"application/json"}), body:JSON.stringify({enabled:!strategy.enabled})
+            }));
+            document.getElementById("strategy-message").textContent = strategy.enabled ? "Estrategia desactivada." : "Estrategia activada. Solo esta estrategia filtrará los resultados.";
+            await loadStrategies();
+          } catch(error) { document.getElementById("strategy-message").textContent = apiMessage(error); }
+        });
+        const edit = document.createElement("button"); edit.className = "action secondary"; edit.textContent = "Editar";
+        edit.addEventListener("click", () => {
+          document.getElementById("strategy-id").value = strategy.id;
+          document.getElementById("strategy-name").value = strategy.name;
+          document.getElementById("strategy-language").value = strategy.language;
+          document.getElementById("strategy-source").value = strategy.source;
+          document.getElementById("strategy-editor-title").textContent = "Editar estrategia";
+          document.getElementById("strategy-message").textContent = "";
+          updateLanguageHelp();
+          document.getElementById("strategy-form").scrollIntoView({behavior:"smooth",block:"start"});
+        });
+        const del = document.createElement("button"); del.className = "action danger"; del.textContent = "Eliminar";
+        del.addEventListener("click", async () => {
+          if (!confirm("¿Eliminar la estrategia «" + strategy.name + "»?")) return;
+          try {
+            await readJson(await fetch("/api/strategies/" + encodeURIComponent(strategy.id), {method:"DELETE",headers:strategyHeaders()}));
+            document.getElementById("strategy-message").textContent = "Estrategia eliminada.";
+            if (document.getElementById("strategy-id").value === strategy.id) clearStrategyForm();
+            await loadStrategies();
+          } catch(error) { document.getElementById("strategy-message").textContent = apiMessage(error); }
+        });
+        actions.append(toggle,edit,del); card.appendChild(actions); list.appendChild(card);
+      }
+    }
+    function updateLanguageHelp() {
+      const language = document.getElementById("strategy-language").value;
+      const help = document.getElementById("formula-help");
+      help.textContent = language === "formula"
+        ? "Fórmula ejecutable segura. Campos: price, previous_close, change, change_pct, gap_pct, float_shares, rvol, volume, sector, symbol. Operadores: and, or, not; comparaciones; +, -, *, /, %. Funciones: abs(), min(), max()."
+        : language === "python"
+          ? "Subconjunto seguro: una expresión, o def evaluate(stock): return expresión. Acceso solo mediante stock['gap_pct'], stock['volume'], etc. No se permiten imports, loops, asignaciones ni acceso al sistema."
+          : "Subconjunto compatible: plot scan = close > 5; o expresión simple. close/last se mapean al precio y volume al volumen. No admite Average(), datos históricos ni bloques ThinkScript.";
+    }
+    document.getElementById("strategy-language").addEventListener("change", updateLanguageHelp);
+    function clearStrategyForm() {
+      document.getElementById("strategy-form").reset();
+      document.getElementById("strategy-id").value = "";
+      document.getElementById("strategy-editor-title").textContent = "Crear estrategia";
+      updateLanguageHelp();
+    }
+    document.getElementById("strategy-new").addEventListener("click", clearStrategyForm);
+    document.getElementById("strategy-token").addEventListener("change", loadStrategies);
+    document.getElementById("strategy-form").addEventListener("submit", async event => {
+      event.preventDefault();
+      const payload = {
+        id: document.getElementById("strategy-id").value || null,
+        name: document.getElementById("strategy-name").value,
+        language: document.getElementById("strategy-language").value,
+        source: document.getElementById("strategy-source").value
+      };
+      try {
+        const result = await readJson(await fetch("/api/strategies", {
+          method:"POST", headers:strategyHeaders({"Content-Type":"application/json"}), body:JSON.stringify(payload)
+        }));
+        document.getElementById("strategy-id").value = result.strategy.id;
+        document.getElementById("strategy-message").textContent = result.strategy.execution_ready
+          ? "Guardada y validada. Actívala desde la lista para aplicarla a los resultados."
+          : "Guardada. Este lenguaje aún no está habilitado para ejecución.";
+        await loadStrategies();
+      } catch(error) { document.getElementById("strategy-message").textContent = apiMessage(error); }
+    });
+
+
+    function drawCandles(candles) {
+      const svg = document.getElementById("chart-svg");
+      const ns = "http://www.w3.org/2000/svg";
+      svg.replaceChildren();
+      const add = (tag,attrs,textValue) => {
+        const element = document.createElementNS(ns,tag);
+        for (const [key,value] of Object.entries(attrs||{})) element.setAttribute(key,String(value));
+        if (textValue != null) element.textContent = textValue;
+        svg.appendChild(element); return element;
+      };
+      if (!candles.length) {
+        add("text",{x:500,y:160,"text-anchor":"middle",fill:"#718096","font-size":14},"No hay velas reales guardadas para graficar");
+        return;
+      }
+      const valid = candles.filter(c=>[c.open,c.high,c.low,c.close].every(v=>Number.isFinite(Number(v))));
+      if (!valid.length) { add("text",{x:500,y:160,"text-anchor":"middle",fill:"#718096","font-size":14},"Las velas guardadas no contienen OHLC válido"); return; }
+      const min = Math.min(...valid.map(c=>Number(c.low))), max = Math.max(...valid.map(c=>Number(c.high)));
+      const span = max-min || 1, left=62, right=980, top=20, bottom=275, plotH=bottom-top;
+      for(let i=0;i<=4;i++){
+        const y=top+i*plotH/4, value=max-i*span/4;
+        add("line",{x1:left,y1:y,x2:right,y2:y,stroke:"#e4eaf0","stroke-width":1});
+        add("text",{x:left-8,y:y+4,"text-anchor":"end",fill:"#718096","font-size":11},value.toFixed(2));
+      }
+      const step=(right-left)/valid.length, bodyWidth=Math.max(2,Math.min(10,step*0.58));
+      valid.forEach((c,i)=>{
+        const x=left+step*(i+0.5), y=v=>bottom-(Number(v)-min)/span*plotH;
+        const open=y(c.open), close=y(c.close), high=y(c.high), low=y(c.low), rising=Number(c.close)>=Number(c.open), color=rising?"#16845b":"#c34444";
+        add("line",{x1:x,y1:high,x2:x,y2:low,stroke:color,"stroke-width":1.3});
+        add("rect",{x:x-bodyWidth/2,y:Math.min(open,close),width:bodyWidth,height:Math.max(1,Math.abs(close-open)),fill:color,stroke:color});
+      });
+      add("text",{x:left,y:302,fill:"#718096","font-size":11},valid[0].candle_time_ms?new Date(valid[0].candle_time_ms).toLocaleString():"Más antiguas");
+      add("text",{x:right,y:302,"text-anchor":"end",fill:"#718096","font-size":11},valid[valid.length-1].candle_time_ms?new Date(valid[valid.length-1].candle_time_ms).toLocaleString():"Más recientes");
+    }
+
+    document.getElementById("chart-form").addEventListener("submit", async event => {
+      event.preventDefault();
+      const symbol = document.getElementById("chart-symbol").value.trim().toUpperCase();
+      const limit = Math.min(500,Math.max(10,Number(document.getElementById("chart-limit").value)||100));
+      const body = document.getElementById("chart-rows"); body.replaceChildren();
+      document.getElementById("chart-message").textContent = "Cargando velas reales…";
+      try {
+        const payload = await readJson(await fetch("/api/candles/" + encodeURIComponent(symbol) + "?limit=" + limit,{cache:"no-store"}));
+        chartRows = payload.candles || [];
+        drawCandles(chartRows);
+        if (!chartRows.length) {
+          const tr = document.createElement("tr"), td = document.createElement("td"); td.colSpan=6; td.textContent="No hay velas guardadas para "+symbol+". No se muestran datos inventados."; tr.appendChild(td); body.appendChild(tr);
+        } else for (const candle of chartRows) {
+          const tr = document.createElement("tr");
+          for (const value of [candle.candle_time_ms ? new Date(candle.candle_time_ms).toLocaleString() : "—", candle.open, candle.high, candle.low, candle.close, candle.volume]) {
+            const td = document.createElement("td"); td.textContent = value == null ? "—" : String(value); tr.appendChild(td);
+          }
+          body.appendChild(tr);
+        }
+        document.getElementById("chart-message").textContent = symbol + ": " + chartRows.length + " velas guardadas. RVOL: " + (payload.rvol && payload.rvol.rvol != null ? payload.rvol.rvol : "sin datos suficientes");
+      } catch(error) { document.getElementById("chart-message").textContent = apiMessage(error); }
+    });
+
+    function readWatchlist() {
+      try { const value = JSON.parse(localStorage.getItem("tradescanner_watchlist") || "[]"); watchlist = Array.isArray(value) ? value.filter(v=>typeof v==="string") : []; }
+      catch (_) { watchlist = []; }
+    }
+    function renderWatchlist() {
+      readWatchlist();
+      const body = document.getElementById("watchlist-rows"); body.replaceChildren();
+      for (const symbol of watchlist) {
+        const item = allResults.find(row=>row.symbol===symbol);
+        const tr = document.createElement("tr");
+        for (const value of [symbol,item && item.price != null ? "$"+displayNumber(item.price) : "—",item && item.change_pct != null ? displayNumber(item.change_pct)+"%" : "—",item && item.gap_pct != null ? displayNumber(item.gap_pct)+"%" : "—",item ? "Snapshot disponible" : "Sin cotización reciente"]) {
+          const td=document.createElement("td"); td.textContent=value; tr.appendChild(td);
+        }
+        const td=document.createElement("td"), button=document.createElement("button"); button.className="action danger"; button.textContent="Quitar";
+        button.addEventListener("click",()=>{watchlist=watchlist.filter(v=>v!==symbol);localStorage.setItem("tradescanner_watchlist",JSON.stringify(watchlist));renderWatchlist();});
+        td.appendChild(button);tr.appendChild(td);body.appendChild(tr);
+      }
+      if (!watchlist.length) { const tr=document.createElement("tr"),td=document.createElement("td");td.colSpan=6;td.textContent="Tu lista está vacía. Agrega tickers para seguirlos.";tr.appendChild(td);body.appendChild(tr); }
+    }
+    document.getElementById("watchlist-form").addEventListener("submit",event=>{
+      event.preventDefault(); const symbol=document.getElementById("watchlist-symbol").value.trim().toUpperCase();
+      if(!/^[A-Z0-9.\-]{1,15}$/.test(symbol)){document.getElementById("watchlist-message").textContent="Ticker no válido.";return;}
+      readWatchlist(); if(!watchlist.includes(symbol))watchlist.push(symbol);
+      localStorage.setItem("tradescanner_watchlist",JSON.stringify(watchlist));document.getElementById("watchlist-symbol").value="";document.getElementById("watchlist-message").textContent=symbol+" guardado en esta lista del navegador.";renderWatchlist();
+    });
+
+    async function loadSettings() {
+      const target=document.getElementById("settings-cards"); target.replaceChildren();
+      try {
+        const [engine,snapshots,universe]=await Promise.all([
+          readJson(await fetch("/api/engine/status",{cache:"no-store"})),
+          readJson(await fetch("/api/snapshots/status",{cache:"no-store"})),
+          readJson(await fetch("/api/universe/status",{cache:"no-store"})).catch(error=>({universe_error:apiMessage(error)}))
+        ]);
+        const state=engine.state||{};
+        const cards=[
+          ["Proveedor",engine.provider||"—"],
+          ["Escaneo automático",engine.automatic_scan_enabled?"Activado":"Desactivado (sin cambios desde esta pestaña)"],
+          ["Estado del motor",state.status||"—"],
+          ["Último error",state.last_error||"Ninguno reportado"],
+          ["Símbolos en universo",universe.universe_count==null?(universe.universe_error||"No disponible"):Number(universe.universe_count).toLocaleString("en-US")],
+          ["Snapshots guardados",snapshots.snapshot_count==null?"—":Number(snapshots.snapshot_count).toLocaleString("en-US")],
+          ["Símbolos vistos",snapshots.symbols_seen==null?"—":Number(snapshots.symbols_seen).toLocaleString("en-US")],
+          ["Último snapshot",snapshots.latest_snapshot_at||"Sin datos"],
+          ["Durabilidad de SQLite",snapshots.durability_status||"No verificada"]
+        ];
+        for(const [title,value] of cards){const card=document.createElement("div");card.className="data-card";const h=document.createElement("strong");h.textContent=title;const p=document.createElement("p");p.textContent=String(value);p.style.margin="8px 0 0";card.append(h,p);target.appendChild(card);}
+      } catch(error) { target.textContent="No se pudo consultar la configuración: "+apiMessage(error); }
+    }
+    document.getElementById("refresh-settings").addEventListener("click",loadSettings);
+
     refreshScanner();
     window.setInterval(refreshScanner, 15000);
+    loadStrategies();
+    updateLanguageHelp();
   </script>
 </body>
 </html>

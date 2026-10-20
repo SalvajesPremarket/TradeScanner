@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from typing import Any, Callable
 
 from tradescanner.candles import CandleStore, normalize_price_history
+from tradescanner.float_provider import refresh_float_cache
 from tradescanner.snapshots import BATCH_SIZE, SnapshotStore, collect_snapshots
 from tradescanner.schwab import SchwabAPIError, SchwabConfigurationError, get_price_history, get_quotes
 from tradescanner.universe import load_symbol_universe
@@ -98,6 +99,9 @@ def run_scan_cycle(
             raise SchwabAPIError(
                 "Schwab returned no persistable quotes; the universe cursor was not advanced."
             )
+        # FMP is used only for public float. Its cached bulk dataset refreshes at
+        # most daily (six-hour cooldown on failures); it never supplies quotes.
+        float_provider_state = refresh_float_cache(target_store)
         candle_state: dict[str, Any] = {
             "candle_symbol": None,
             "candles_saved": 0,
@@ -141,8 +145,8 @@ def run_scan_cycle(
                     rvol = candle_store.rvol(candidate["symbol"])
                     candle_state["rvol"] = rvol.get("rvol")
                     candle_state["rvol_sessions_used"] = rvol.get("sessions_used", 0)
-                    # FLOAT is sourced only from an explicit Schwab quote field.
-                    # Do not substitute shares outstanding or call a third-party API.
+                    # Preserve Schwab FLOAT when explicit; the API decorates missing
+                    # values from the cached FMP FLOAT dataset without blocking this cycle.
                     candle_state["float_symbol"] = candidate["symbol"] if candidate.get("float_shares") is not None else None
                     candle_state["float_shares"] = candidate.get("float_shares")
                     candle_state["float_source"] = candidate.get("float_source")
@@ -165,6 +169,8 @@ def run_scan_cycle(
             received_count=result["received_count"],
             snapshots_saved=result["snapshots_saved"],
             **candle_state,
+            float_provider_status=float_provider_state.get("status"),
+            float_provider_rows_saved=float_provider_state.get("rows_saved", 0),
             cycles_completed=int(target_store.get_state("cycles_completed", 0)) + 1,
         )
         # Only mark market-data connectivity from provider timestamps that are
