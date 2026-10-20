@@ -32,6 +32,19 @@ class StrategyTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             save_strategy("Unsafe", "formula", "__import__('os').system('echo nope')", store=self.store)
 
+    def test_formula_complexity_and_large_constants_are_rejected(self):
+        with self.assertRaises(ValueError):
+            save_strategy("Too complex", "formula", " and ".join(["True"] * 160), store=self.store)
+        with self.assertRaises(ValueError):
+            save_strategy("Huge string", "formula", repr("x" * 257) + " == 'x'", store=self.store)
+
+    def test_string_repetition_is_bounded_during_evaluation(self):
+        self.assertFalse(formula_matches("'x' * 1000000000 == 'x'", {}))
+
+    def test_boolean_operators_short_circuit_missing_values(self):
+        self.assertFalse(formula_matches("gap_pct > 3 and volume > 10", {"gap_pct": 1, "volume": 100}))
+        self.assertTrue(formula_matches("gap_pct > 3 or volume > 10", {"gap_pct": 1, "volume": 100}))
+
     def test_only_one_formula_strategy_can_be_active(self):
         first = save_strategy("GAP", "formula", "gap_pct >= 3", store=self.store)
         second = save_strategy("Volume", "formula", "volume >= 500000", store=self.store)
