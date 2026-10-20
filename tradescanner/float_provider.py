@@ -141,6 +141,75 @@ def refresh_float_cache(
         }
 
 
+def refresh_symbol_float(
+    store: Any,
+    symbol: str,
+    *,
+    fetcher: Callable[[str, str], list[dict[str, Any]]] | None = None,
+    now: float | None = None,
+) -> dict[str, Any]:
+    """Fetch FLOAT for one scanned symbol when bulk cache misses it.
+
+    This is a bounded fallback: it never fetches quotes and skips existing cached
+    values, so a scan cycle makes at most one targeted FMP request.
+    """
+    api_key = os.getenv("FMP_API_KEY", "").strip()
+    normalized = symbol.strip().upper() if isinstance(symbol, str) else ""
+    if not api_key:
+        return {"status": "not_configured", "provider": "FMP", "symbol": normalized}
+    if not normalized:
+        return {"status": "invalid_symbol", "provider": "FMP"}
+    current = time.time() if now is None else now
+    try:
+        with _connect(store) as connection:
+            cached = connection.execute(
+                "SELECT float_shares, source_date, cached_at FROM float_cache WHERE symbol = ?",
+                (normalized,),
+            ).fetchone()
+        if cached and current - float(cached[2]) < CACHE_TTL_SECONDS:
+            return {"status": "cached", "provider": "FMP", "symbol": normalized}
+        fetch_one = fetcher or (lambda ticker, key: _fetch_symbol_float(ticker, key))
+        items = fetch_one(normalized, api_key)
+        usable = next((item for item in items if isinstance(item, dict)
+                       and str(item.get("symbol", "")).strip().upper() == normalized
+                       and isinstance(item.get("floatShares"), (int, float))
+                       and not isinstance(item.get("floatShares"), bool)
+                       and item.get("floatShares", 0) > 0), None)
+        if usable is None:
+            return {"status": "not_found", "provider": "FMP", "symbol": normalized}
+        value = float(usable["floatShares"])
+        source_date = usable.get("date") if isinstance(usable.get("date"), str) else None
+        with _connect(store) as connection:
+            connection.execute(
+                """INSERT INTO float_cache(symbol, float_shares, source_date, cached_at, source)
+                   VALUES (?, ?, ?, ?, 'fmp')
+                   ON CONFLICT(symbol) DO UPDATE SET
+                     float_shares=excluded.float_shares,
+                     source_date=excluded.source_date,
+                     cached_at=excluded.cached_at,
+                     source=excluded.source""",
+                (normalized, value, source_date, current),
+            )
+        return {"status": "updated", "provider": "FMP", "symbol": normalized,
+                "rows_saved": 1, "float_shares": value}
+    except Exception as exc:
+        return {"status": "unavailable", "provider": "FMP", "symbol": normalized,
+                "error": type(exc).__name__}
+
+
+def _fetch_symbol_float(symbol: str, api_key: str) -> list[dict[str, Any]]:
+    query = urlencode({"symbol": symbol, "apikey": api_key})
+    request = Request(
+        f"https://financialmodelingprep.com/stable/shares-float?{query}",
+        headers={"Accept": "application/json", "User-Agent": "TradeScanner/1.0"},
+    )
+    with urlopen(request, timeout=HTTP_TIMEOUT_SECONDS) as response:
+        payload = json.loads(response.read().decode("utf-8"))
+    if not isinstance(payload, list):
+        raise ValueError("FMP symbol float endpoint returned an unexpected response.")
+    return [item for item in payload if isinstance(item, dict)]
+
+
 def apply_cached_float(rows: list[dict[str, Any]], store: Any) -> list[dict[str, Any]]:
     """Decorate quote rows from local cache only; this function never calls FMP."""
     if not rows:
