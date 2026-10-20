@@ -22,6 +22,11 @@ def normalize_schwab_quotes(payload: dict[str, Any]) -> list[dict[str, Any]]:
     for symbol, record in payload.items():
         if not isinstance(record, dict):
             continue
+        # Some provider responses include an ERRORS metadata entry alongside
+        # quote records. It is not a tradable symbol and must not become a row.
+        normalized_symbol = str(symbol).strip().upper()
+        if normalized_symbol in {"ERROR", "ERRORS"}:
+            continue
         quote = record.get("quote")
         reference = record.get("reference")
         fundamental = record.get("fundamental")
@@ -79,7 +84,7 @@ def normalize_schwab_quotes(payload: dict[str, Any]) -> list[dict[str, Any]]:
             float_shares = None
             float_source = None
         rows.append({
-            "symbol": str(symbol).strip().upper(),
+            "symbol": normalized_symbol,
             "company": reference.get("description"),
             "price": last,
             "previous_close": previous_close,
