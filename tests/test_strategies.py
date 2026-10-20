@@ -7,6 +7,7 @@ from tradescanner.strategies import (
     active_strategy,
     delete_strategy,
     formula_matches,
+    strategy_matches,
     list_strategies,
     save_strategy,
     set_strategy_enabled,
@@ -40,14 +41,31 @@ class StrategyTests(unittest.TestCase):
         items = list_strategies(self.store)
         self.assertEqual(sum(bool(item["enabled"]) for item in items), 1)
 
-    def test_python_and_thinkscript_are_saved_but_cannot_be_activated(self):
-        python_strategy = save_strategy("Python draft", "python", "def evaluate(stock): return True", store=self.store)
-        self.assertFalse(python_strategy["execution_ready"])
+    def test_restricted_python_expression_and_function_are_executable(self):
+        expression = save_strategy("Python expression", "python", "gap_pct >= 3 and volume >= 500000", store=self.store)
+        self.assertTrue(expression["execution_ready"])
+        self.assertTrue(strategy_matches(expression, {"gap_pct": 4, "volume": 800000}))
+        function = save_strategy(
+            "Python function", "python",
+            "def evaluate(stock): return stock['gap_pct'] >= 3 and stock['volume'] >= 500000",
+            store=self.store,
+        )
+        self.assertTrue(strategy_matches(function, {"gap_pct": 4, "volume": 800000}))
+        self.assertFalse(strategy_matches(function, {"gap_pct": 1, "volume": 800000}))
+
+    def test_python_rejects_imports_and_arbitrary_attribute_access(self):
         with self.assertRaises(ValueError):
-            set_strategy_enabled(python_strategy["id"], True, store=self.store)
-        thinkscript = save_strategy("ThinkScript draft", "thinkscript", "plot scan = close > Average(close, 20);", store=self.store)
+            save_strategy("Unsafe import", "python", "import os", store=self.store)
         with self.assertRaises(ValueError):
-            set_strategy_enabled(thinkscript["id"], True, store=self.store)
+            save_strategy("Unsafe attribute", "python", "def evaluate(stock): return stock.__class__", store=self.store)
+
+    def test_simple_thinkscript_style_scan_is_supported_but_history_is_not(self):
+        strategy = save_strategy("ThinkScript", "thinkscript", "plot scan = close > 5;", store=self.store)
+        self.assertTrue(strategy["execution_ready"])
+        self.assertTrue(strategy_matches(strategy, {"price": 10}))
+        self.assertFalse(strategy_matches(strategy, {"price": 4}))
+        with self.assertRaises(ValueError):
+            save_strategy("History unsupported", "thinkscript", "plot scan = close > Average(close, 20);", store=self.store)
 
     def test_edit_preserves_id_and_delete_removes_strategy(self):
         saved = save_strategy("First name", "formula", "price > 5", store=self.store)
