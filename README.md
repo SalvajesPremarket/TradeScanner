@@ -68,6 +68,7 @@ Abrir `http://localhost:8000`; documentación API en `http://localhost:8000/docs
 
 Con Infisical configurado, el callback OAuth guarda el refresh token directamente en el vault y nunca lo muestra en la página. El adaptador lee el token del vault, conserva temporalmente el access token en memoria y persiste cualquier refresh token rotado. Sin Infisical configurado, el callback OAuth no comienza.
 - `TRADESCANNER_SCAN_INTERVAL_SECONDS` (predeterminado 30; mínimo 10)
+- `TRADESCANNER_STRATEGY_ADMIN_TOKEN` (obligatorio para habilitar el editor; crea un secreto largo y aleatorio en variables privadas de Render; no lo publiques ni lo compartas)
 
 No publicar claves o tokens en GitHub ni en el chat. Si una credencial se compartió previamente en texto, rotarla antes de utilizarla.
 
@@ -82,6 +83,8 @@ No desplegar todavía: falta validar datos reales y configurar almacenamiento pe
 ## Interfaz de estrategias (rama en revisión)
 
 - Las pestañas Screener/Acciones, Estrategias, Gráficos, Listas y Configuración consultan datos del servicio; gráficos muestra velas almacenadas, listas se guardan en el navegador y configuración es de solo lectura.
-- Las estrategias con lenguaje **Fórmula** aceptan expresiones restringidas y evaluadas con una lista permitida de operadores y campos; no se ejecuta código arbitrario.
-- Los scripts Python y ThinkScript se pueden guardar como borradores, pero no se pueden activar hasta implementar y validar adaptadores aislados para esos lenguajes.
-- **Requisito de seguridad antes de integrar/desplegar:** la app no tiene autenticación de usuario actualmente. No publicar las rutas de gestión de estrategias en un servicio accesible públicamente hasta protegerlas o restringir el acceso.
+- Las estrategias con lenguaje **Fórmula** usan expresiones restringidas y una lista permitida de operadores y campos.
+- El modo **Python seguro** solo acepta una expresión o `def evaluate(stock): return ...`; únicamente permite leer campos conocidos con `stock["gap_pct"]` y expresiones del evaluador restringido. No ejecuta imports, loops, llamadas arbitrarias ni acceso al sistema.
+- El modo **ThinkScript** acepta solo expresiones simples de escaneo, como `plot scan = close > 5;`. No implementa indicadores que requieren historial, como `Average()`, ni todo el lenguaje ThinkScript.
+- Todas las rutas de administración de estrategias requieren `X-Strategy-Admin-Token` y la variable privada `TRADESCANNER_STRATEGY_ADMIN_TOKEN`. Si no se configura, las rutas quedan bloqueadas. El token se introduce en el editor y no se guarda en localStorage.
+- El token compartido es una barrera de acceso a la administración, no un sistema de cuentas individuales. No se deben compartir enlaces o claves en público; HTTPS es obligatorio en producción.
