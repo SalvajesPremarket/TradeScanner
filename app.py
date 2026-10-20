@@ -202,10 +202,13 @@ def snapshots_latest(limit: int = Query(100, ge=1, le=1000)):
 
 def _authorize_strategy_access(request: Request) -> None:
     expected = os.getenv("TRADESCANNER_STRATEGY_ADMIN_TOKEN", "").strip()
-    if not expected:
+    if len(expected) < 32:
         raise HTTPException(
             status_code=503,
-            detail="Editor de estrategias bloqueado: configura TRADESCANNER_STRATEGY_ADMIN_TOKEN en el entorno privado del servicio.",
+            detail=(
+                "Editor de estrategias bloqueado: configura TRADESCANNER_STRATEGY_ADMIN_TOKEN "
+                "con al menos 32 caracteres aleatorios en el entorno privado del servicio."
+            ),
         )
     supplied = request.headers.get("x-strategy-admin-token", "")
     if not supplied or not hmac.compare_digest(supplied, expected):
