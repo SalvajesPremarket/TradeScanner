@@ -10,6 +10,7 @@ import json
 import os
 import sqlite3
 import time
+import urllib.error
 from datetime import datetime, timezone
 from typing import Any, Callable
 from urllib.parse import urlencode
@@ -131,6 +132,14 @@ def refresh_float_cache(
             "pages_fetched": page + 1,
             "updated_at": datetime.fromtimestamp(current, timezone.utc).isoformat(),
         }
+    except urllib.error.HTTPError as exc:
+        # HTTP status is actionable and safe; never expose provider bodies or keys.
+        return {
+            "status": "unavailable",
+            "provider": "FMP",
+            "rows_saved": 0,
+            "error": f"HTTP {exc.code}",
+        }
     except Exception as exc:
         # Only record the exception class; never expose keys, URLs, or provider bodies.
         return {
@@ -197,6 +206,9 @@ def refresh_symbol_float(
             )
         return {"status": "updated", "provider": "FMP", "symbol": normalized,
                 "rows_saved": 1, "float_shares": value}
+    except urllib.error.HTTPError as exc:
+        return {"status": "unavailable", "provider": "FMP", "symbol": normalized,
+                "error": f"HTTP {exc.code}"}
     except Exception as exc:
         return {"status": "unavailable", "provider": "FMP", "symbol": normalized,
                 "error": type(exc).__name__}
