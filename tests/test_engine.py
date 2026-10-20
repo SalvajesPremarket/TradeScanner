@@ -100,6 +100,46 @@ class AutomaticEngineTests(unittest.TestCase):
             self.assertEqual(store.stats()["snapshot_count"], 0)
 
 
+    def test_scan_status_reports_cached_float_value(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = SnapshotStore(Path(directory) / "engine.sqlite3")
+            with store._connect() as connection:
+                connection.execute(
+                    """CREATE TABLE float_cache (
+                        symbol TEXT PRIMARY KEY, float_shares REAL NOT NULL,
+                        source_date TEXT, cached_at REAL NOT NULL, source TEXT NOT NULL
+                    )"""
+                )
+                connection.execute(
+                    "INSERT INTO float_cache VALUES (?, ?, ?, ?, ?)",
+                    ("AAPL", 123456.0, "2026-10-01", 100000.0, "fmp"),
+                )
+
+            def fetch(batch):
+                return {symbol: {
+                    "quote": {"lastPrice": 11.0, "closePrice": 10.0, "totalVolume": 1000},
+                    "reference": {"description": symbol},
+                } for symbol in batch}
+
+            with patch.dict(os.environ, {
+                "SCHWAB_CLIENT_ID": "test-id",
+                "SCHWAB_CLIENT_SECRET": "test-secret",
+                "SCHWAB_REFRESH_TOKEN": "test-refresh",
+            }), patch("tradescanner.engine.refresh_float_cache", return_value={
+                "status": "cached", "provider": "FMP", "rows_saved": 0
+            }), patch("tradescanner.engine.refresh_symbol_float", return_value={
+                "status": "cached", "provider": "FMP", "symbol": "AAPL"
+            }):
+                result = run_scan_cycle(
+                    store, universe_loader=lambda: {"symbols": ["AAPL"]}, quote_fetcher=fetch
+                )
+
+            self.assertEqual(result["targeted_float_status"], "cached")
+            self.assertEqual(result["float_symbol"], "AAPL")
+            self.assertEqual(result["float_shares"], 123456.0)
+            self.assertEqual(result["float_as_of"], "2026-10-01")
+            self.assertEqual(result["float_source"], "fmp")
+
     def test_scan_cycle_saves_candidate_candles_and_computes_rvol(self):
         with tempfile.TemporaryDirectory() as directory:
             store = SnapshotStore(Path(directory) / "engine.sqlite3")
