@@ -137,6 +137,22 @@ def run_scan_cycle(
             targeted_float_state = {"status": "unavailable", "provider": "FMP", "error": type(exc).__name__}
         if targeted_float_state.get("status") in {"unavailable", "not_found", "cooldown", "not_configured"}:
             candle_state["float_error"] = targeted_float_state.get("error") or targeted_float_state["status"]
+        # Reflect cached/updated FLOAT in engine diagnostics too. The endpoint
+        # decorates displayed snapshots from this cache, but engine status used
+        # to misleadingly show null even when a targeted cache hit had succeeded.
+        float_status_symbol = targeted_float_state.get("symbol")
+        if isinstance(float_status_symbol, str) and float_status_symbol:
+            try:
+                from tradescanner.float_provider import apply_cached_float
+                float_status_row = {"symbol": float_status_symbol, "float_shares": targeted_float_state.get("float_shares"),
+                                    "float_source": None, "float_as_of": None}
+                apply_cached_float([float_status_row], target_store)
+                candle_state["float_symbol"] = float_status_symbol if float_status_row.get("float_shares") is not None else None
+                candle_state["float_shares"] = float_status_row.get("float_shares")
+                candle_state["float_as_of"] = float_status_row.get("float_as_of")
+                candle_state["float_source"] = float_status_row.get("float_source")
+            except (OSError, RuntimeError, sqlite3.Error, ValueError):
+                pass
 
         # One bounded historical request per successful quote cycle. Prefer the
         # strongest observed GAP from this batch; never block quote persistence
