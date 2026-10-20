@@ -107,6 +107,8 @@ def status():
         "service": "TradeScanner",
         "provider": "Schwab",
         "provider_configured": configured,
+        "infisical_configured": infisical_is_configured(),
+        "float_provider_configured": bool(os.getenv("FMP_API_KEY", "").strip()),
         "market_data_connected": connected,
         "results_published": results_published,
         "engine_status": engine.get("status", "starting"),
