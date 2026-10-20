@@ -135,6 +135,8 @@ def run_scan_cycle(
                 targeted_float_state = {"status": "not_needed", "provider": "FMP"}
         except Exception as exc:
             targeted_float_state = {"status": "unavailable", "provider": "FMP", "error": type(exc).__name__}
+        if targeted_float_state.get("status") in {"unavailable", "not_found", "cooldown", "not_configured"}:
+            candle_state["float_error"] = targeted_float_state.get("error") or targeted_float_state["status"]
 
         # One bounded historical request per successful quote cycle. Prefer the
         # strongest observed GAP from this batch; never block quote persistence
