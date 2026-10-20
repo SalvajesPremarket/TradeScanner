@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from typing import Any, Callable
 
 from tradescanner.candles import CandleStore, normalize_price_history
-from tradescanner.float_provider import refresh_float_cache
+from tradescanner.float_provider import refresh_float_cache, refresh_symbol_float
 from tradescanner.infisical_vault import is_configured as infisical_is_configured
 from tradescanner.snapshots import BATCH_SIZE, SnapshotStore, collect_snapshots
 from tradescanner.schwab import SchwabAPIError, SchwabConfigurationError, get_price_history, get_quotes
@@ -119,6 +119,23 @@ def run_scan_cycle(
             "float_source": None,
             "float_error": None,
         }
+        # If Schwab does not provide FLOAT, fill the current scan candidate from
+        # FMP's symbol endpoint. This is at most one additional bounded request per cycle.
+        try:
+            latest_rows_for_float = target_store.latest_for_symbols(batch)
+            missing_float = [row for row in latest_rows_for_float
+                             if row.get("float_shares") is None and isinstance(row.get("symbol"), str)]
+            if missing_float:
+                float_candidate = max(
+                    missing_float,
+                    key=lambda row: row.get("volume") if isinstance(row.get("volume"), (int, float)) else -1,
+                )
+                targeted_float_state = refresh_symbol_float(target_store, float_candidate["symbol"])
+            else:
+                targeted_float_state = {"status": "not_needed", "provider": "FMP"}
+        except Exception as exc:
+            targeted_float_state = {"status": "unavailable", "provider": "FMP", "error": type(exc).__name__}
+
         # One bounded historical request per successful quote cycle. Prefer the
         # strongest observed GAP from this batch; never block quote persistence
         # or cursor progress if the separate candle endpoint is unavailable.
@@ -176,6 +193,8 @@ def run_scan_cycle(
             **candle_state,
             float_provider_status=float_provider_state.get("status"),
             float_provider_rows_saved=float_provider_state.get("rows_saved", 0),
+            targeted_float_status=targeted_float_state.get("status"),
+            targeted_float_symbol=targeted_float_state.get("symbol"),
             cycles_completed=int(target_store.get_state("cycles_completed", 0)) + 1,
         )
         # Only mark market-data connectivity from provider timestamps that are
