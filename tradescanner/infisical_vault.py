@@ -92,7 +92,12 @@ def _access_token() -> str:
             },
             method="POST",
         )
-        payload = _json_request(request)
+        try:
+            payload = _json_request(request)
+        except urllib.error.HTTPError as exc:
+            # A missing/invalid auth route must become a safe integration error,
+            # never an unhandled urllib exception in a FastAPI request.
+            raise InfisicalError(f"Infisical authentication failed (HTTP {exc.code}).") from None
         data = payload.get("data", payload)
         token = data.get("accessToken") if isinstance(data, dict) else None
         if not isinstance(token, str) or not token:
