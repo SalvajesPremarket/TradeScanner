@@ -4,6 +4,16 @@ from tradescanner.core import apply_filters, normalize_schwab_quotes
 
 
 class NormalizeSchwabQuotesTests(unittest.TestCase):
+    def test_ignores_provider_errors_metadata_entry(self):
+        rows = normalize_schwab_quotes({
+            "ERRORS": {"error": "provider returned a per-symbol error"},
+            "AAPL": {
+                "quote": {"lastPrice": 100, "closePrice": 99, "totalVolume": 1000},
+                "reference": {"description": "Apple Inc."},
+            },
+        })
+        self.assertEqual([row["symbol"] for row in rows], ["AAPL"])
+
     def test_normalizes_present_quote_fields_and_calculates_gap(self):
         rows = normalize_schwab_quotes({
             "aapl": {
