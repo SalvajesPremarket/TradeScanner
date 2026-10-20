@@ -187,5 +187,26 @@ class AppEntrypointTests(unittest.TestCase):
         self.assertEqual(result["active_strategy"]["id"], "strategy-1")
 
 
+    def test_all_five_navigation_tabs_have_matching_panels_and_handlers(self):
+        html = (app_module.ROOT / "index.html").read_text(encoding="utf-8")
+        tabs = {
+            "screener": None,
+            "strategies": "tab-strategies",
+            "charts": "tab-charts",
+            "lists": "tab-lists",
+            "settings": "tab-settings",
+        }
+        for tab, panel_id in tabs.items():
+            with self.subTest(tab=tab):
+                self.assertIn(f'data-tab="{tab}"', html)
+                if panel_id:
+                    self.assertIn(f'id="{panel_id}"', html)
+                self.assertIn('button.addEventListener("click", () => showTab(button.dataset.tab))', html)
+        self.assertIn("function showTab(name)", html)
+        self.assertIn('name === "strategies"', html)
+        self.assertIn('name === "lists"', html)
+        self.assertIn('name === "settings"', html)
+
+
 if __name__ == "__main__":
     unittest.main()
