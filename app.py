@@ -128,7 +128,7 @@ def engine_status():
         "cycle_interval_seconds": interval,
         "batch_size": 100,
         "provider": "Schwab",
-        "float_provider": "Schwab (only if explicit float fields are returned)",
+        "float_provider": "Schwab first; FMP cache for FLOAT only when FMP_API_KEY is configured",
         "state": state or {"status": "starting"},
     }
 
