@@ -12,6 +12,7 @@ from fastapi.responses import FileResponse
 
 from tradescanner.candles import CandleStore
 from tradescanner.core import apply_filters, normalize_schwab_quotes
+from tradescanner.float_provider import apply_cached_float
 from tradescanner.engine import get_engine_status, record_engine_status, run_scan_cycle
 from tradescanner.snapshots import SnapshotStore, collect_snapshots
 from tradescanner.strategies import (active_strategy, delete_strategy, strategy_matches, list_strategies, save_strategy, set_strategy_enabled)
