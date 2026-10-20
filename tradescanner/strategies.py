@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import ast
+import math
 import operator
 import re
 import uuid
@@ -68,7 +69,7 @@ def _validate_formula(source: str) -> ast.Expression:
                 raise ValueError("Las cadenas de texto son demasiado largas.")
             if isinstance(node.value, int) and not isinstance(node.value, bool) and node.value.bit_length() > MAX_INTEGER_BITS:
                 raise ValueError("El número entero supera el límite permitido.")
-            if isinstance(node.value, float) and (not __import__("math").isfinite(node.value) or abs(node.value) > 1e100):
+            if isinstance(node.value, float) and (not math.isfinite(node.value) or abs(node.value) > 1e100):
                 raise ValueError("El número está fuera del rango permitido.")
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in {"min", "max"} and len(node.args) > 20:
             raise ValueError("min() y max() admiten como máximo 20 argumentos.")
@@ -143,7 +144,7 @@ def _eval(node: ast.AST, row: dict[str, Any]) -> Any:
         result = _BINARY[type(node.op)](left, right)
         if isinstance(result, int) and not isinstance(result, bool) and result.bit_length() > MAX_INTEGER_BITS:
             return None
-        if isinstance(result, float) and (not __import__("math").isfinite(result) or abs(result) > 1e100):
+        if isinstance(result, float) and (not math.isfinite(result) or abs(result) > 1e100):
             return None
         return result
     if isinstance(node, ast.Compare):
