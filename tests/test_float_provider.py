@@ -81,6 +81,39 @@ class FMPFloatProviderTests(unittest.TestCase):
         self.assertEqual(second["status"], "cooldown")
         self.assertEqual(calls, ["AAPL"])
 
+    def test_targeted_http_429_triggers_global_cooldown_for_other_symbols(self):
+        import urllib.error
+        error = urllib.error.HTTPError(
+            "https://provider.invalid/endpoint", 429, "rate limited", {}, None
+        )
+        calls = []
+        def fail(symbol, key):
+            calls.append(symbol)
+            raise error
+        with patch.dict(os.environ, {"FMP_API_KEY": "test-key"}):
+            first = refresh_symbol_float(self.store, "AAPL", fetcher=fail, now=100000)
+            second = refresh_symbol_float(
+                self.store, "MSFT", fetcher=lambda *_: self.fail("global cooldown should prevent request"), now=100001
+            )
+        self.assertEqual(first["status"], "unavailable")
+        self.assertEqual(first["error"], "HTTP 429")
+        self.assertEqual(second["status"], "cooldown")
+        self.assertEqual(calls, ["AAPL"])
+
+    def test_targeted_global_cooldown_expires_after_six_hours(self):
+        import urllib.error
+        error = urllib.error.HTTPError(
+            "https://provider.invalid/endpoint", 429, "rate limited", {}, None
+        )
+        with patch.dict(os.environ, {"FMP_API_KEY": "test-key"}):
+            refresh_symbol_float(self.store, "AAPL", fetcher=lambda *_: (_ for _ in ()).throw(error), now=100000)
+            result = refresh_symbol_float(
+                self.store, "MSFT",
+                fetcher=lambda symbol, key: [{"symbol": symbol, "floatShares": 123456}],
+                now=100000 + 6 * 60 * 60 + 1,
+            )
+        self.assertEqual(result["status"], "updated")
+
     def test_existing_schwab_float_is_never_overwritten(self):
         with patch.dict(os.environ, {"FMP_API_KEY": "test-key"}):
             refresh_float_cache(
