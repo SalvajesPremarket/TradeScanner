@@ -1,4 +1,5 @@
 import asyncio
+import hmac
 import os
 import sqlite3
 import time
@@ -6,14 +7,14 @@ from datetime import datetime, timezone
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Query, Body
+from fastapi import FastAPI, HTTPException, Query, Body, Request
 from fastapi.responses import FileResponse
 
 from tradescanner.candles import CandleStore
 from tradescanner.core import apply_filters, normalize_schwab_quotes
 from tradescanner.engine import get_engine_status, record_engine_status, run_scan_cycle
 from tradescanner.snapshots import SnapshotStore, collect_snapshots
-from tradescanner.strategies import (active_strategy, delete_strategy, formula_matches, list_strategies, save_strategy, set_strategy_enabled)
+from tradescanner.strategies import (active_strategy, delete_strategy, strategy_matches, list_strategies, save_strategy, set_strategy_enabled)
 from tradescanner.universe import UniverseUnavailableError, load_symbol_universe
 from tradescanner.oauth import router as oauth_router
 from tradescanner.schwab import (
@@ -185,14 +186,28 @@ def snapshots_latest(limit: int = Query(100, ge=1, le=1000)):
         raise HTTPException(status_code=503, detail="Snapshot storage is unavailable.") from None
 
 
+def _authorize_strategy_access(request: Request) -> None:
+    expected = os.getenv("TRADESCANNER_STRATEGY_ADMIN_TOKEN", "").strip()
+    if not expected:
+        raise HTTPException(
+            status_code=503,
+            detail="Editor de estrategias bloqueado: configura TRADESCANNER_STRATEGY_ADMIN_TOKEN en el entorno privado del servicio.",
+        )
+    supplied = request.headers.get("x-strategy-admin-token", "")
+    if not supplied or not hmac.compare_digest(supplied, expected):
+        raise HTTPException(status_code=401, detail="Clave del editor incorrecta o ausente.")
+
+
 @app.get("/api/strategies")
-def strategies_list():
+def strategies_list(request: Request):
+    _authorize_strategy_access(request)
     """List saved strategies without exposing any execution environment."""
     return {"strategies": list_strategies()}
 
 
 @app.post("/api/strategies")
-def strategies_save(payload: dict = Body(...)):
+def strategies_save(request: Request, payload: dict = Body(...)):
+    _authorize_strategy_access(request)
     try:
         strategy = save_strategy(
             name=payload.get("name", ""),
@@ -208,7 +223,8 @@ def strategies_save(payload: dict = Body(...)):
 
 
 @app.post("/api/strategies/{strategy_id}/activate")
-def strategies_activate(strategy_id: str, payload: dict = Body(...)):
+def strategies_activate(strategy_id: str, request: Request, payload: dict = Body(...)):
+    _authorize_strategy_access(request)
     enabled = payload.get("enabled")
     if not isinstance(enabled, bool):
         raise HTTPException(status_code=400, detail="enabled debe ser true o false.")
@@ -221,7 +237,8 @@ def strategies_activate(strategy_id: str, payload: dict = Body(...)):
 
 
 @app.delete("/api/strategies/{strategy_id}")
-def strategies_delete(strategy_id: str):
+def strategies_delete(strategy_id: str, request: Request):
+    _authorize_strategy_access(request)
     try:
         delete_strategy(strategy_id)
         return {"deleted": True, "id": strategy_id}
@@ -230,7 +247,8 @@ def strategies_delete(strategy_id: str):
 
 
 @app.get("/api/strategies/active-matches")
-def strategies_active_matches():
+def strategies_active_matches(request: Request):
+    _authorize_strategy_access(request)
     strategy = active_strategy()
     if not strategy:
         return {"strategy": None, "symbols": []}
@@ -242,7 +260,7 @@ def strategies_active_matches():
     matches = [
         row.get("symbol") for row in rows
         if row.get("symbol") and row.get("quote_is_fresh") is not False
-        and formula_matches(strategy["source"], row)
+        and strategy_matches(strategy, row)
     ]
     return {"strategy": {"id": strategy["id"], "name": strategy["name"]}, "symbols": matches}
 
