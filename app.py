@@ -98,12 +98,17 @@ def status():
             connected = -30 <= quote_age_seconds <= 300
         except (TypeError, ValueError, OverflowError):
             connected = False
+    try:
+        latest_rows = SnapshotStore().latest(limit=1000)
+        results_published = sum(1 for row in latest_rows if row.get("quote_is_fresh") is True)
+    except (OSError, RuntimeError, sqlite3.Error, ValueError):
+        results_published = 0
     return {
         "service": "TradeScanner",
         "provider": "Schwab",
         "provider_configured": configured,
         "market_data_connected": connected,
-        "results_published": 0,
+        "results_published": results_published,
         "engine_status": engine.get("status", "starting"),
         "message": (
             "Schwab quotes were received within the last five minutes."
