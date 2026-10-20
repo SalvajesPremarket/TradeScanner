@@ -62,8 +62,11 @@ def refresh_float_cache(
         return {"status": "not_configured", "provider": "FMP", "rows_saved": 0}
 
     current = time.time() if now is None else now
-    last_success = store.get_state("fmp_float_last_success_at", 0)
-    last_attempt = store.get_state("fmp_float_last_attempt_at", 0)
+    try:
+        last_success = store.get_state("fmp_float_last_success_at", 0)
+        last_attempt = store.get_state("fmp_float_last_attempt_at", 0)
+    except Exception as exc:
+        return {"status": "unavailable", "provider": "FMP", "rows_saved": 0, "error": type(exc).__name__}
     try:
         last_success = float(last_success or 0)
         last_attempt = float(last_attempt or 0)
@@ -76,7 +79,10 @@ def refresh_float_cache(
         return {"status": "cooldown", "provider": "FMP", "rows_saved": 0}
 
     # Persist the attempt before networking, preventing rapid retry loops after a crash.
-    store.set_state("fmp_float_last_attempt_at", current)
+    try:
+        store.set_state("fmp_float_last_attempt_at", current)
+    except Exception as exc:
+        return {"status": "unavailable", "provider": "FMP", "rows_saved": 0, "error": type(exc).__name__}
     fetch_page = fetcher or (lambda page, key: _fetch_page(page, key))
     records: dict[str, tuple[float, str | None]] = {}
     try:
