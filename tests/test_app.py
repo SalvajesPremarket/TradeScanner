@@ -147,6 +147,24 @@ class AppEntrypointTests(unittest.TestCase):
         self.assertEqual(raised.exception.status_code, 400)
         self.assertIn("100 unique symbols", raised.exception.detail)
 
+    def test_active_strategy_filters_snapshots_and_excludes_explicitly_stale_quotes(self):
+        rows = [
+            {"symbol": "AAA", "gap_pct": 4, "quote_is_fresh": True},
+            {"symbol": "BBB", "gap_pct": 2, "quote_is_fresh": True},
+            {"symbol": "CCC", "gap_pct": 5, "quote_is_fresh": False},
+        ]
+        with patch("app.SnapshotStore") as store_class, patch("app.CandleStore") as candle_class, patch(
+            "app.active_strategy",
+            return_value={"id": "strategy-1", "name": "GAP mínimo", "language": "formula", "source": "gap_pct >= 3", "enabled": True},
+        ), patch("app.strategy_matches", side_effect=lambda strategy, row: row.get("gap_pct", 0) >= 3):
+            store = store_class.return_value
+            store.latest.return_value = rows
+            store.path = "unused-test-db"
+            candle_class.return_value.rvol.return_value = {"rvol": None, "sessions_used": 0}
+            result = app_module.snapshots_latest(limit=100)
+        self.assertEqual([row["symbol"] for row in result["results"]], ["AAA"])
+        self.assertEqual(result["active_strategy"]["id"], "strategy-1")
+
 
 if __name__ == "__main__":
     unittest.main()
