@@ -168,6 +168,11 @@ def refresh_symbol_float(
             ).fetchone()
         if cached and current - float(cached[2]) < CACHE_TTL_SECONDS:
             return {"status": "cached", "provider": "FMP", "symbol": normalized}
+        attempt_key = f"fmp_float_symbol_attempt_{normalized}"
+        last_attempt = float(store.get_state(attempt_key, 0) or 0)
+        if current - last_attempt < FAILURE_COOLDOWN_SECONDS:
+            return {"status": "cooldown", "provider": "FMP", "symbol": normalized}
+        store.set_state(attempt_key, current)
         fetch_one = fetcher or (lambda ticker, key: _fetch_symbol_float(ticker, key))
         items = fetch_one(normalized, api_key)
         usable = next((item for item in items if isinstance(item, dict)
