@@ -127,17 +127,17 @@ class AppEntrypointTests(unittest.TestCase):
             with self.assertRaises(HTTPException) as missing:
                 app_module._authorize_strategy_access(request)
         self.assertEqual(missing.exception.status_code, 503)
-        with patch.dict(os.environ, {"TRADESCANNER_STRATEGY_ADMIN_TOKEN": "expected-secret"}):
+        with patch.dict(os.environ, {"TRADESCANNER_STRATEGY_ADMIN_TOKEN": "expected-secret-value-that-is-long-enough-32"}):
             with self.assertRaises(HTTPException) as wrong:
                 app_module._authorize_strategy_access(request)
         self.assertEqual(wrong.exception.status_code, 401)
         authorized = Request({
             "type": "http", "method": "GET", "path": "/api/strategies",
-            "headers": [(b"x-strategy-admin-token", b"expected-secret")],
+            "headers": [(b"x-strategy-admin-token", b"expected-secret-value-that-is-long-enough-32")],
             "query_string": b"", "server": ("test", 443), "scheme": "https",
             "client": ("test", 123), "root_path": "",
         })
-        with patch.dict(os.environ, {"TRADESCANNER_STRATEGY_ADMIN_TOKEN": "expected-secret"}):
+        with patch.dict(os.environ, {"TRADESCANNER_STRATEGY_ADMIN_TOKEN": "expected-secret-value-that-is-long-enough-32"}):
             self.assertIsNone(app_module._authorize_strategy_access(authorized))
 
     def test_all_strategy_admin_endpoints_fail_closed_without_private_token(self):
