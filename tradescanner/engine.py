@@ -10,6 +10,7 @@ from typing import Any, Callable
 
 from tradescanner.candles import CandleStore, normalize_price_history
 from tradescanner.float_provider import refresh_float_cache
+from tradescanner.infisical_vault import is_configured as infisical_is_configured
 from tradescanner.snapshots import BATCH_SIZE, SnapshotStore, collect_snapshots
 from tradescanner.schwab import SchwabAPIError, SchwabConfigurationError, get_price_history, get_quotes
 from tradescanner.universe import load_symbol_universe
@@ -26,9 +27,13 @@ def _now() -> str:
 
 
 def _credentials_configured() -> bool:
-    return all(os.getenv(key, "").strip() for key in (
-        "SCHWAB_CLIENT_ID", "SCHWAB_CLIENT_SECRET", "SCHWAB_REFRESH_TOKEN"
+    has_schwab_client = all(os.getenv(key, "").strip() for key in (
+        "SCHWAB_CLIENT_ID", "SCHWAB_CLIENT_SECRET"
     ))
+    # The refresh token may live exclusively in Infisical after OAuth bootstrap.
+    # Do not block the engine merely because the bootstrap env var is absent.
+    has_refresh_token_source = bool(os.getenv("SCHWAB_REFRESH_TOKEN", "").strip()) or infisical_is_configured()
+    return has_schwab_client and has_refresh_token_source
 
 
 def _load_cached_universe(loader: Callable[[], dict[str, Any]] | None = None) -> dict[str, Any]:

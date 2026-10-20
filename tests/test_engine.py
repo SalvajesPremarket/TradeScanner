@@ -175,5 +175,36 @@ class AutomaticEngineTests(unittest.TestCase):
             self.assertEqual(requested_history, ["LIQUID"])
 
 
+    def test_infisical_can_supply_refresh_token_without_render_refresh_variable(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = SnapshotStore(Path(directory) / "engine.sqlite3")
+            env = {
+                "SCHWAB_CLIENT_ID": "test-id",
+                "SCHWAB_CLIENT_SECRET": "test-secret",
+                "SCHWAB_REFRESH_TOKEN": "",
+                "INFISICAL_CLIENT_ID": "vault-client",
+                "INFISICAL_CLIENT_SECRET": "vault-secret",
+                "INFISICAL_PROJECT_ID": "project-id",
+                "INFISICAL_ENVIRONMENT": "prod",
+            }
+            def fetch(batch):
+                return {symbol: {
+                    "quote": {"lastPrice": 10.0, "closePrice": 9.0},
+                    "reference": {"description": symbol},
+                } for symbol in batch}
+
+            with patch.dict(os.environ, env, clear=True), patch(
+                "tradescanner.engine.infisical_is_configured", return_value=True
+            ):
+                result = run_scan_cycle(
+                    store,
+                    universe_loader=lambda: {"symbols": ["AAPL"]},
+                    quote_fetcher=fetch,
+                )
+
+            self.assertEqual(result["status"], "running")
+            self.assertEqual(result["received_count"], 1)
+
+
 if __name__ == "__main__":
     unittest.main()
