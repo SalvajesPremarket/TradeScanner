@@ -175,7 +175,7 @@
         ];
         if (floatOn && (item.float_shares === null || item.float_shares === undefined)) return false;
         // Do not present explicitly stale provider quotes as current radar results.
-        if (item.quote_is_fresh === false) return false;
+        if (item.quote_is_fresh !== true) return false;
         for (const [threshold, actual, mode] of checks) {
           if (threshold === null) continue;
           if (actual === null || actual === undefined || !Number.isFinite(Number(actual))) return false;
@@ -262,7 +262,7 @@
         // rows that are not actual tickers. Unknown freshness is preserved for
         // backwards compatibility with older snapshots.
         allResults = (Array.isArray(snapshotPayload.results) ? snapshotPayload.results : [])
-          .filter(item => item && item.symbol !== "ERROR" && item.symbol !== "ERRORS" && item.quote_is_fresh !== false);
+          .filter(item => item && item.symbol !== "ERROR" && item.symbol !== "ERRORS" && item.quote_is_fresh === true);
         applyFilters();
         if (activeStrategyId) loadStrategies();
         if (state.status === "waiting_for_credentials") {
