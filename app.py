@@ -182,6 +182,8 @@ def snapshots_latest(limit: int = Query(100, ge=1, le=1000)):
             row.setdefault("float_shares", None)
             row.setdefault("float_as_of", None)
             row.setdefault("float_source", None)
+        # Fill missing FLOAT from the local FMP cache; never call FMP from UI requests.
+        apply_cached_float(rows, store)
         selected_strategy = active_strategy()
         if selected_strategy:
             rows = [
