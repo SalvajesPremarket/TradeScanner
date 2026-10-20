@@ -12,7 +12,7 @@ Reconstrucción limpia e independiente. No importar ni recuperar código de sist
 - Caché temporal del token de acceso Schwab con renovación anticipada.
 - Captura acotada de velas intradía para un candidato de cada lote de cotizaciones; se guarda OHLCV de Schwab en SQLite.
 - RVOL intradía calculado como volumen acumulado de la sesión actual frente al promedio acumulado de hasta cinco sesiones anteriores a la misma hora de Nueva York. Se excluyen sesiones históricas incompletas; si no hay historial suficiente, devuelve `null`.
-- FLOAT: se acepta únicamente si Schwab devuelve un campo explícito `floatShares`. Schwab normalmente expone `sharesOutstanding`, que no equivale a FLOAT; nunca se usa como sustituto. Si no hay un campo FLOAT verificable, el valor queda `null` y el filtro FLOAT no incluye ese símbolo.
+- FLOAT: primero se utiliza un campo FLOAT explícito de Schwab si está disponible. Como fuente secundaria opcional, FMP se consulta exclusivamente para FLOAT mediante su endpoint de flotación; nunca para cotizaciones, volumen, GAP ni RVOL. El conjunto de flotación se guarda en SQLite y se refresca como máximo una vez cada 24 horas; si FMP falla, se aplica una pausa de seis horas antes de reintentar. La interfaz solo lee la caché local, por lo que actualizar la tabla no genera solicitudes FMP. `sharesOutstanding` nunca se usa como sustituto de FLOAT.
 - Interfaz conectada a snapshots guardados, estado del motor y RVOL calculado cuando existe historial.
 - Las credenciales nunca se guardan en el repositorio.
 
@@ -39,7 +39,7 @@ Reconstrucción limpia e independiente. No importar ni recuperar código de sist
 - Probar autenticación y cotizaciones reales de Schwab en un entorno seguro antes de declarar la conexión validada.
 - Mejorar la cobertura de velas: por límite de solicitudes, el ciclo captura velas para un candidato por lote, no para todo el universo en cada ciclo.
 - Verificar frescura de las velas y el comportamiento de RVOL con sesiones reales y datos extendidos de Schwab.
-- Confirmar con respuestas reales de Schwab si el endpoint autorizado para esta cuenta devuelve un campo FLOAT explícito; la documentación habitual de cotizaciones expone `sharesOutstanding`, no un número de float shares. Si no lo devuelve, FLOAT permanece `null` sin proveedor externo.
+- Configurar `FMP_API_KEY` como secreto privado en Render para habilitar el proveedor secundario de FLOAT. Sin esa variable, FMP permanece deshabilitado y el scanner sigue funcionando con Schwab; no se necesita ni se consulta FMP para otros campos.
 - Conectar almacenamiento SQLite a disco persistente de Render antes de despliegues productivos.
 - Ejecutar y verificar CI después de estos cambios, revisar límites de API y completar prueba end-to-end.
 - Los filtros actuales funcionan en la interfaz sobre snapshots reales almacenados; solo filtran los datos que estén disponibles y no fabrican valores.
