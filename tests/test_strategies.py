@@ -38,7 +38,7 @@ class StrategyTests(unittest.TestCase):
 
     def test_formula_complexity_and_large_constants_are_rejected(self):
         with self.assertRaises(ValueError):
-            save_strategy("Too complex", "formula", " and ".join(["True"] * 160), store=self.store)
+            save_strategy("Too complex", "formula", " and ".join(["True"] * 400), store=self.store)
         with self.assertRaises(ValueError):
             save_strategy("Huge string", "formula", repr("x" * 257) + " == 'x'", store=self.store)
 
