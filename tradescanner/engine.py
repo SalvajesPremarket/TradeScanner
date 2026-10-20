@@ -145,8 +145,8 @@ def run_scan_cycle(
                     rvol = candle_store.rvol(candidate["symbol"])
                     candle_state["rvol"] = rvol.get("rvol")
                     candle_state["rvol_sessions_used"] = rvol.get("sessions_used", 0)
-                    # FLOAT is sourced only from an explicit Schwab quote field.
-                    # Do not substitute shares outstanding or call a third-party API.
+                    # Preserve Schwab FLOAT when explicit; the API decorates missing
+                    # values from the cached FMP FLOAT dataset without blocking this cycle.
                     candle_state["float_symbol"] = candidate["symbol"] if candidate.get("float_shares") is not None else None
                     candle_state["float_shares"] = candidate.get("float_shares")
                     candle_state["float_source"] = candidate.get("float_source")
