@@ -536,7 +536,13 @@
           ["Snapshots guardados",snapshots.snapshot_count==null?"—":Number(snapshots.snapshot_count).toLocaleString("en-US")],
           ["Símbolos vistos",snapshots.symbols_seen==null?"—":Number(snapshots.symbols_seen).toLocaleString("en-US")],
           ["Último snapshot",snapshots.latest_snapshot_at||"Sin datos"],
-          ["Durabilidad de SQLite",snapshots.durability_status||"No verificada"]
+          ["Durabilidad de SQLite",snapshots.durability_status||"No verificada"],
+          ["FLOAT · caché general",state.float_provider_status||"Sin estado"],
+          ["FLOAT · símbolo consultado",state.targeted_float_symbol||"Ninguno"],
+          ["FLOAT · resultado",state.float_shares==null?"No disponible":Number(state.float_shares).toLocaleString("en-US")],
+          ["FLOAT · fuente y fecha",state.float_source?(state.float_source+" · "+(state.float_as_of||"fecha no informada")):"Sin dato confirmado"],
+          ["FLOAT · estado por símbolo",state.targeted_float_status||"Sin estado"],
+          ["FLOAT · error",state.float_error||"Ninguno reportado"]
         ];
         for(const [title,value] of cards){const card=document.createElement("div");card.className="data-card";const h=document.createElement("strong");h.textContent=title;const p=document.createElement("p");p.textContent=String(value);p.style.margin="8px 0 0";card.append(h,p);target.appendChild(card);}
       } catch(error) { target.textContent="No se pudo consultar la configuración: "+apiMessage(error); }
