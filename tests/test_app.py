@@ -187,6 +187,31 @@ class AppEntrypointTests(unittest.TestCase):
         self.assertEqual(result["active_strategy"]["id"], "strategy-1")
 
 
+    def test_snapshots_latest_applies_cached_float_to_rows(self):
+        rows = [{"symbol": "AAPL", "float_shares": None, "quote_is_fresh": True}]
+        def apply_float(cached_rows, store):
+            cached_rows[0].update({
+                "float_shares": 123456789,
+                "float_as_of": "2026-10-01",
+                "float_source": "fmp",
+            })
+            return cached_rows
+
+        with patch("app.SnapshotStore") as store_class, patch("app.CandleStore") as candle_class, patch(
+            "app.active_strategy", return_value=None
+        ), patch("app.apply_cached_float", side_effect=apply_float) as apply_cached:
+            store = store_class.return_value
+            store.latest.return_value = rows
+            store.path = "unused-test-db"
+            candle_class.return_value.rvol.return_value = {"rvol": None, "sessions_used": 0}
+            result = app_module.snapshots_latest(limit=100)
+
+        apply_cached.assert_called_once_with(rows, store)
+        self.assertEqual(result["results"][0]["float_shares"], 123456789)
+        self.assertEqual(result["results"][0]["float_source"], "fmp")
+        self.assertEqual(result["results"][0]["float_as_of"], "2026-10-01")
+
+
     def test_all_five_navigation_tabs_have_matching_panels_and_handlers(self):
         html = (app_module.ROOT / "index.html").read_text(encoding="utf-8")
         tabs = {
