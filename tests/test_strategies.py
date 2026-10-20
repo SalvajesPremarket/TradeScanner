@@ -28,6 +28,10 @@ class StrategyTests(unittest.TestCase):
         self.assertFalse(formula_matches(expression, {"gap_pct": 2, "volume": 900000}))
         self.assertFalse(formula_matches(expression, {"gap_pct": 4, "volume": None}))
 
+    def test_negated_missing_field_does_not_match(self):
+        self.assertFalse(formula_matches("not (gap_pct > 3)", {"gap_pct": None}))
+        self.assertFalse(formula_matches("not (gap_pct > 3)", {}))
+
     def test_formula_rejects_python_execution_constructs(self):
         with self.assertRaises(ValueError):
             save_strategy("Unsafe", "formula", "__import__('os').system('echo nope')", store=self.store)
@@ -71,6 +75,18 @@ class StrategyTests(unittest.TestCase):
             save_strategy("Unsafe import", "python", "import os", store=self.store)
         with self.assertRaises(ValueError):
             save_strategy("Unsafe attribute", "python", "def evaluate(stock): return stock.__class__", store=self.store)
+
+    def test_active_strategy_can_be_edited_to_supported_python_adapter(self):
+        strategy = save_strategy("Editable", "formula", "gap_pct >= 3", store=self.store)
+        set_strategy_enabled(strategy["id"], True, store=self.store)
+        edited = save_strategy(
+            "Editable Python", "python",
+            "def evaluate(stock): return stock['gap_pct'] >= 3",
+            strategy_id=strategy["id"], store=self.store,
+        )
+        self.assertTrue(edited["enabled"])
+        self.assertTrue(strategy_matches(edited, {"gap_pct": 4}))
+        self.assertEqual(active_strategy(self.store)["language"], "python")
 
     def test_simple_thinkscript_style_scan_is_supported_but_history_is_not(self):
         strategy = save_strategy("ThinkScript", "thinkscript", "plot scan = close > 5;", store=self.store)
