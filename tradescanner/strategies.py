@@ -151,7 +151,7 @@ def _eval(node: ast.AST, row: dict[str, Any]) -> Any:
         left = _eval(node.left, row)
         for op, comparator in zip(node.ops, node.comparators):
             right = _eval(comparator, row)
-            if left is None or right is None: return False
+            if left is None or right is None: return None
             try:
                 accepted = _COMPARE[type(op)](left, right)
             except (TypeError, ValueError):
@@ -278,8 +278,6 @@ def save_strategy(name: str, language: str, source: str, strategy_id: str | None
     existing = next((item for item in items if item.get("id") == strategy_id), None) if strategy_id else None
     if strategy_id and existing is None:
         raise KeyError("Estrategia no encontrada.")
-    if existing and existing.get("enabled") and language != "formula":
-        raise ValueError("Desactiva la estrategia antes de cambiarla a un lenguaje aún no ejecutable.")
     item = {
         "id": strategy_id or str(uuid.uuid4()), "name": clean_name,
         "language": language, "source": source, "enabled": bool(existing and existing.get("enabled")),
