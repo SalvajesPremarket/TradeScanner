@@ -42,6 +42,18 @@ class FMPFloatProviderTests(unittest.TestCase):
         self.assertEqual(rows[0]["float_source"], "fmp")
         self.assertEqual(rows[0]["float_as_of"], "2026-10-01")
 
+    def test_empty_cache_does_not_trust_recent_success_timestamp(self):
+        self.store.set_state("fmp_float_last_success_at", 99999)
+        calls = []
+        def fetch(page, key):
+            calls.append(page)
+            return [{"symbol": "AAPL", "floatShares": 123456, "date": "2026-10-01"}]
+        with patch.dict(os.environ, {"FMP_API_KEY": "test-key"}):
+            result = refresh_float_cache(self.store, fetcher=fetch, now=100000)
+        self.assertEqual(result["status"], "updated")
+        self.assertEqual(result["rows_saved"], 1)
+        self.assertEqual(calls, [0])
+
     def test_targeted_float_fallback_caches_symbol_value(self):
         calls = []
         def fetch(symbol, key):
