@@ -236,6 +236,9 @@ def strategies_active_matches():
         return {"strategy": None, "symbols": []}
     store = SnapshotStore()
     rows = store.latest(1000)
+    candle_store = CandleStore(store.path)
+    for row in rows:
+        row["rvol"] = candle_store.rvol(row["symbol"])["rvol"]
     matches = [
         row.get("symbol") for row in rows
         if row.get("symbol") and row.get("quote_is_fresh") is not False
