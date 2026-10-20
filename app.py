@@ -70,6 +70,11 @@ async def lifespan(application: FastAPI):
     stop = asyncio.Event()
     task = asyncio.create_task(_automatic_scan_loop(stop))
     application.state.scan_task = task
+    logger.warning(
+        "TradeScanner lifespan started; automatic_scan_enabled=%s",
+        os.getenv("TRADESCANNER_AUTO_SCAN_ENABLED", "false").strip().lower()
+        in {"1", "true", "yes", "on"},
+    )
     try:
         yield
     finally:
@@ -145,8 +150,13 @@ def engine_status():
         interval = max(10, int(os.getenv("TRADESCANNER_SCAN_INTERVAL_SECONDS", "30")))
     except ValueError:
         interval = 30
+    task = getattr(app.state, "scan_task", None)
+    task_done = task.done() if task is not None else None
     return {
         "automatic_scan_enabled": enabled,
+        "scan_loop_task_created": task is not None,
+        "scan_loop_task_done": task_done,
+        "scan_loop_task_running": task is not None and not task_done,
         "cycle_interval_seconds": interval,
         "batch_size": 100,
         "provider": "Schwab",
