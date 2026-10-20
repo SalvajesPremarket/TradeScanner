@@ -42,6 +42,21 @@ class FMPFloatProviderTests(unittest.TestCase):
         self.assertEqual(rows[0]["float_source"], "fmp")
         self.assertEqual(rows[0]["float_as_of"], "2026-10-01")
 
+    def test_targeted_float_fallback_caches_symbol_value(self):
+        calls = []
+        def fetch(symbol, key):
+            calls.append((symbol, key))
+            return [{"symbol": symbol, "floatShares": 123456, "date": "2026-10-01"}]
+        with patch.dict(os.environ, {"FMP_API_KEY": "test-key"}):
+            first = refresh_symbol_float(self.store, "AAPL", fetcher=fetch, now=100000)
+            second = refresh_symbol_float(self.store, "AAPL", fetcher=lambda *_: self.fail("cached value should skip network"), now=100001)
+        self.assertEqual(first["status"], "updated")
+        self.assertEqual(second["status"], "cached")
+        self.assertEqual(calls, [("AAPL", "test-key")])
+        rows = [{"symbol": "AAPL", "float_shares": None}]
+        apply_cached_float(rows, self.store)
+        self.assertEqual(rows[0]["float_shares"], 123456)
+
     def test_existing_schwab_float_is_never_overwritten(self):
         with patch.dict(os.environ, {"FMP_API_KEY": "test-key"}):
             refresh_float_cache(
