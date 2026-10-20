@@ -4,6 +4,7 @@ from __future__ import annotations
 import ast
 import operator
 import uuid
+from datetime import datetime, timezone
 from typing import Any
 
 from tradescanner.snapshots import SnapshotStore
@@ -135,7 +136,7 @@ def save_strategy(name: str, language: str, source: str, strategy_id: str | None
     item = {
         "id": strategy_id or str(uuid.uuid4()), "name": clean_name,
         "language": language, "source": source, "enabled": bool(existing and existing.get("enabled")),
-        "execution_ready": language == "formula", "updated_at": __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat(),
+        "execution_ready": language == "formula", "updated_at": datetime.now(timezone.utc).isoformat(),
     }
     if item["enabled"] and language == "formula":
         _validate_formula(source)
