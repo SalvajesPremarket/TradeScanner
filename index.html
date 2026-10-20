@@ -102,6 +102,7 @@
       <div class="tab-body">
         <form id="chart-form" class="tools"><label class="field" style="min-width:180px;flex:1">Ticker<input id="chart-symbol" maxlength="15" value="AAPL" required></label><label class="field" style="width:140px">Velas<input id="chart-limit" type="number" min="10" max="500" value="100"></label><button class="action" type="submit">Cargar velas</button></form>
         <div id="chart-message" class="tab-message">El gráfico mostrará únicamente velas que estén guardadas. No se inventarán precios.</div>
+        <svg id="chart-svg" viewBox="0 0 1000 320" width="100%" role="img" aria-label="Gráfico de velas de Schwab" style="display:block;min-height:160px;border:1px solid var(--line);background:#fff;margin-bottom:14px"><text x="500" y="160" text-anchor="middle" fill="#718096" font-size="14">Carga velas guardadas para mostrar el gráfico</text></svg>
         <div class="table-wrap"><table class="simple-table"><thead><tr><th>FECHA</th><th>OPEN</th><th>HIGH</th><th>LOW</th><th>CLOSE</th><th>VOLUMEN</th></tr></thead><tbody id="chart-rows"><tr><td colspan="6">Introduce un ticker y carga sus velas.</td></tr></tbody></table></div>
       </div>
     </section>
@@ -424,6 +425,41 @@
       } catch(error) { document.getElementById("strategy-message").textContent = apiMessage(error); }
     });
 
+
+    function drawCandles(candles) {
+      const svg = document.getElementById("chart-svg");
+      const ns = "http://www.w3.org/2000/svg";
+      svg.replaceChildren();
+      const add = (tag,attrs,textValue) => {
+        const element = document.createElementNS(ns,tag);
+        for (const [key,value] of Object.entries(attrs||{})) element.setAttribute(key,String(value));
+        if (textValue != null) element.textContent = textValue;
+        svg.appendChild(element); return element;
+      };
+      if (!candles.length) {
+        add("text",{x:500,y:160,"text-anchor":"middle",fill:"#718096","font-size":14},"No hay velas reales guardadas para graficar");
+        return;
+      }
+      const valid = candles.filter(c=>[c.open,c.high,c.low,c.close].every(v=>Number.isFinite(Number(v))));
+      if (!valid.length) { add("text",{x:500,y:160,"text-anchor":"middle",fill:"#718096","font-size":14},"Las velas guardadas no contienen OHLC válido"); return; }
+      const min = Math.min(...valid.map(c=>Number(c.low))), max = Math.max(...valid.map(c=>Number(c.high)));
+      const span = max-min || 1, left=62, right=980, top=20, bottom=275, plotH=bottom-top;
+      for(let i=0;i<=4;i++){
+        const y=top+i*plotH/4, value=max-i*span/4;
+        add("line",{x1:left,y1:y,x2:right,y2:y,stroke:"#e4eaf0","stroke-width":1});
+        add("text",{x:left-8,y:y+4,"text-anchor":"end",fill:"#718096","font-size":11},value.toFixed(2));
+      }
+      const step=(right-left)/valid.length, bodyWidth=Math.max(2,Math.min(10,step*0.58));
+      valid.forEach((c,i)=>{
+        const x=left+step*(i+0.5), y=v=>bottom-(Number(v)-min)/span*plotH;
+        const open=y(c.open), close=y(c.close), high=y(c.high), low=y(c.low), rising=Number(c.close)>=Number(c.open), color=rising?"#16845b":"#c34444";
+        add("line",{x1:x,y1:high,x2:x,y2:low,stroke:color,"stroke-width":1.3});
+        add("rect",{x:x-bodyWidth/2,y:Math.min(open,close),width:bodyWidth,height:Math.max(1,Math.abs(close-open)),fill:color,stroke:color});
+      });
+      add("text",{x:left,y:302,fill:"#718096","font-size":11},valid[0].candle_time_ms?new Date(valid[0].candle_time_ms).toLocaleString():"Más antiguas");
+      add("text",{x:right,y:302,"text-anchor":"end",fill:"#718096","font-size":11},valid[valid.length-1].candle_time_ms?new Date(valid[valid.length-1].candle_time_ms).toLocaleString():"Más recientes");
+    }
+
     document.getElementById("chart-form").addEventListener("submit", async event => {
       event.preventDefault();
       const symbol = document.getElementById("chart-symbol").value.trim().toUpperCase();
@@ -433,11 +469,12 @@
       try {
         const payload = await readJson(await fetch("/api/candles/" + encodeURIComponent(symbol) + "?limit=" + limit,{cache:"no-store"}));
         chartRows = payload.candles || [];
+        drawCandles(chartRows);
         if (!chartRows.length) {
           const tr = document.createElement("tr"), td = document.createElement("td"); td.colSpan=6; td.textContent="No hay velas guardadas para "+symbol+". No se muestran datos inventados."; tr.appendChild(td); body.appendChild(tr);
         } else for (const candle of chartRows) {
           const tr = document.createElement("tr");
-          for (const value of [candle.datetime || candle.timestamp || candle.time, candle.open, candle.high, candle.low, candle.close, candle.volume]) {
+          for (const value of [candle.candle_time_ms ? new Date(candle.candle_time_ms).toLocaleString() : "—", candle.open, candle.high, candle.low, candle.close, candle.volume]) {
             const td = document.createElement("td"); td.textContent = value == null ? "—" : String(value); tr.appendChild(td);
           }
           body.appendChild(tr);
