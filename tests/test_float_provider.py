@@ -81,6 +81,33 @@ class FMPFloatProviderTests(unittest.TestCase):
         self.assertEqual(rows[0]["float_shares"], 555)
         self.assertEqual(rows[0]["float_source"], "schwab")
 
+    def test_bulk_http_error_reports_status_without_provider_body(self):
+        import urllib.error
+        error = urllib.error.HTTPError(
+            "https://provider.invalid/endpoint", 404, "not found", {}, None
+        )
+        with patch.dict(os.environ, {"FMP_API_KEY": "test-key"}):
+            result = refresh_float_cache(
+                self.store, fetcher=lambda *_: (_ for _ in ()).throw(error), now=100000
+            )
+        self.assertEqual(result["status"], "unavailable")
+        self.assertEqual(result["error"], "HTTP 404")
+        self.assertNotIn("provider.invalid", str(result))
+
+    def test_targeted_http_error_reports_status_without_provider_body(self):
+        import urllib.error
+        error = urllib.error.HTTPError(
+            "https://provider.invalid/endpoint", 404, "not found", {}, None
+        )
+        with patch.dict(os.environ, {"FMP_API_KEY": "test-key"}):
+            result = refresh_symbol_float(
+                self.store, "AAPL",
+                fetcher=lambda *_: (_ for _ in ()).throw(error), now=100000
+            )
+        self.assertEqual(result["status"], "unavailable")
+        self.assertEqual(result["error"], "HTTP 404")
+        self.assertNotIn("provider.invalid", str(result))
+
     def test_failure_is_cooled_down_without_retrying_each_cycle(self):
         calls = []
         def fail(page, key):
