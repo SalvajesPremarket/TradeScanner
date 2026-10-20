@@ -185,7 +185,7 @@ def snapshots_latest(limit: int = Query(100, ge=1, le=1000)):
         if selected_strategy:
             rows = [
                 row for row in rows
-                if row.get("quote_is_fresh") is not False
+                if row.get("quote_is_fresh") is True
                 and strategy_matches(selected_strategy, row)
             ]
         return {
@@ -273,7 +273,7 @@ def strategies_active_matches(request: Request):
         row["rvol"] = candle_store.rvol(row["symbol"])["rvol"]
     matches = [
         row.get("symbol") for row in rows
-        if row.get("symbol") and row.get("quote_is_fresh") is not False
+        if row.get("symbol") and row.get("quote_is_fresh") is True
         and strategy_matches(strategy, row)
     ]
     return {"strategy": {"id": strategy["id"], "name": strategy["name"]}, "symbols": matches}
