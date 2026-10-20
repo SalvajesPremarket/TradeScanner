@@ -57,6 +57,18 @@ class FMPFloatProviderTests(unittest.TestCase):
         apply_cached_float(rows, self.store)
         self.assertEqual(rows[0]["float_shares"], 123456)
 
+    def test_targeted_float_failure_uses_six_hour_cooldown(self):
+        calls = []
+        def fail(symbol, key):
+            calls.append(symbol)
+            raise RuntimeError("provider unavailable")
+        with patch.dict(os.environ, {"FMP_API_KEY": "test-key"}):
+            first = refresh_symbol_float(self.store, "AAPL", fetcher=fail, now=100000)
+            second = refresh_symbol_float(self.store, "AAPL", fetcher=fail, now=100001)
+        self.assertEqual(first["status"], "unavailable")
+        self.assertEqual(second["status"], "cooldown")
+        self.assertEqual(calls, ["AAPL"])
+
     def test_existing_schwab_float_is_never_overwritten(self):
         with patch.dict(os.environ, {"FMP_API_KEY": "test-key"}):
             refresh_float_cache(
