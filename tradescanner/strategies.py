@@ -13,6 +13,11 @@ from tradescanner.snapshots import SnapshotStore
 STATE_KEY = "user_strategies_v1"
 MAX_NAME_LENGTH = 80
 MAX_SOURCE_LENGTH = 50_000
+MAX_AST_NODES = 300
+MAX_AST_DEPTH = 40
+MAX_STRING_LENGTH = 256
+MAX_RESULT_STRING_LENGTH = 1024
+MAX_INTEGER_BITS = 256
 LANGUAGES = {"formula", "python", "thinkscript"}
 
 _BINARY = {
@@ -48,7 +53,25 @@ def _validate_formula(source: str) -> ast.Expression:
         tree = ast.parse(source, mode="eval")
     except (SyntaxError, ValueError):
         raise ValueError("La fórmula no tiene una sintaxis válida. Usa expresiones como: gap_pct >= 3 and volume >= 500000") from None
-    for node in ast.walk(tree):
+    nodes = list(ast.walk(tree))
+    if len(nodes) > MAX_AST_NODES:
+        raise ValueError("La fórmula es demasiado compleja.")
+    def depth(node: ast.AST, level: int = 1) -> int:
+        if level > MAX_AST_DEPTH:
+            raise ValueError("La fórmula supera la profundidad permitida.")
+        children = list(ast.iter_child_nodes(node))
+        return max((depth(child, level + 1) for child in children), default=level)
+    depth(tree)
+    for node in nodes:
+        if isinstance(node, ast.Constant):
+            if isinstance(node.value, str) and len(node.value) > MAX_STRING_LENGTH:
+                raise ValueError("Las cadenas de texto son demasiado largas.")
+            if isinstance(node.value, int) and not isinstance(node.value, bool) and node.value.bit_length() > MAX_INTEGER_BITS:
+                raise ValueError("El número entero supera el límite permitido.")
+            if isinstance(node.value, float) and (not __import__("math").isfinite(node.value) or abs(node.value) > 1e100):
+                raise ValueError("El número está fuera del rango permitido.")
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in {"min", "max"} and len(node.args) > 20:
+            raise ValueError("min() y max() admiten como máximo 20 argumentos.")
         if isinstance(node, ast.Name) and node.id not in _ALLOWED_NAMES | set(_ALLOWED_CALLS):
             raise ValueError(f"Campo o función no permitido: {node.id}")
         if isinstance(node, ast.Call) and (not isinstance(node.func, ast.Name) or node.func.id not in _ALLOWED_CALLS):
@@ -76,8 +99,15 @@ def _eval(node: ast.AST, row: dict[str, Any]) -> Any:
             return row.get(node.id)
         return _ALLOWED_CALLS[node.id]
     if isinstance(node, ast.BoolOp):
-        values = [_eval(value, row) for value in node.values]
-        return all(values) if isinstance(node.op, ast.And) else any(values)
+        if isinstance(node.op, ast.And):
+            for value in node.values:
+                if not _eval(value, row):
+                    return False
+            return True
+        for value in node.values:
+            if _eval(value, row):
+                return True
+        return False
     if isinstance(node, ast.UnaryOp):
         value = _eval(node.operand, row)
         if value is None:
@@ -87,8 +117,35 @@ def _eval(node: ast.AST, row: dict[str, Any]) -> Any:
         return +value
     if isinstance(node, ast.BinOp):
         left, right = _eval(node.left, row), _eval(node.right, row)
-        if left is None or right is None: return None
-        return _BINARY[type(node.op)](left, right)
+        if left is None or right is None:
+            return None
+        # Permit bounded string concatenation/repetition only; never allocate
+        # an unbounded result from a user-supplied strategy.
+        if isinstance(left, str) or isinstance(right, str):
+            if isinstance(node.op, ast.Add) and isinstance(left, str) and isinstance(right, str):
+                if len(left) + len(right) > MAX_RESULT_STRING_LENGTH:
+                    return None
+                return left + right
+            if isinstance(node.op, ast.Mult):
+                string_value = left if isinstance(left, str) else right
+                count = right if isinstance(left, str) else left
+                if isinstance(string_value, str) and isinstance(count, int) and not isinstance(count, bool):
+                    if count < 0 or len(string_value) * count > MAX_RESULT_STRING_LENGTH:
+                        return None
+                    return string_value * count
+            return None
+        if not isinstance(left, (int, float, bool)) or not isinstance(right, (int, float, bool)):
+            return None
+        if isinstance(left, int) and not isinstance(left, bool) and left.bit_length() > MAX_INTEGER_BITS:
+            return None
+        if isinstance(right, int) and not isinstance(right, bool) and right.bit_length() > MAX_INTEGER_BITS:
+            return None
+        result = _BINARY[type(node.op)](left, right)
+        if isinstance(result, int) and not isinstance(result, bool) and result.bit_length() > MAX_INTEGER_BITS:
+            return None
+        if isinstance(result, float) and (not __import__("math").isfinite(result) or abs(result) > 1e100):
+            return None
+        return result
     if isinstance(node, ast.Compare):
         left = _eval(node.left, row)
         for op, comparator in zip(node.ops, node.comparators):
