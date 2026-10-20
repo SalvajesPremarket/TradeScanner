@@ -66,6 +66,10 @@ def refresh_float_cache(
     try:
         last_success = store.get_state("fmp_float_last_success_at", 0)
         last_attempt = store.get_state("fmp_float_last_attempt_at", 0)
+        # A successful timestamp alone is not proof the current database has
+        # usable FLOAT rows (for example, after an ephemeral SQLite reset).
+        with _connect(store) as connection:
+            cached_rows = connection.execute("SELECT COUNT(*) FROM float_cache").fetchone()[0]
     except Exception as exc:
         return {"status": "unavailable", "provider": "FMP", "rows_saved": 0, "error": type(exc).__name__}
     try:
@@ -74,7 +78,7 @@ def refresh_float_cache(
     except (TypeError, ValueError):
         last_success = last_attempt = 0.0
 
-    if current - last_success < CACHE_TTL_SECONDS:
+    if cached_rows > 0 and current - last_success < CACHE_TTL_SECONDS:
         return {"status": "cached", "provider": "FMP", "rows_saved": 0}
     if current - last_attempt < FAILURE_COOLDOWN_SECONDS:
         return {"status": "cooldown", "provider": "FMP", "rows_saved": 0}
