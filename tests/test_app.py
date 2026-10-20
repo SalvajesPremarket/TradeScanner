@@ -29,6 +29,19 @@ class AppEntrypointTests(unittest.TestCase):
             result = app_module.engine_status()
         self.assertFalse(result["automatic_scan_enabled"])
 
+    def test_schwab_provider_is_configured_when_refresh_token_is_in_infisical(self):
+        env = {
+            "SCHWAB_CLIENT_ID": "test-client",
+            "SCHWAB_CLIENT_SECRET": "test-secret",
+            "SCHWAB_REFRESH_TOKEN": "",
+        }
+        with patch.dict(os.environ, env, clear=True), patch(
+            "app.infisical_is_configured", return_value=True
+        ), patch("app.get_engine_status", return_value={}):
+            result = app_module.status()
+        self.assertTrue(result["provider_configured"])
+        self.assertFalse(result["market_data_connected"])
+
     def test_market_data_connection_requires_a_recent_quote(self):
         with patch.dict(os.environ, {}, clear=True), patch(
             "app.get_engine_status",

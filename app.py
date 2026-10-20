@@ -13,6 +13,7 @@ from fastapi.responses import FileResponse
 from tradescanner.candles import CandleStore
 from tradescanner.core import apply_filters, normalize_schwab_quotes
 from tradescanner.float_provider import apply_cached_float
+from tradescanner.infisical_vault import is_configured as infisical_is_configured
 from tradescanner.engine import get_engine_status, record_engine_status, run_scan_cycle
 from tradescanner.snapshots import SnapshotStore, collect_snapshots
 from tradescanner.strategies import (active_strategy, delete_strategy, strategy_matches, list_strategies, save_strategy, set_strategy_enabled)
@@ -80,9 +81,10 @@ def health():
 
 @app.get("/api/status")
 def status():
-    configured = all(
-        os.getenv(name)
-        for name in ("SCHWAB_CLIENT_ID", "SCHWAB_CLIENT_SECRET", "SCHWAB_REFRESH_TOKEN")
+    configured = all(os.getenv(name, "").strip() for name in (
+        "SCHWAB_CLIENT_ID", "SCHWAB_CLIENT_SECRET"
+    )) and (
+        bool(os.getenv("SCHWAB_REFRESH_TOKEN", "").strip()) or infisical_is_configured()
     )
     engine = get_engine_status()
     last_quote_at = engine.get("last_quote_received_at")
