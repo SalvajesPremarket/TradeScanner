@@ -140,6 +140,26 @@ class AppEntrypointTests(unittest.TestCase):
         with patch.dict(os.environ, {"TRADESCANNER_STRATEGY_ADMIN_TOKEN": "expected-secret"}):
             self.assertIsNone(app_module._authorize_strategy_access(authorized))
 
+    def test_all_strategy_admin_endpoints_fail_closed_without_private_token(self):
+        request = Request({
+            "type": "http", "method": "GET", "path": "/api/strategies",
+            "headers": [], "query_string": b"", "server": ("test", 443),
+            "scheme": "https", "client": ("test", 123), "root_path": "",
+        })
+        calls = [
+            lambda: app_module.strategies_list(request),
+            lambda: app_module.strategies_save(request, {"name": "Test", "language": "formula", "source": "True"}),
+            lambda: app_module.strategies_activate("missing", request, {"enabled": True}),
+            lambda: app_module.strategies_delete("missing", request),
+            lambda: app_module.strategies_active_matches(request),
+        ]
+        with patch.dict(os.environ, {}, clear=True):
+            for call in calls:
+                with self.subTest(endpoint=call):
+                    with self.assertRaises(HTTPException) as raised:
+                        call()
+                    self.assertEqual(raised.exception.status_code, 503)
+
     def test_manual_scan_rejects_more_than_one_provider_batch(self):
         symbols = ",".join(f"SYM{i:03d}" for i in range(101))
         with self.assertRaises(HTTPException) as raised:
