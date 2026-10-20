@@ -133,8 +133,12 @@ def _python_expression(source: str) -> str:
             return ast.unparse(expression)
         except (SyntaxError, ValueError):
             raise ValueError("Python seguro acepta una expresión o una función evaluate(stock) con un único return.") from None
+    if len(tree.body) == 1 and isinstance(tree.body[0], ast.Expr):
+        result = ast.unparse(tree.body[0].value)
+        _validate_formula(result)
+        return result
     if len(tree.body) != 1 or not isinstance(tree.body[0], (ast.FunctionDef, ast.AsyncFunctionDef)):
-        raise ValueError("Python seguro acepta únicamente def evaluate(stock): return expresión.")
+        raise ValueError("Python seguro acepta una expresión o def evaluate(stock): return expresión.")
     function = tree.body[0]
     if isinstance(function, ast.AsyncFunctionDef) or function.name != "evaluate" or len(function.args.args) != 1 or function.args.args[0].arg != "stock":
         raise ValueError("La función debe llamarse evaluate(stock).")
