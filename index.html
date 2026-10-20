@@ -119,6 +119,8 @@
           [minChange, item.change_pct, "min"], [maxChange, item.change_pct, "max"]
         ];
         if (floatOn && (item.float_shares === null || item.float_shares === undefined)) return false;
+        // Do not present explicitly stale provider quotes as current radar results.
+        if (item.quote_is_fresh === false) return false;
         for (const [threshold, actual, mode] of checks) {
           if (threshold === null) continue;
           if (actual === null || actual === undefined || !Number.isFinite(Number(actual))) return false;
@@ -200,7 +202,12 @@
         const enginePayload = await engineResponse.json();
         const snapshotPayload = await snapshotsResponse.json();
         const state = enginePayload.state || {};
-        allResults = Array.isArray(snapshotPayload.results) ? snapshotPayload.results : [];
+        // The snapshots endpoint retains historical rows. Keep known-stale
+        // quotes out of the live radar, and defensively ignore provider metadata
+        // rows that are not actual tickers. Unknown freshness is preserved for
+        // backwards compatibility with older snapshots.
+        allResults = (Array.isArray(snapshotPayload.results) ? snapshotPayload.results : [])
+          .filter(item => item && item.symbol !== "ERROR" && item.symbol !== "ERRORS" && item.quote_is_fresh !== false);
         applyFilters();
         if (state.status === "waiting_for_credentials") {
           statusNode.textContent = "Esperando credenciales Schwab";

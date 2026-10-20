@@ -4,6 +4,16 @@ from tradescanner.core import apply_filters, normalize_schwab_quotes
 
 
 class NormalizeSchwabQuotesTests(unittest.TestCase):
+    def test_ignores_provider_errors_metadata_entry(self):
+        rows = normalize_schwab_quotes({
+            "ERRORS": {"error": "provider returned a per-symbol error"},
+            "AAPL": {
+                "quote": {"lastPrice": 100, "closePrice": 99, "totalVolume": 1000},
+                "reference": {"description": "Apple Inc."},
+            },
+        })
+        self.assertEqual([row["symbol"] for row in rows], ["AAPL"])
+
     def test_normalizes_present_quote_fields_and_calculates_gap(self):
         rows = normalize_schwab_quotes({
             "aapl": {
@@ -68,7 +78,7 @@ class NormalizeSchwabQuotesTests(unittest.TestCase):
         self.assertIsNone(rows[0]["volume"])
         self.assertIsNone(rows[0]["gap_pct"])
 
-    def test_uses_only_explicit_schwab_float_not_shares_outstanding(self):
+    def test_uses_float_shares_or_derives_from_schwab_float_market_cap(self):
         rows = normalize_schwab_quotes({
             "AAPL": {
                 "quote": {"lastPrice": 100, "closePrice": 99},
@@ -80,17 +90,32 @@ class NormalizeSchwabQuotesTests(unittest.TestCase):
                 "reference": {"description": "Example"},
                 "fundamental": {"floatShares": 250000},
             },
+            "DERIVED": {
+                "quote": {"lastPrice": 20, "closePrice": 19},
+                "reference": {"description": "Derived Example"},
+                "fundamental": {"marketCapFloat": 5000000, "sharesOutstanding": 9000000},
+            },
         })
         self.assertIsNone(rows[0]["float_shares"])
+        self.assertIsNone(rows[0]["float_source"])
         self.assertEqual(rows[1]["float_shares"], 250000)
         self.assertEqual(rows[1]["float_source"], "schwab")
+        self.assertEqual(rows[2]["float_shares"], 250000)
+        self.assertEqual(rows[2]["float_source"], "schwab_market_cap_float_derived")
 
     def test_missing_fields_are_not_invented(self):
         rows = normalize_schwab_quotes({"XYZ": {"quote": {}, "reference": {}}})
-        self.assertIsNone(rows[0]["price"])
-        self.assertIsNone(rows[0]["gap_pct"])
-        self.assertIsNone(rows[0]["volume"])
-        self.assertIsNone(rows[0]["rvol"])
+        self.assertEqual(rows, [])
+
+    def test_ignores_provider_error_metadata_without_market_quote(self):
+        rows = normalize_schwab_quotes({
+            "ERRORS": {"errors": [{"message": "provider error"}]},
+            "AAPL": {
+                "quote": {"lastPrice": 100, "closePrice": 99, "totalVolume": 1000},
+                "reference": {"description": "Apple Inc."},
+            },
+        })
+        self.assertEqual([row["symbol"] for row in rows], ["AAPL"])
 
     def test_filters_exclude_missing_values_only_when_filter_enabled(self):
         rows = [

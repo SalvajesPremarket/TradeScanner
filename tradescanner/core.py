@@ -22,12 +22,20 @@ def normalize_schwab_quotes(payload: dict[str, Any]) -> list[dict[str, Any]]:
     for symbol, record in payload.items():
         if not isinstance(record, dict):
             continue
+        # Some provider responses include an ERRORS metadata entry alongside
+        # quote records. It is not a tradable symbol and must not become a row.
+        normalized_symbol = str(symbol).strip().upper()
+        if normalized_symbol in {"ERROR", "ERRORS"}:
+            continue
         quote = record.get("quote")
         reference = record.get("reference")
         fundamental = record.get("fundamental")
         quote = quote if isinstance(quote, dict) else {}
         reference = reference if isinstance(reference, dict) else {}
         fundamental = fundamental if isinstance(fundamental, dict) else {}
+        # Ignore provider metadata/error entries without a quote object or fields.
+        if not quote:
+            continue
 
         last = _number(quote.get("lastPrice"))
         previous_close = _number(quote.get("closePrice"))
@@ -56,11 +64,27 @@ def normalize_schwab_quotes(payload: dict[str, Any]) -> list[dict[str, Any]]:
         if last is not None and previous_close is not None and previous_close > 0:
             gap_pct = round(((last / previous_close) - 1.0) * 100.0, 10)
 
-        # Only accept an explicitly named float field from Schwab. The standard
-        # sharesOutstanding field is a different metric and must not be substituted.
+        # Prefer a directly supplied float-share count. Schwab payloads may instead
+        # expose marketCapFloat (public-float market capitalization); when present,
+        # derive an approximate share count from that value and the current price.
+        # Never substitute sharesOutstanding, which is a different metric.
         float_shares = _number(fundamental.get("floatShares"))
+        float_source = "schwab" if float_shares is not None and float_shares > 0 else None
+        float_market_cap = _number(fundamental.get("marketCapFloat"))
+        if (
+            (float_shares is None or float_shares <= 0)
+            and float_market_cap is not None
+            and float_market_cap > 0
+            and last is not None
+            and last > 0
+        ):
+            float_shares = float_market_cap / last
+            float_source = "schwab_market_cap_float_derived"
+        if float_shares is not None and float_shares <= 0:
+            float_shares = None
+            float_source = None
         rows.append({
-            "symbol": str(symbol).strip().upper(),
+            "symbol": normalized_symbol,
             "company": reference.get("description"),
             "price": last,
             "previous_close": previous_close,
@@ -76,7 +100,7 @@ def normalize_schwab_quotes(payload: dict[str, Any]) -> list[dict[str, Any]]:
             "quote_age_seconds": round(quote_age_seconds, 3) if quote_age_seconds is not None else None,
             "quote_is_fresh": quote_is_fresh,
             "data_source": "schwab",
-            "float_source": "schwab" if float_shares is not None else None,
+            "float_source": float_source,
         })
     return rows
 
