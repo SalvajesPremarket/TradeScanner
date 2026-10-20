@@ -172,6 +172,7 @@ class AppEntrypointTests(unittest.TestCase):
             {"symbol": "AAA", "gap_pct": 4, "quote_is_fresh": True},
             {"symbol": "BBB", "gap_pct": 2, "quote_is_fresh": True},
             {"symbol": "CCC", "gap_pct": 5, "quote_is_fresh": False},
+            {"symbol": "DDD", "gap_pct": 5},
         ]
         with patch("app.SnapshotStore") as store_class, patch("app.CandleStore") as candle_class, patch(
             "app.active_strategy",
