@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import ast
 import operator
+import re
 import uuid
 from datetime import datetime, timezone
 from typing import Any
@@ -108,6 +109,86 @@ def _eval(node: ast.AST, row: dict[str, Any]) -> Any:
     raise ValueError("Construcción no permitida.")
 
 
+
+class _PythonStockFields(ast.NodeTransformer):
+    """Convert only stock['known_field'] references into safe formula names."""
+    def visit_Subscript(self, node: ast.Subscript):
+        if not (isinstance(node.value, ast.Name) and node.value.id == "stock"):
+            raise ValueError("Python solo permite acceder a campos mediante stock['campo'].")
+        key = node.slice
+        if not isinstance(key, ast.Constant) or not isinstance(key.value, str) or key.value not in _ALLOWED_NAMES:
+            raise ValueError("Campo stock no permitido.")
+        return ast.copy_location(ast.Name(id=key.value, ctx=ast.Load()), node)
+
+
+def _python_expression(source: str) -> str:
+    if not source or len(source) > MAX_SOURCE_LENGTH:
+        raise ValueError("El script está vacío o supera el límite permitido.")
+    try:
+        tree = ast.parse(source, mode="exec")
+    except (SyntaxError, ValueError):
+        try:
+            expression = ast.parse(source, mode="eval")
+            _validate_formula(ast.unparse(expression))
+            return ast.unparse(expression)
+        except (SyntaxError, ValueError):
+            raise ValueError("Python seguro acepta una expresión o una función evaluate(stock) con un único return.") from None
+    if len(tree.body) != 1 or not isinstance(tree.body[0], (ast.FunctionDef, ast.AsyncFunctionDef)):
+        raise ValueError("Python seguro acepta únicamente def evaluate(stock): return expresión.")
+    function = tree.body[0]
+    if isinstance(function, ast.AsyncFunctionDef) or function.name != "evaluate" or len(function.args.args) != 1 or function.args.args[0].arg != "stock":
+        raise ValueError("La función debe llamarse evaluate(stock).")
+    if function.decorator_list or function.args.vararg or function.args.kwarg or function.args.kwonlyargs or len(function.body) != 1 or not isinstance(function.body[0], ast.Return) or function.body[0].value is None:
+        raise ValueError("La función debe contener solamente una instrucción return.")
+    expression = _PythonStockFields().visit(function.body[0].value)
+    ast.fix_missing_locations(expression)
+    result = ast.unparse(expression)
+    _validate_formula(result)
+    return result
+
+
+def _thinkscript_expression(source: str) -> str:
+    """Translate a deliberately small, stateless ThinkScript-like scan subset."""
+    if not source or len(source) > MAX_SOURCE_LENGTH:
+        raise ValueError("El script está vacío o supera el límite permitido.")
+    cleaned = source.strip()
+    # Permit a single plot assignment, optionally ending with a semicolon.
+    match = re.fullmatch(r"(?is)plot\\s+scan\\s*=\\s*(.*?)\\s*;?", cleaned)
+    if match:
+        cleaned = match.group(1)
+    if ";" in cleaned or re.search(r"(?i)\\b(def|input|script|rec|fold|reference|addlabel|assignpricecolor)\\b", cleaned):
+        raise ValueError("ThinkScript: este adaptador admite una expresión de escaneo simple, no bloques ni indicadores con historial.")
+    aliases = {
+        "close": "price", "last": "price", "volume": "volume",
+        "gap_pct": "gap_pct", "change_pct": "change_pct", "rvol": "rvol",
+        "float_shares": "float_shares", "open": "price",
+    }
+    for name, replacement in aliases.items():
+        cleaned = re.sub(r"(?i)\\b" + re.escape(name) + r"\\b", replacement, cleaned)
+    cleaned = re.sub(r"(?i)\\band\\b", "and", cleaned)
+    cleaned = re.sub(r"(?i)\\bor\\b", "or", cleaned)
+    cleaned = re.sub(r"(?i)\\bnot\\b", "not", cleaned)
+    _validate_formula(cleaned)
+    return cleaned
+
+
+def strategy_matches(strategy: dict[str, Any], row: dict[str, Any]) -> bool:
+    language = strategy.get("language")
+    source = strategy.get("source", "")
+    try:
+        if language == "formula":
+            expression = source
+        elif language == "python":
+            expression = _python_expression(source)
+        elif language == "thinkscript":
+            expression = _thinkscript_expression(source)
+        else:
+            return False
+        return formula_matches(expression, row)
+    except (SyntaxError, TypeError, ValueError):
+        return False
+
+
 def formula_matches(source: str, row: dict[str, Any]) -> bool:
     try:
         return bool(_eval(_validate_formula(source), row))
@@ -126,6 +207,10 @@ def save_strategy(name: str, language: str, source: str, strategy_id: str | None
         raise ValueError("El código está vacío o supera el límite de 50.000 caracteres.")
     if language == "formula":
         _validate_formula(source)
+    elif language == "python":
+        _python_expression(source)
+    elif language == "thinkscript":
+        _thinkscript_expression(source)
     target = _store(store)
     items = list_strategies(target)
     existing = next((item for item in items if item.get("id") == strategy_id), None) if strategy_id else None
@@ -136,7 +221,7 @@ def save_strategy(name: str, language: str, source: str, strategy_id: str | None
     item = {
         "id": strategy_id or str(uuid.uuid4()), "name": clean_name,
         "language": language, "source": source, "enabled": bool(existing and existing.get("enabled")),
-        "execution_ready": language == "formula", "updated_at": datetime.now(timezone.utc).isoformat(),
+        "execution_ready": language in LANGUAGES, "updated_at": datetime.now(timezone.utc).isoformat(),
     }
     if item["enabled"] and language == "formula":
         _validate_formula(source)
@@ -155,10 +240,12 @@ def set_strategy_enabled(strategy_id: str, enabled: bool,
     selected = next((item for item in items if item.get("id") == strategy_id), None)
     if selected is None:
         raise KeyError("Estrategia no encontrada.")
-    if enabled and selected.get("language") != "formula":
-        raise ValueError("Esta estrategia está guardada, pero este lenguaje todavía no puede ejecutarse de forma segura. Usa Fórmula para activarla.")
     if enabled:
-        _validate_formula(selected.get("source", ""))
+        strategy_matches(selected, {})
+        if selected.get("language") == "formula": _validate_formula(selected.get("source", ""))
+        elif selected.get("language") == "python": _python_expression(selected.get("source", ""))
+        elif selected.get("language") == "thinkscript": _thinkscript_expression(selected.get("source", ""))
+        else: raise ValueError("Lenguaje no compatible.")
     for item in items:
         item["enabled"] = bool(enabled and item.get("id") == strategy_id)
     target.set_state(STATE_KEY, items)
