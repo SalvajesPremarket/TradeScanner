@@ -27,6 +27,11 @@ Reconstrucción limpia e independiente. No importar ni recuperar código de sist
 - `GET /api/candles/AAPL?limit=500`: velas guardadas y cálculo RVOL de ese símbolo.
 - `GET /api/quotes?symbols=AAPL,MSFT`: consulta de cotizaciones y filtros básicos.
 - `POST /api/scan?symbols=AAPL,MSFT`: captura de snapshots bajo demanda.
+- `GET /api/strategies`: lista las estrategias guardadas.
+- `POST /api/strategies`: guarda o edita una estrategia (`name`, `language`, `source`, opcionalmente `id`).
+- `POST /api/strategies/{id}/activate`: activa/desactiva una estrategia; solo una puede estar activa.
+- `DELETE /api/strategies/{id}`: elimina una estrategia.
+- `GET /api/strategies/active-matches`: símbolos que cumplen la fórmula activa y tienen cotización no marcada como desactualizada.
 
 ## Pendiente antes de declarar producción
 
@@ -72,3 +77,11 @@ No publicar claves o tokens en GitHub ni en el chat. Si una credencial se compar
 - Start command: `uvicorn app:app --host 0.0.0.0 --port $PORT`
 
 No desplegar todavía: falta validar datos reales y configurar almacenamiento persistente.
+
+
+## Interfaz de estrategias (rama en revisión)
+
+- Las pestañas Screener/Acciones, Estrategias, Gráficos, Listas y Configuración consultan datos del servicio; gráficos muestra velas almacenadas, listas se guardan en el navegador y configuración es de solo lectura.
+- Las estrategias con lenguaje **Fórmula** aceptan expresiones restringidas y evaluadas con una lista permitida de operadores y campos; no se ejecuta código arbitrario.
+- Los scripts Python y ThinkScript se pueden guardar como borradores, pero no se pueden activar hasta implementar y validar adaptadores aislados para esos lenguajes.
+- **Requisito de seguridad antes de integrar/desplegar:** la app no tiene autenticación de usuario actualmente. No publicar las rutas de gestión de estrategias en un servicio accesible públicamente hasta protegerlas o restringir el acceso.
