@@ -100,6 +100,27 @@ class FMPFloatProviderTests(unittest.TestCase):
         self.assertEqual(second["status"], "cooldown")
         self.assertEqual(calls, ["AAPL"])
 
+    def test_targeted_http_402_triggers_global_cooldown_for_other_symbols(self):
+        import urllib.error
+        error = urllib.error.HTTPError(
+            "https://provider.invalid/endpoint", 402, "payment required", {}, None
+        )
+        calls = []
+        def fail(symbol, key):
+            calls.append(symbol)
+            raise error
+        with patch.dict(os.environ, {"FMP_API_KEY": "test-key"}):
+            first = refresh_symbol_float(self.store, "AAPL", fetcher=fail, now=100000)
+            second = refresh_symbol_float(
+                self.store, "MSFT",
+                fetcher=lambda *_: self.fail("global cooldown should prevent request"),
+                now=100001,
+            )
+        self.assertEqual(first["status"], "unavailable")
+        self.assertEqual(first["error"], "HTTP 402")
+        self.assertEqual(second["status"], "cooldown")
+        self.assertEqual(calls, ["AAPL"])
+
     def test_targeted_global_cooldown_expires_after_six_hours(self):
         import urllib.error
         error = urllib.error.HTTPError(
