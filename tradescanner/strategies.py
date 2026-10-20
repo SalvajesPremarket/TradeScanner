@@ -153,10 +153,10 @@ def _thinkscript_expression(source: str) -> str:
         raise ValueError("El script está vacío o supera el límite permitido.")
     cleaned = source.strip()
     # Permit a single plot assignment, optionally ending with a semicolon.
-    match = re.fullmatch(r"(?is)plot\\s+scan\\s*=\\s*(.*?)\\s*;?", cleaned)
+    match = re.fullmatch(r"(?is)plot\s+scan\s*=\s*(.*?)\s*;?", cleaned)
     if match:
         cleaned = match.group(1)
-    if ";" in cleaned or re.search(r"(?i)\\b(def|input|script|rec|fold|reference|addlabel|assignpricecolor)\\b", cleaned):
+    if ";" in cleaned or re.search(r"(?i)\b(def|input|script|rec|fold|reference|addlabel|assignpricecolor)\b", cleaned):
         raise ValueError("ThinkScript: este adaptador admite una expresión de escaneo simple, no bloques ni indicadores con historial.")
     aliases = {
         "close": "price", "last": "price", "volume": "volume",
@@ -164,10 +164,10 @@ def _thinkscript_expression(source: str) -> str:
         "float_shares": "float_shares", "open": "price",
     }
     for name, replacement in aliases.items():
-        cleaned = re.sub(r"(?i)\\b" + re.escape(name) + r"\\b", replacement, cleaned)
-    cleaned = re.sub(r"(?i)\\band\\b", "and", cleaned)
-    cleaned = re.sub(r"(?i)\\bor\\b", "or", cleaned)
-    cleaned = re.sub(r"(?i)\\bnot\\b", "not", cleaned)
+        cleaned = re.sub(r"(?i)\b" + re.escape(name) + r"\b", replacement, cleaned)
+    cleaned = re.sub(r"(?i)\band\b", "and", cleaned)
+    cleaned = re.sub(r"(?i)\bor\b", "or", cleaned)
+    cleaned = re.sub(r"(?i)\bnot\b", "not", cleaned)
     _validate_formula(cleaned)
     return cleaned
 
