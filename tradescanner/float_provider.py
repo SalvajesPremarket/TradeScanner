@@ -174,6 +174,9 @@ def refresh_symbol_float(
         return {"status": "invalid_symbol", "provider": "FMP"}
     current = time.time() if now is None else now
     try:
+        global_cooldown_until = float(store.get_state("fmp_float_global_cooldown_until", 0) or 0)
+        if current < global_cooldown_until:
+            return {"status": "cooldown", "provider": "FMP", "symbol": normalized}
         with _connect(store) as connection:
             cached = connection.execute(
                 "SELECT float_shares, source_date, cached_at FROM float_cache WHERE symbol = ?",
@@ -211,6 +214,11 @@ def refresh_symbol_float(
         return {"status": "updated", "provider": "FMP", "symbol": normalized,
                 "rows_saved": 1, "float_shares": value}
     except urllib.error.HTTPError as exc:
+        if exc.code == 429:
+            try:
+                store.set_state("fmp_float_global_cooldown_until", current + FAILURE_COOLDOWN_SECONDS)
+            except Exception:
+                pass
         return {"status": "unavailable", "provider": "FMP", "symbol": normalized,
                 "error": f"HTTP {exc.code}"}
     except Exception as exc:
