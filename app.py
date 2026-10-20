@@ -181,7 +181,21 @@ def snapshots_latest(limit: int = Query(100, ge=1, le=1000)):
             row.setdefault("float_shares", None)
             row.setdefault("float_as_of", None)
             row.setdefault("float_source", None)
-        return {"results": rows, "limit": limit}
+        selected_strategy = active_strategy()
+        if selected_strategy:
+            rows = [
+                row for row in rows
+                if row.get("quote_is_fresh") is not False
+                and strategy_matches(selected_strategy, row)
+            ]
+        return {
+            "results": rows,
+            "limit": limit,
+            "active_strategy": (
+                {"id": selected_strategy["id"], "name": selected_strategy["name"]}
+                if selected_strategy else None
+            ),
+        }
     except (OSError, RuntimeError, sqlite3.Error, ValueError):
         raise HTTPException(status_code=503, detail="Snapshot storage is unavailable.") from None
 
