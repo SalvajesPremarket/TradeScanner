@@ -245,6 +245,70 @@ class AutomaticEngineTests(unittest.TestCase):
             self.assertEqual(result["status"], "running")
             self.assertEqual(result["received_count"], 1)
 
+    def test_float_diagnostics_do_not_get_overwritten_by_candle_symbol(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = SnapshotStore(Path(directory) / "engine.sqlite3")
+            with store._connect() as connection:
+                connection.execute(
+                    """CREATE TABLE float_cache (
+                        symbol TEXT PRIMARY KEY, float_shares REAL NOT NULL,
+                        source_date TEXT, cached_at REAL NOT NULL, source TEXT NOT NULL
+                    )"""
+                )
+                connection.execute(
+                    "INSERT INTO float_cache VALUES (?, ?, ?, ?, ?)",
+                    ("AAPL", 123456.0, "2026-10-01", 100000.0, "fmp"),
+                )
+
+            def fetch(batch):
+                return {
+                    "AAPL": {
+                        "quote": {"lastPrice": 11.0, "closePrice": 10.0, "totalVolume": 100},
+                        "reference": {"description": "AAPL"},
+                    },
+                    "MSFT": {
+                        "quote": {"lastPrice": 21.0, "closePrice": 20.0, "totalVolume": 200},
+                        "reference": {"description": "MSFT"},
+                    },
+                }
+
+            float_rows = [
+                {"symbol": "AAPL", "price": 11.0, "volume": 100, "float_shares": None},
+                {"symbol": "MSFT", "price": 21.0, "volume": 200, "float_shares": 999999.0},
+            ]
+            candle_rows = [
+                {"symbol": "AAPL", "price": 11.0, "volume": 100, "float_shares": None},
+                {"symbol": "MSFT", "price": 21.0, "volume": 200, "float_shares": 999999.0},
+            ]
+            fresh_rows = [
+                {"symbol": "AAPL", "quote_is_fresh": True},
+                {"symbol": "MSFT", "quote_is_fresh": True},
+            ]
+            with patch.dict(os.environ, {
+                "SCHWAB_CLIENT_ID": "test-id",
+                "SCHWAB_CLIENT_SECRET": "test-secret",
+                "SCHWAB_REFRESH_TOKEN": "test-refresh",
+            }), patch.object(store, "latest_for_symbols", side_effect=[
+                float_rows, candle_rows, fresh_rows
+            ]), patch("tradescanner.engine.refresh_float_cache", return_value={
+                "status": "cached", "provider": "FMP", "rows_saved": 0
+            }), patch("tradescanner.engine.refresh_symbol_float", return_value={
+                "status": "cached", "provider": "FMP", "symbol": "AAPL",
+                "float_shares": 123456.0
+            }):
+                result = run_scan_cycle(
+                    store,
+                    universe_loader=lambda: {"symbols": ["AAPL", "MSFT"]},
+                    quote_fetcher=fetch,
+                    candle_fetcher=lambda symbol: {"candles": []},
+                )
+
+            self.assertEqual(result["targeted_float_symbol"], "AAPL")
+            self.assertEqual(result["float_symbol"], "AAPL")
+            self.assertEqual(result["float_shares"], 123456.0)
+            self.assertEqual(result["candle_symbol"], "MSFT")
+
+
 
 if __name__ == "__main__":
     unittest.main()
