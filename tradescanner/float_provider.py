@@ -214,7 +214,10 @@ def refresh_symbol_float(
         return {"status": "updated", "provider": "FMP", "symbol": normalized,
                 "rows_saved": 1, "float_shares": value}
     except urllib.error.HTTPError as exc:
-        if exc.code == 429:
+        # A billing/plan failure (402) or rate limit (429) affects the whole
+        # provider, not just one ticker. Pause all targeted FLOAT requests so
+        # each new scan candidate does not trigger another doomed request.
+        if exc.code in {402, 429}:
             try:
                 store.set_state("fmp_float_global_cooldown_until", current + FAILURE_COOLDOWN_SECONDS)
             except Exception:
