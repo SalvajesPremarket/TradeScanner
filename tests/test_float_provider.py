@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from tradescanner.float_provider import apply_cached_float, refresh_float_cache
+from tradescanner.float_provider import apply_cached_float, refresh_float_cache, refresh_symbol_float
 from tradescanner.snapshots import SnapshotStore
 
 
