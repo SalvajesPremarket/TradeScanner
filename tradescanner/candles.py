@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import math
+import os
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -72,7 +73,7 @@ class CandleStore:
     """Persist provider candles in the same SQLite database as quote snapshots."""
 
     def __init__(self, path: str | Path | None = None) -> None:
-        configured_url = __import__("os").getenv("DATABASE_URL", "").strip()
+        configured_url = os.getenv("DATABASE_URL", "").strip()
         self.path = (str(path) if path is not None else configured_url) or DEFAULT_DB_PATH
         if not is_postgres(self.path):
             Path(self.path).parent.mkdir(parents=True, exist_ok=True)
