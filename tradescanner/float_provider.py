@@ -8,13 +8,14 @@ from __future__ import annotations
 
 import json
 import os
-import sqlite3
 import time
 import urllib.error
 from datetime import datetime, timezone
 from typing import Any, Callable
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
+
+from tradescanner.db import DB_ERRORS, connect as db_connect
 
 FMP_FLOAT_URL = "https://financialmodelingprep.com/stable/shares-float-all"
 CACHE_TTL_SECONDS = 24 * 60 * 60
@@ -24,14 +25,14 @@ MAX_PAGES = 2
 HTTP_TIMEOUT_SECONDS = 5
 
 
-def _connect(store: Any) -> sqlite3.Connection:
-    connection = sqlite3.connect(str(store.path), timeout=10)
+def _connect(store: Any):
+    connection = db_connect(store.path)
     connection.execute(
         """CREATE TABLE IF NOT EXISTS float_cache (
             symbol TEXT PRIMARY KEY,
-            float_shares REAL NOT NULL,
+            float_shares DOUBLE PRECISION NOT NULL,
             source_date TEXT,
-            cached_at REAL NOT NULL,
+            cached_at DOUBLE PRECISION NOT NULL,
             source TEXT NOT NULL
         )"""
     )
@@ -260,7 +261,7 @@ def apply_cached_float(rows: list[dict[str, Any]], store: Any) -> list[dict[str,
                 f"SELECT symbol, float_shares, source_date FROM float_cache WHERE symbol IN ({placeholders})",
                 symbols,
             ).fetchall()
-    except (OSError, sqlite3.Error):
+    except DB_ERRORS + (OSError,):
         return rows
     cache = {
         symbol: {"float_shares": float_shares, "float_as_of": source_date, "float_source": "fmp"}
