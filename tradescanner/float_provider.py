@@ -261,7 +261,7 @@ def apply_cached_float(rows: list[dict[str, Any]], store: Any) -> list[dict[str,
                 f"SELECT symbol, float_shares, source_date FROM float_cache WHERE symbol IN ({placeholders})",
                 symbols,
             ).fetchall()
-    except (OSError, *DB_ERRORS):
+    except DB_ERRORS + (OSError,):
         return rows
     cache = {
         symbol: {"float_shares": float_shares, "float_as_of": source_date, "float_source": "fmp"}
