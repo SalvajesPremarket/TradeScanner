@@ -2,7 +2,6 @@ import asyncio
 import hmac
 import logging
 import os
-import sqlite3
 import time
 from datetime import datetime, timezone
 from contextlib import asynccontextmanager
@@ -12,6 +11,7 @@ from fastapi import FastAPI, HTTPException, Query, Body, Request
 from fastapi.responses import FileResponse
 
 from tradescanner.candles import CandleStore
+from tradescanner.db import DB_ERRORS, is_postgres
 from tradescanner.core import apply_filters, normalize_schwab_quotes
 from tradescanner.float_provider import apply_cached_float
 from tradescanner.infisical_vault import is_configured as infisical_is_configured
@@ -58,7 +58,7 @@ async def _automatic_scan_loop(stop: asyncio.Event) -> None:
             logger.error("Automatic scan cycle failed; error_type=%s", type(exc).__name__)
             try:
                 record_engine_status(SnapshotStore(), status="error", last_error=type(exc).__name__)
-            except (OSError, RuntimeError, sqlite3.Error):
+            except (OSError, RuntimeError) + DB_ERRORS:
                 pass
         try:
             await asyncio.wait_for(stop.wait(), timeout=interval)
@@ -121,7 +121,7 @@ def status():
     try:
         latest_rows = SnapshotStore().latest(limit=1000)
         results_published = sum(1 for row in latest_rows if row.get("quote_is_fresh") is True)
-    except (OSError, RuntimeError, sqlite3.Error, ValueError):
+    except (OSError, RuntimeError, ValueError) + DB_ERRORS:
         results_published = 0
     return {
         "service": "TradeScanner",
@@ -189,16 +189,16 @@ def snapshots_status():
     try:
         store = SnapshotStore()
         return {
-            "storage": "sqlite",
-            "storage_path_configured": bool(os.getenv("TRADESCANNER_DB_PATH")),
-            "durability_status": "not_verified",
+            "storage": "postgresql" if is_postgres(store.path) else "sqlite",
+            "storage_path_configured": bool(os.getenv("DATABASE_URL", "").strip() or os.getenv("TRADESCANNER_DB_PATH", "").strip()),
+            "durability_status": "managed_postgresql" if is_postgres(store.path) else "not_verified",
             "durability_note": (
-                "SQLite persistence is not guaranteed by setting a path alone; "
-                "verify that TRADESCANNER_DB_PATH points to a durable mounted volume."
+                "PostgreSQL is managed by the configured provider; verify the DATABASE_URL and "
+                "provider retention/backup settings. SQLite needs a durable mounted volume."
             ),
             **store.stats(),
         }
-    except (OSError, RuntimeError, sqlite3.Error):
+    except (OSError, RuntimeError) + DB_ERRORS:
         raise HTTPException(status_code=503, detail="Snapshot storage is unavailable.") from None
 
 
@@ -233,7 +233,7 @@ def snapshots_latest(limit: int = Query(100, ge=1, le=1000)):
                 if selected_strategy else None
             ),
         }
-    except (OSError, RuntimeError, sqlite3.Error, ValueError):
+    except (OSError, RuntimeError, ValueError) + DB_ERRORS:
         raise HTTPException(status_code=503, detail="Snapshot storage is unavailable.") from None
 
 
@@ -333,7 +333,7 @@ def candles_status(symbol: str, limit: int = Query(500, ge=1, le=5000)):
             "candles": candle_store.latest(normalized, limit),
             "rvol": candle_store.rvol(normalized),
         }
-    except (OSError, RuntimeError, sqlite3.Error, ValueError):
+    except (OSError, RuntimeError, ValueError) + DB_ERRORS:
         raise HTTPException(status_code=503, detail="Candle storage is unavailable.") from None
 
 
@@ -355,7 +355,7 @@ def scan(symbols: str = Query(..., description="Comma-separated ticker symbols; 
         raise HTTPException(status_code=400, detail=str(exc)) from None
     except SchwabAPIError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from None
-    except (OSError, RuntimeError, sqlite3.Error):
+    except (OSError, RuntimeError) + DB_ERRORS:
         raise HTTPException(status_code=503, detail="Snapshot storage is unavailable.") from None
 
     return {
