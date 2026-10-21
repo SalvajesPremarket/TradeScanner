@@ -28,6 +28,7 @@ from tradescanner.schwab import (
 
 ROOT = Path(__file__).resolve().parent
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
 
 
 async def _automatic_scan_loop(stop: asyncio.Event) -> None:
