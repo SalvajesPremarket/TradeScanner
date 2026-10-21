@@ -3,12 +3,12 @@ from __future__ import annotations
 
 import json
 import os
-import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
 from tradescanner.core import normalize_schwab_quotes
+from tradescanner.db import connect as db_connect, is_postgres
 from tradescanner.schwab import get_quotes
 
 DEFAULT_DB_PATH = Path(os.getenv("TRADESCANNER_DB_PATH", "data/tradescanner.sqlite3"))
@@ -19,13 +19,16 @@ class SnapshotStore:
     """Persist observed quote snapshots; configure TRADESCANNER_DB_PATH for durable storage."""
 
     def __init__(self, path: str | Path | None = None) -> None:
-        self.path = Path(path) if path is not None else DEFAULT_DB_PATH
-        self.path.parent.mkdir(parents=True, exist_ok=True)
+        configured_url = os.getenv("DATABASE_URL", "").strip()
+        self.path = (str(path) if path is not None else configured_url) or DEFAULT_DB_PATH
+        if not is_postgres(self.path):
+            Path(self.path).parent.mkdir(parents=True, exist_ok=True)
         with self._connect() as connection:
+            snapshot_id = "BIGSERIAL PRIMARY KEY" if is_postgres(self.path) else "INTEGER PRIMARY KEY AUTOINCREMENT"
             connection.execute(
-                """
+                f"""
                 CREATE TABLE IF NOT EXISTS quote_snapshots (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    id {snapshot_id},
                     captured_at TEXT NOT NULL,
                     symbol TEXT NOT NULL,
                     data_source TEXT NOT NULL,
@@ -42,8 +45,8 @@ class SnapshotStore:
                 "state_key TEXT PRIMARY KEY, state_json TEXT NOT NULL)"
             )
 
-    def _connect(self) -> sqlite3.Connection:
-        return sqlite3.connect(str(self.path), timeout=10)
+    def _connect(self):
+        return db_connect(self.path)
 
     def get_state(self, key: str, default: Any = None) -> Any:
         with self._connect() as connection:
