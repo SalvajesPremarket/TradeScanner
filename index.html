@@ -45,6 +45,18 @@
       <div><h1>Radar de acciones</h1><div class="subtitle">Interfaz base limpia de TradeScanner</div></div>
       <div class="status">Motor nuevo en desarrollo</div>
     </section>
+    <section class="panel" aria-label="Acceso de usuario">
+      <div class="panel-head"><h2>CUENTA · NEON AUTH</h2><span class="muted">Acceso seguro</span></div>
+      <div style="padding:14px 15px">
+        <form id="auth-form" style="display:flex;gap:10px;flex-wrap:wrap;align-items:end">
+          <label style="display:flex;flex-direction:column;gap:5px;flex:1;min-width:180px">Correo electrónico<input id="auth-email" type="email" autocomplete="email" required maxlength="254" style="padding:9px;border:1px solid #cbd5df;border-radius:3px"></label>
+          <label style="display:flex;flex-direction:column;gap:5px;flex:1;min-width:180px">Contraseña<input id="auth-password" type="password" autocomplete="current-password" required minlength="8" maxlength="128" style="padding:9px;border:1px solid #cbd5df;border-radius:3px"></label>
+          <button id="sign-in" type="submit">Iniciar sesión</button><button id="sign-up" type="button" style="background:white;color:#2f6f9f;border:1px solid #2f6f9f;padding:8px 12px">Crear cuenta</button>
+        </form>
+        <div id="signed-in" style="display:none;align-items:center;gap:12px;flex-wrap:wrap"><span id="user-label"></span><button id="sign-out" type="button">Cerrar sesión</button></div>
+        <div id="auth-message" role="status" aria-live="polite" style="margin-top:10px;color:#718096;font-size:12px">Comprueba tu correo y contraseña para entrar o crea una cuenta.</div>
+      </div>
+    </section>
     <section class="panel" aria-label="Radar de acciones">
       <div class="panel-head"><h2>ACCIONES</h2></div>
       <div class="filters-title">FILTROS</div>
@@ -66,5 +78,50 @@
       <footer>Interfaz limpia. Sin fórmulas, datos simulados ni conexiones al sistema anterior.</footer>
     </section>
   </main>
+  <script>
+    // Neon Managed Auth (Better Auth), production branch of tradescanner-db.
+    const AUTH_BASE = "https://ep-soft-dew-b5v4h9wx.neonauth.c-7.us-east-2.aws.neon.tech/neondb/auth";
+    const form = document.getElementById("auth-form");
+    const email = document.getElementById("auth-email");
+    const password = document.getElementById("auth-password");
+    const message = document.getElementById("auth-message");
+    const signedIn = document.getElementById("signed-in");
+    const userLabel = document.getElementById("user-label");
+    const signIn = document.getElementById("sign-in");
+    const signUp = document.getElementById("sign-up");
+    function showMessage(text, error=false) { message.textContent=text; message.style.color=error?"#a32929":"#718096"; }
+    async function authRequest(path, body) {
+      const response = await fetch(AUTH_BASE+path, {method:body?"POST":"GET", credentials:"include",
+        headers:body?{"Content-Type":"application/json"}:{}, body:body?JSON.stringify(body):undefined});
+      let data={}; try { data=await response.json(); } catch (_) {}
+      if (!response.ok || data.error) throw new Error(data.message||data.error||"Error de autenticación ("+response.status+").");
+      return data;
+    }
+    function setSession(user) {
+      if (user) { form.style.display="none"; signedIn.style.display="flex"; userLabel.textContent="Sesión iniciada: "+(user.email||user.name||"usuario"); showMessage("Sesión activa."); }
+      else { form.style.display="flex"; signedIn.style.display="none"; }
+    }
+    async function refreshSession() {
+      try { const d=await authRequest("/get-session"); setSession(d.user||(d.session&&d.session.user)||null); }
+      catch (_) { setSession(null); showMessage("No se pudo comprobar la sesión. Verifica el dominio autorizado de la aplicación en Neon.",true); }
+    }
+    form.addEventListener("submit",async e=>{
+      e.preventDefault(); signIn.disabled=signUp.disabled=true;
+      try { const d=await authRequest("/sign-in/email",{email:email.value.trim(),password:password.value}); setSession(d.user||(d.session&&d.session.user)||null); if(!d.user&&!d.session) await refreshSession(); showMessage("Inicio de sesión enviado correctamente."); }
+      catch(err){showMessage(err.message||"No se pudo iniciar sesión.",true);}
+      finally{signIn.disabled=signUp.disabled=false;}
+    });
+    signUp.addEventListener("click",async()=>{
+      if(!form.reportValidity()) return; signIn.disabled=signUp.disabled=true;
+      try { const d=await authRequest("/sign-up/email",{email:email.value.trim(),password:password.value,name:email.value.trim().split("@")[0]}); setSession(d.user||(d.session&&d.session.user)||null); if(!d.user&&!d.session) await refreshSession(); showMessage("Registro completado."); }
+      catch(err){showMessage(err.message||"No se pudo crear la cuenta.",true);}
+      finally{signIn.disabled=signUp.disabled=false;}
+    });
+    document.getElementById("sign-out").addEventListener("click",async()=>{
+      try{await authRequest("/sign-out",{});setSession(null);password.value="";showMessage("Sesión cerrada.");}
+      catch(err){showMessage(err.message||"No se pudo cerrar sesión.",true);}
+    });
+    refreshSession();
+  </script>
 </body>
 </html>
