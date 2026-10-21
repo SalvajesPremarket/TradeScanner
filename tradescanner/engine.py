@@ -202,7 +202,10 @@ def run_scan_cycle(
                 candle_state["candle_error"] = type(exc).__name__
         logger.warning("Scan cycle stage=price_history_finished candles_saved=%s", candle_state.get("candles_saved", 0))
         next_cursor = (cursor + len(batch)) % len(symbols)
+        logger.warning("Scan cycle stage=cursor_persist_started cursor=%s", next_cursor)
         target_store.set_state("universe_cursor", next_cursor)
+        logger.warning("Scan cycle stage=cursor_persist_finished")
+        logger.warning("Scan cycle stage=engine_status_persist_started")
         state = record_engine_status(
             target_store,
             status="running",
@@ -224,13 +227,17 @@ def run_scan_cycle(
             targeted_float_symbol=targeted_float_state.get("symbol"),
             cycles_completed=int(target_store.get_state("cycles_completed", 0)) + 1,
         )
+        logger.warning("Scan cycle stage=engine_status_persist_finished cycles_completed=%s", state.get("cycles_completed"))
         # Only mark market-data connectivity from provider timestamps that are
         # within the accepted freshness window; a newly fetched stale quote is not live data.
+        logger.warning("Scan cycle stage=freshness_check_started")
         latest_rows = target_store.latest_for_symbols(batch)
+        logger.warning("Scan cycle stage=freshness_check_finished rows=%s", len(latest_rows))
         if any(row.get("quote_is_fresh") is True for row in latest_rows):
             state["last_quote_received_at"] = _now()
             target_store.set_state("engine_status", state)
         target_store.set_state("cycles_completed", state["cycles_completed"])
+        logger.warning("Scan cycle stage=cycle_returning status=completed cycles_completed=%s snapshots_saved=%s", state.get("cycles_completed"), state.get("snapshots_saved"))
         return {"status": "completed", **state}
     except (SchwabConfigurationError, SchwabAPIError, ValueError, OSError, sqlite3.Error) as exc:
         target_store = store or SnapshotStore()
