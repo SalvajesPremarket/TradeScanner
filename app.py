@@ -40,7 +40,7 @@ async def _automatic_scan_loop(stop: asyncio.Event) -> None:
         interval = max(10, int(os.getenv("TRADESCANNER_SCAN_INTERVAL_SECONDS", "30")))
     except ValueError:
         interval = 30
-    logger.info("Automatic scan loop enabled; interval_seconds=%s", interval)
+    logger.warning("Automatic scan loop coroutine entered; interval_seconds=%s", interval)
 
     while not stop.is_set():
         started = time.monotonic()
@@ -71,6 +71,7 @@ async def lifespan(application: FastAPI):
     stop = asyncio.Event()
     task = asyncio.create_task(_automatic_scan_loop(stop))
     application.state.scan_task = task
+    await asyncio.sleep(0)  # Give the scan coroutine a scheduling turn before startup completes.
     logger.warning(
         "TradeScanner lifespan started; automatic_scan_enabled=%s",
         os.getenv("TRADESCANNER_AUTO_SCAN_ENABLED", "false").strip().lower()
