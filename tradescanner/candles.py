@@ -2,13 +2,13 @@
 from __future__ import annotations
 
 import math
-import sqlite3
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
 from tradescanner.snapshots import DEFAULT_DB_PATH
+from tradescanner.db import connect as db_connect, is_postgres
 
 MARKET_TZ = ZoneInfo("America/New_York")
 
@@ -72,19 +72,21 @@ class CandleStore:
     """Persist provider candles in the same SQLite database as quote snapshots."""
 
     def __init__(self, path: str | Path | None = None) -> None:
-        self.path = Path(path) if path is not None else DEFAULT_DB_PATH
-        self.path.parent.mkdir(parents=True, exist_ok=True)
+        configured_url = __import__("os").getenv("DATABASE_URL", "").strip()
+        self.path = (str(path) if path is not None else configured_url) or DEFAULT_DB_PATH
+        if not is_postgres(self.path):
+            Path(self.path).parent.mkdir(parents=True, exist_ok=True)
         with self._connect() as connection:
             connection.execute(
                 """CREATE TABLE IF NOT EXISTS intraday_candles (
                     symbol TEXT NOT NULL,
-                    candle_time_ms INTEGER NOT NULL,
-                    open REAL NOT NULL,
-                    high REAL NOT NULL,
-                    low REAL NOT NULL,
-                    close REAL NOT NULL,
-                    volume INTEGER NOT NULL,
-                    fetched_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    candle_time_ms BIGINT NOT NULL,
+                    open DOUBLE PRECISION NOT NULL,
+                    high DOUBLE PRECISION NOT NULL,
+                    low DOUBLE PRECISION NOT NULL,
+                    close DOUBLE PRECISION NOT NULL,
+                    volume BIGINT NOT NULL,
+                    fetched_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     PRIMARY KEY(symbol, candle_time_ms)
                 )"""
             )
@@ -93,8 +95,8 @@ class CandleStore:
                 "ON intraday_candles(symbol, candle_time_ms)"
             )
 
-    def _connect(self) -> sqlite3.Connection:
-        return sqlite3.connect(str(self.path), timeout=10)
+    def _connect(self):
+        return db_connect(self.path)
 
     def save(self, candles: list[dict[str, Any]]) -> int:
         if not candles:
