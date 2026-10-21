@@ -20,6 +20,7 @@ def is_postgres(database: str | Path | None = None) -> bool:
 
 class Connection:
     """Keep the existing qmark SQL API while using psycopg for PostgreSQL."""
+
     def __init__(self, raw: Any, postgres: bool) -> None:
         self.raw = raw
         self.postgres = postgres
@@ -32,8 +33,9 @@ class Connection:
         try:
             return self.raw.__exit__(exc_type, exc, tb)
         finally:
-            if not self.postgres:
-                self.raw.close()
+            # psycopg's connection context commits/rolls back but does not close
+            # the connection. Always close it to avoid leaking DB connections.
+            self.raw.close()
 
     def execute(self, sql: str, params: Any = ()):
         if self.postgres:
