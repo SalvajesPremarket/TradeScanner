@@ -3,13 +3,13 @@ from __future__ import annotations
 
 import logging
 import os
-import sqlite3
 import threading
 import time
 from datetime import datetime, timezone
 from typing import Any, Callable
 
 from tradescanner.candles import CandleStore, normalize_price_history
+from tradescanner.db import DB_ERRORS
 from tradescanner.float_provider import refresh_float_cache, refresh_symbol_float
 from tradescanner.infisical_vault import is_configured as infisical_is_configured
 from tradescanner.snapshots import BATCH_SIZE, SnapshotStore, collect_snapshots
@@ -161,7 +161,7 @@ def run_scan_cycle(
                 candle_state["float_shares"] = float_status_row.get("float_shares")
                 candle_state["float_as_of"] = float_status_row.get("float_as_of")
                 candle_state["float_source"] = float_status_row.get("float_source")
-            except (OSError, RuntimeError, sqlite3.Error, ValueError):
+            except (OSError, RuntimeError, ValueError) + DB_ERRORS:
                 pass
 
         # One bounded historical request per successful quote cycle. Prefer the
@@ -198,7 +198,7 @@ def run_scan_cycle(
                     candle_state["rvol_sessions_used"] = rvol.get("sessions_used", 0)
                     # Keep FLOAT diagnostics tied to the independently queried FLOAT symbol.
                     # Candle sampling can select a different ticker and must not overwrite it.
-            except (SchwabAPIError, SchwabConfigurationError, ValueError, OSError, RuntimeError, sqlite3.Error) as exc:
+            except (SchwabAPIError, SchwabConfigurationError, ValueError, OSError, RuntimeError) + DB_ERRORS as exc:
                 candle_state["candle_error"] = type(exc).__name__
         logger.warning("Scan cycle stage=price_history_finished candles_saved=%s", candle_state.get("candles_saved", 0))
         next_cursor = (cursor + len(batch)) % len(symbols)
@@ -239,7 +239,7 @@ def run_scan_cycle(
         target_store.set_state("cycles_completed", state["cycles_completed"])
         logger.warning("Scan cycle stage=cycle_returning status=completed cycles_completed=%s snapshots_saved=%s", state.get("cycles_completed"), state.get("snapshots_saved"))
         return {"status": "completed", **state}
-    except (SchwabConfigurationError, SchwabAPIError, ValueError, OSError, sqlite3.Error) as exc:
+    except (SchwabConfigurationError, SchwabAPIError, ValueError, OSError) + DB_ERRORS as exc:
         target_store = store or SnapshotStore()
         state = record_engine_status(
             target_store,
