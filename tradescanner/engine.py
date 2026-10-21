@@ -1,6 +1,7 @@
 """Incremental, restart-safe quote scanner for the clean TradeScanner core."""
 from __future__ import annotations
 
+import logging
 import os
 import sqlite3
 import threading
@@ -14,6 +15,9 @@ from tradescanner.infisical_vault import is_configured as infisical_is_configure
 from tradescanner.snapshots import BATCH_SIZE, SnapshotStore, collect_snapshots
 from tradescanner.schwab import SchwabAPIError, SchwabConfigurationError, get_price_history, get_quotes
 from tradescanner.universe import load_symbol_universe
+
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
 
 UNIVERSE_CACHE_SECONDS = 6 * 60 * 60
 _universe_cache: dict[str, Any] | None = None
@@ -81,7 +85,9 @@ def run_scan_cycle(
             )
             return {"status": state["status"], "provider": "Schwab"}
 
+        logger.warning("Scan cycle stage=load_universe_started")
         universe = _load_cached_universe(universe_loader)
+        logger.warning("Scan cycle stage=load_universe_finished symbols=%s", universe.get("count", "unknown"))
         symbols = universe.get("symbols")
         if not isinstance(symbols, list) or not symbols:
             raise ValueError("The listed-symbol universe is empty.")
@@ -99,14 +105,18 @@ def run_scan_cycle(
             batch.extend(symbols[:BATCH_SIZE - len(batch)])
         started = time.monotonic()
         cycle_started_at = _now()
+        logger.warning("Scan cycle stage=schwab_quotes_started batch_size=%s", len(batch))
         result = collect_snapshots(batch, target_store, quote_fetcher or get_quotes)
+        logger.warning("Scan cycle stage=schwab_quotes_finished received=%s saved=%s", result.get("received_count", 0), result.get("snapshots_saved", 0))
         if result["received_count"] <= 0 or result["snapshots_saved"] <= 0:
             raise SchwabAPIError(
                 "Schwab returned no persistable quotes; the universe cursor was not advanced."
             )
         # FMP is used only for public float. Its cached bulk dataset refreshes at
         # most daily (six-hour cooldown on failures); it never supplies quotes.
+        logger.warning("Scan cycle stage=float_cache_refresh_started")
         float_provider_state = refresh_float_cache(target_store)
+        logger.warning("Scan cycle stage=float_cache_refresh_finished status=%s", float_provider_state.get("status", "unknown"))
         candle_state: dict[str, Any] = {
             "candle_symbol": None,
             "candles_saved": 0,
@@ -159,6 +169,7 @@ def run_scan_cycle(
         # or cursor progress if the separate candle endpoint is unavailable.
         history_fetch = candle_fetcher or (get_price_history if quote_fetcher is None else None)
         if history_fetch is not None:
+            logger.warning("Scan cycle stage=price_history_started")
             try:
                 rows = target_store.latest_for_symbols(batch)
                 eligible = [
@@ -189,6 +200,7 @@ def run_scan_cycle(
                     # Candle sampling can select a different ticker and must not overwrite it.
             except (SchwabAPIError, SchwabConfigurationError, ValueError, OSError, RuntimeError, sqlite3.Error) as exc:
                 candle_state["candle_error"] = type(exc).__name__
+        logger.warning("Scan cycle stage=price_history_finished candles_saved=%s", candle_state.get("candles_saved", 0))
         next_cursor = (cursor + len(batch)) % len(symbols)
         target_store.set_state("universe_cursor", next_cursor)
         state = record_engine_status(
