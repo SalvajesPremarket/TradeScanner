@@ -16,7 +16,7 @@ from tradescanner.db import DB_ERRORS, is_postgres
 from tradescanner.core import apply_filters, normalize_schwab_quotes
 import urllib.error
 
-from tradescanner.float_provider import apply_cached_float, _fetch_page
+from tradescanner.float_provider import apply_cached_float, _fetch_page, _fetch_symbol_float
 from tradescanner.infisical_vault import is_configured as infisical_is_configured
 from tradescanner.engine import get_engine_status, record_engine_status, run_scan_cycle
 from tradescanner.snapshots import SnapshotStore, collect_snapshots
@@ -154,7 +154,7 @@ def status():
 
 @app.post("/api/diagnostics/float/fmp")
 def diagnose_fmp_float(request: Request):
-    """One-shot, read-only FMP FLOAT check; requires a valid Neon session."""
+    """One-shot, read-only check of FMP bulk and per-symbol FLOAT endpoints."""
     _authorize_strategy_access(request)
     api_key = os.getenv("FMP_API_KEY", "").strip()
     if not api_key:
@@ -164,8 +164,23 @@ def diagnose_fmp_float(request: Request):
             "key_configured": False,
             "provider_http_status": None,
             "usable_records": 0,
+            "cache_modified": False,
         }
 
+    result = {
+        "provider": "FMP",
+        "key_configured": True,
+        "cache_modified": False,
+        "bulk_status": "not_tested",
+        "bulk_http_status": None,
+        "records_received": 0,
+        "usable_records": 0,
+        "targeted_symbol": "NVDA",
+        "targeted_status": "not_tested",
+        "targeted_http_status": None,
+        "targeted_records_received": 0,
+        "targeted_usable_records": 0,
+    }
     try:
         records = _fetch_page(0, api_key)
         usable = sum(
@@ -176,35 +191,48 @@ def diagnose_fmp_float(request: Request):
             and not isinstance(item.get("floatShares"), bool)
             and item.get("floatShares", 0) > 0
         )
-        return {
-            "provider": "FMP",
-            "status": "ok" if usable else "no_usable_data",
-            "key_configured": True,
-            "provider_http_status": 200,
+        result.update({
+            "bulk_status": "ok" if usable else "no_usable_data",
+            "bulk_http_status": 200,
             "records_received": len(records),
             "usable_records": usable,
-            "cache_modified": False,
-        }
+        })
     except urllib.error.HTTPError as exc:
-        return {
-            "provider": "FMP",
-            "status": "unavailable",
-            "key_configured": True,
-            "provider_http_status": exc.code,
-            "usable_records": 0,
-            "cache_modified": False,
-        }
+        result.update({"bulk_status": "unavailable", "bulk_http_status": exc.code})
     except Exception as exc:
-        logger.warning("FMP FLOAT diagnostic failed; error_type=%s", type(exc).__name__)
-        return {
-            "provider": "FMP",
-            "status": "unavailable",
-            "key_configured": True,
-            "provider_http_status": None,
-            "error_type": type(exc).__name__,
-            "usable_records": 0,
-            "cache_modified": False,
-        }
+        logger.warning("FMP bulk FLOAT diagnostic failed; error_type=%s", type(exc).__name__)
+        result.update({"bulk_status": "unavailable", "bulk_error_type": type(exc).__name__})
+
+    try:
+        targeted = _fetch_symbol_float("NVDA", api_key)
+        usable_targeted = any(
+            isinstance(item, dict)
+            and str(item.get("symbol", "")).strip().upper() == "NVDA"
+            and isinstance(item.get("floatShares"), (int, float))
+            and not isinstance(item.get("floatShares"), bool)
+            and item.get("floatShares", 0) > 0
+            for item in targeted
+        )
+        result.update({
+            "targeted_status": "ok" if usable_targeted else "no_usable_data",
+            "targeted_http_status": 200,
+            "targeted_records_received": len(targeted),
+            "targeted_usable_records": int(usable_targeted),
+        })
+    except urllib.error.HTTPError as exc:
+        result.update({"targeted_status": "unavailable", "targeted_http_status": exc.code})
+    except Exception as exc:
+        logger.warning("FMP targeted FLOAT diagnostic failed; error_type=%s", type(exc).__name__)
+        result.update({"targeted_status": "unavailable", "targeted_error_type": type(exc).__name__})
+
+    result["status"] = (
+        "ok" if result["bulk_status"] == "ok" and result["targeted_status"] == "ok"
+        else "partial" if result["bulk_status"] == "ok" or result["targeted_status"] == "ok"
+        else "unavailable"
+    )
+    # Legacy fields remain available for older UI clients.
+    result["provider_http_status"] = result["bulk_http_status"]
+    return result
 
 
 @app.get("/api/engine/status")
