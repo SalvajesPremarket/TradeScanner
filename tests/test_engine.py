@@ -365,7 +365,9 @@ class AutomaticEngineTests(unittest.TestCase):
                     candle_fetcher=fetch_history,
                 )
 
-            self.assertEqual(requested_history, ["LIQUID", "THIN"])
+            # The per-cycle request budget is three; both eligible symbols are
+            # refreshed each cycle when the queue contains only two candidates.
+            self.assertEqual(requested_history, ["LIQUID", "THIN", "LIQUID", "THIN"])
             self.assertEqual(store.get_state("momentum_history_queue"), [])
 
 
