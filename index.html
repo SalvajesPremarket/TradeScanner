@@ -263,7 +263,7 @@
       try {
         const [engineResponse, snapshotsResponse] = await Promise.all([
           fetch("/api/engine/status", { cache: "no-store" }),
-          fetch("/api/snapshots/latest?limit=1000", { cache: "no-store" })
+          fetch("/api/snapshots/latest?limit=100", { cache: "no-store" })
         ]);
         if (!engineResponse.ok || !snapshotsResponse.ok) throw new Error("API unavailable");
         const enginePayload = await engineResponse.json();
