@@ -167,9 +167,11 @@
       }) : "—";
     }
 
-    function cell(row, value) {
+    function cell(row, value, missingTitle) {
       const td = document.createElement("td");
-      td.textContent = value === null || value === undefined || value === "" ? "—" : String(value);
+      const missing = value === null || value === undefined || value === "";
+      td.textContent = missing ? "—" : String(value);
+      if (missing && missingTitle) td.title = missingTitle;
       row.appendChild(td);
     }
 
@@ -223,11 +225,11 @@
         cell(tr, item.price == null ? "—" : "$" + displayNumber(item.price));
         cell(tr, item.change_pct == null ? "—" : displayNumber(item.change_pct) + "%");
         cell(tr, item.gap_pct == null ? "—" : displayNumber(item.gap_pct) + "%");
-        cell(tr, item.float_shares == null ? "—" : displayNumber(item.float_shares, 0));
-        cell(tr, item.rvol == null ? "—" : displayNumber(item.rvol) + "x");
-        cell(tr, item.volume == null ? "—" : displayNumber(item.volume, 0));
-        cell(tr, item.sector);
-        cell(tr, "—");
+        cell(tr, item.float_shares == null ? null : displayNumber(item.float_shares, 0), "FLOAT no disponible: no se inventan valores; se usa el dato de Schwab o la caché local de FMP.");
+        cell(tr, item.rvol == null ? null : displayNumber(item.rvol) + "x", "RVOL no disponible: hacen falta velas actuales y al menos dos sesiones históricas comparables.");
+        cell(tr, item.volume == null ? null : displayNumber(item.volume, 0));
+        cell(tr, item.sector, "Sector no proporcionado en los datos actuales del proveedor.");
+        cell(tr, "—", "Gráfico no disponible en esta fila; consulta la pestaña GRÁFICOS para un ticker con velas guardadas.");
         rowsNode.appendChild(tr);
       }
     }
@@ -339,6 +341,9 @@
         if (state.last_error) details.push("Error motor: " + state.last_error);
         if (state.candle_error) details.push("Error velas: " + state.candle_error);
         if (state.float_error) details.push("Error FLOAT: " + state.float_error);
+        if (state.targeted_float_provider_http_status != null) details.push("FMP HTTP: " + state.targeted_float_provider_http_status);
+        if (state.targeted_float_cooldown_reason) details.push("Motivo cooldown FLOAT: " + state.targeted_float_cooldown_reason);
+        if (state.targeted_float_cooldown_remaining_seconds != null) details.push("Cooldown FLOAT restante: " + Math.ceil(state.targeted_float_cooldown_remaining_seconds / 60) + " min");
         if (enginePayload.float_provider) details.push("FLOAT: " + enginePayload.float_provider);
         if (!details.length && state.status === "waiting_for_credentials") details.push("Configurar credenciales seguras de Schwab en el servicio.");
         if (!details.length) details.push("Esperando el primer lote real.");
@@ -613,6 +618,12 @@
           ["FLOAT · resultado",state.float_shares==null?"No disponible":Number(state.float_shares).toLocaleString("en-US")],
           ["FLOAT · fuente y fecha",state.float_source?(state.float_source+" · "+(state.float_as_of||"fecha no informada")):"Sin dato confirmado"],
           ["FLOAT · estado por símbolo",state.targeted_float_status||"Sin estado"],
+          ["FLOAT · HTTP proveedor",state.targeted_float_provider_http_status==null?"Sin código HTTP":state.targeted_float_provider_http_status],
+          ["FLOAT · motivo cooldown",state.targeted_float_cooldown_reason||"Sin cooldown global reportado"],
+          ["FLOAT · minutos de cooldown restantes",state.targeted_float_cooldown_remaining_seconds==null?"No aplica":Math.ceil(state.targeted_float_cooldown_remaining_seconds/60)],
+          ["RVOL · ticker histórico actual",state.candle_symbol||"Ninguno"],
+          ["RVOL · sesiones comparables",state.rvol_sessions_used==null?"0":state.rvol_sessions_used],
+          ["RVOL · valor calculado",state.rvol==null?"Sin datos suficientes":Number(state.rvol).toFixed(4)+"x"],
           ["FLOAT · error",state.float_error||"Ninguno reportado"]
         ];
         for(const [title,value] of cards){const card=document.createElement("div");card.className="data-card";const h=document.createElement("strong");h.textContent=title;const p=document.createElement("p");p.textContent=String(value);p.style.margin="8px 0 0";card.append(h,p);target.appendChild(card);}
