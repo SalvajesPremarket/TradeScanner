@@ -10,7 +10,7 @@ from typing import Any, Callable
 
 from tradescanner.candles import CandleStore, normalize_price_history
 from tradescanner.db import DB_ERRORS
-from tradescanner.float_provider import refresh_float_cache, refresh_symbol_float
+from tradescanner.float_provider import apply_cached_float, refresh_float_cache, refresh_symbol_float
 from tradescanner.infisical_vault import is_configured as infisical_is_configured
 from tradescanner.snapshots import BATCH_SIZE, SnapshotStore, collect_snapshots
 from tradescanner.schwab import SchwabAPIError, SchwabConfigurationError, get_price_history, get_quotes
@@ -136,16 +136,39 @@ def run_scan_cycle(
         # FMP's symbol endpoint. This is at most one additional bounded request per cycle.
         try:
             latest_rows_for_float = target_store.latest_for_symbols(batch)
-            missing_float = [row for row in latest_rows_for_float
-                             if row.get("float_shares") is None and isinstance(row.get("symbol"), str)]
+            # Check the freshly refreshed bulk cache before deciding that a symbol
+            # needs the paid/plan-restricted per-symbol endpoint. apply_cached_float
+            # is strictly local: it never makes a provider request.
+            apply_cached_float(latest_rows_for_float, target_store)
+            known_float = [
+                row for row in latest_rows_for_float
+                if isinstance(row.get("symbol"), str) and row.get("float_shares") is not None
+            ]
+            missing_float = [
+                row for row in latest_rows_for_float
+                if row.get("float_shares") is None and isinstance(row.get("symbol"), str)
+            ]
             if missing_float:
                 float_candidate = max(
                     missing_float,
                     key=lambda row: row.get("volume") if isinstance(row.get("volume"), (int, float)) else -1,
                 )
                 targeted_float_state = refresh_symbol_float(target_store, float_candidate["symbol"])
+            elif known_float:
+                # Report a real cache hit in engine diagnostics instead of "not_needed"
+                # with no symbol/value. Prefer the most actively traded known symbol.
+                float_candidate = max(
+                    known_float,
+                    key=lambda row: row.get("volume") if isinstance(row.get("volume"), (int, float)) else -1,
+                )
+                targeted_float_state = {
+                    "status": "cached_bulk",
+                    "provider": "FMP",
+                    "symbol": str(float_candidate["symbol"]).strip().upper(),
+                    "float_shares": float_candidate.get("float_shares"),
+                }
             else:
-                targeted_float_state = {"status": "not_needed", "provider": "FMP"}
+                targeted_float_state = {"status": "not_found_in_bulk", "provider": "FMP"}
         except Exception as exc:
             targeted_float_state = {"status": "unavailable", "provider": "FMP", "error": type(exc).__name__}
         if targeted_float_state.get("status") in {"unavailable", "not_found", "cooldown", "not_configured"}:
