@@ -386,7 +386,7 @@
         const title = document.createElement("strong"); title.textContent = strategy.name; card.appendChild(title);
         const details = document.createElement("div"); details.className = "muted";
         if (strategy.execution_mode === "momentum_native") {
-          details.textContent = "PYTHON · " + (strategy.enabled ? "ACTIVA" : "INACTIVA") + " · EVALUADOR MOMENTUM NATIVO · REQUIERE HISTORIAL, VOLUMEN BASE Y NOTICIAS";
+          details.textContent = "PYTHON · " + (strategy.enabled ? "ACTIVA" : "INACTIVA") + " · EVALUADOR MOMENTUM NATIVO · DIAGNÓSTICO DE DATOS";
         } else {
           details.textContent = strategy.language.toUpperCase() + (strategy.enabled ? " · ACTIVA" : " · INACTIVA") + (strategy.execution_ready ? " · EJECUTABLE (SUBCONJUNTO SEGURO)" : " · SOLO GUARDADA");
         }
