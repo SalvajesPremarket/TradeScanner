@@ -13,6 +13,8 @@ from tradescanner.db import DB_ERRORS
 from tradescanner.float_provider import refresh_float_cache, refresh_symbol_float
 from tradescanner.infisical_vault import is_configured as infisical_is_configured
 from tradescanner.snapshots import BATCH_SIZE, SnapshotStore, collect_snapshots
+from tradescanner.strategies import active_strategy
+from tradescanner.news_provider import refresh_news_cache
 from tradescanner.schwab import SchwabAPIError, SchwabConfigurationError, get_price_history, get_quotes
 from tradescanner.universe import load_symbol_universe
 
@@ -112,6 +114,14 @@ def run_scan_cycle(
             raise SchwabAPIError(
                 "Schwab returned no persistable quotes; the universe cursor was not advanced."
             )
+        news_state = {"status": "not_needed", "provider": "FMP", "articles_saved": 0}
+        try:
+            configured_strategy = active_strategy(target_store)
+            if configured_strategy and configured_strategy.get("execution_mode") == "momentum_native":
+                news_state = refresh_news_cache(target_store, batch)
+        except (OSError, RuntimeError, ValueError) + DB_ERRORS as exc:
+            news_state = {"status": "unavailable", "provider": "FMP", "error": type(exc).__name__}
+        # FMP news is optional and cached; unavailable news never becomes a positive signal.
         # FMP is used only for public float. Its cached bulk dataset refreshes at
         # most daily (six-hour cooldown on failures); it never supplies quotes.
         logger.warning("Scan cycle stage=float_cache_refresh_started")
@@ -128,6 +138,8 @@ def run_scan_cycle(
             "float_as_of": None,
             "float_source": None,
             "float_error": None,
+            "news_provider_status": news_state.get("status"),
+            "news_articles_saved": news_state.get("articles_saved", 0),
         }
         # If Schwab does not provide FLOAT, fill the current scan candidate from
         # FMP's symbol endpoint. This is at most one additional bounded request per cycle.
