@@ -177,7 +177,15 @@ def refresh_symbol_float(
     try:
         global_cooldown_until = float(store.get_state("fmp_float_global_cooldown_until", 0) or 0)
         if current < global_cooldown_until:
-            return {"status": "cooldown", "provider": "FMP", "symbol": normalized}
+            reason = store.get_state("fmp_float_global_cooldown_reason", "provider_cooldown")
+            http_status = store.get_state("fmp_float_global_cooldown_http_status")
+            return {
+                "status": "cooldown", "provider": "FMP", "symbol": normalized,
+                "cooldown_scope": "global",
+                "cooldown_reason": reason if isinstance(reason, str) else "provider_cooldown",
+                "provider_http_status": http_status if isinstance(http_status, int) else None,
+                "cooldown_remaining_seconds": max(0, int(global_cooldown_until - current)),
+            }
         with _connect(store) as connection:
             cached = connection.execute(
                 "SELECT float_shares, source_date, cached_at FROM float_cache WHERE symbol = ?",
@@ -221,6 +229,9 @@ def refresh_symbol_float(
         if exc.code in {402, 429}:
             try:
                 store.set_state("fmp_float_global_cooldown_until", current + FAILURE_COOLDOWN_SECONDS)
+                store.set_state("fmp_float_global_cooldown_reason",
+                                "billing_or_plan_restriction" if exc.code == 402 else "rate_limited")
+                store.set_state("fmp_float_global_cooldown_http_status", exc.code)
             except Exception:
                 pass
         return {"status": "unavailable", "provider": "FMP", "symbol": normalized,
