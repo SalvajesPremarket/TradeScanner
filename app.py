@@ -267,17 +267,13 @@ def _authorize_strategy_access(request: Request) -> None:
         # Neon Auth issues tokens whose audience may be deployment-specific. Verify
         # the signature against Neon JWKS, expiration, subject, and issuer below; do not
         # assume a hard-coded audience that rejects valid Neon sessions.
+        # Verify signature with Neon JWKS, expiration, subject, and issuer.
+        # Neon deployment audience is not stable across this setup, so do not hard-code it.
         claims = jwt.decode(
             token.strip(),
             signing_key,
             algorithms=["EdDSA", "ES256", "RS256"],
             options={"verify_aud": False, "require": ["exp", "sub", "iss"]},
-        )        # trailing slash. Signature, audience, expiry, and identity claims remain validated.
-        claims = jwt.decode(
-            token.strip(),
-            signing_key,
-            algorithms=["EdDSA", "ES256", "RS256"],
-            options={"require": ["exp", "sub", "iss"]},
         )
         token_issuer = claims.get("iss")
         if not isinstance(token_issuer, str) or token_issuer.rstrip("/") != issuer.rstrip("/"):
