@@ -200,7 +200,7 @@ class AppEntrypointTests(unittest.TestCase):
         with patch("app.SnapshotStore") as store_class, patch("app.CandleStore") as candle_class, patch(
             "app.active_strategy",
             return_value={"id": "strategy-1", "name": "GAP mínimo", "language": "formula", "source": "gap_pct >= 3", "enabled": True},
-        ), patch("app.strategy_matches", side_effect=lambda strategy, row: row.get("gap_pct", 0) >= 3):
+        ), patch("app.strategy_matches", side_effect=lambda strategy, row, history=None: row.get("gap_pct", 0) >= 3):
             store = store_class.return_value
             store.latest.return_value = rows
             store.path = "unused-test-db"
