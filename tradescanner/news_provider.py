@@ -83,16 +83,24 @@ def refresh_news_cache(
         cooldown_until = float(store.get_state("fmp_news_cooldown_until", 0) or 0)
         if current < cooldown_until:
             return {"status": "cooldown", "provider": "FMP", "articles_saved": 0}
-        last_success = float(store.get_state("fmp_news_last_success_at", 0) or 0)
-        if current - last_success < CACHE_TTL_SECONDS:
+        checked = store.get_state("fmp_news_checked_symbols", {})
+        if not isinstance(checked, dict):
+            checked = {}
+        # Cache coverage per ticker, not globally: a successful request for one
+        # quote batch must not suppress news lookups for every other ticker.
+        due_symbols = [
+            symbol for symbol in normalized
+            if current - float(checked.get(symbol, 0) or 0) >= CACHE_TTL_SECONDS
+        ]
+        if not due_symbols:
             return {"status": "cached", "provider": "FMP", "articles_saved": 0}
         store.set_state("fmp_news_last_attempt_at", current)
-    except (OSError, RuntimeError) + DB_ERRORS:
+    except (OSError, RuntimeError, TypeError, ValueError) + DB_ERRORS:
         return {"status": "unavailable", "provider": "FMP", "articles_saved": 0}
 
     fetch = fetcher or _fetch_news
     try:
-        articles = fetch(normalized, api_key)
+        articles = fetch(due_symbols, api_key)
         records: dict[tuple[str, str, str], tuple[str | None, str | None]] = {}
         for article in articles[:MAX_ARTICLES]:
             symbol = article.get("symbol")
@@ -101,7 +109,7 @@ def refresh_news_cache(
             if not isinstance(symbol, str) or not isinstance(published, str) or not isinstance(headline, str):
                 continue
             symbol = symbol.strip().upper()
-            if symbol not in normalized or not headline.strip():
+            if symbol not in due_symbols or not headline.strip():
                 continue
             try:
                 parsed = datetime.fromisoformat(published.replace("Z", "+00:00"))
@@ -129,8 +137,20 @@ def refresh_news_cache(
             )
             cutoff = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
             connection.execute("DELETE FROM stock_news_cache WHERE published_at < ?", (cutoff,))
+        checked.update({symbol: current for symbol in due_symbols})
+        # Bound persistent state as the listed-symbol universe changes over time.
+        if len(checked) > 2000:
+            checked = dict(sorted(
+                ((key, value) for key, value in checked.items()
+                 if isinstance(key, str) and isinstance(value, (int, float))),
+                key=lambda item: item[1],
+            )[-1500:])
+        store.set_state("fmp_news_checked_symbols", checked)
         store.set_state("fmp_news_last_success_at", current)
-        return {"status": "updated", "provider": "FMP", "articles_saved": len(records)}
+        return {
+            "status": "updated", "provider": "FMP",
+            "articles_saved": len(records), "symbols_checked": len(due_symbols),
+        }
     except urllib.error.HTTPError as exc:
         if exc.code in {402, 429}:
             try:
