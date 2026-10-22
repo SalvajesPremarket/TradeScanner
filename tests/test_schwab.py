@@ -7,6 +7,7 @@ from tradescanner.schwab import (
     SchwabAPIError,
     get_quotes,
     _clear_token_cache,
+    get_price_history,
 )
 
 
@@ -42,6 +43,34 @@ class SchwabAdapterTests(unittest.TestCase):
         self.assertEqual(sum(url.startswith("https://api.schwabapi.com/marketdata/v1/quotes") for url in calls), 2)
         _clear_token_cache()
 
+
+    def test_price_history_requests_five_minute_bars_with_bounded_date_range(self):
+        urls = []
+
+        def fake_request(request, timeout=15):
+            urls.append(request.full_url)
+            if request.full_url == "https://api.schwabapi.com/v1/oauth/token":
+                return {"access_token": "test-access-token", "expires_in": 3600}
+            return {"candles": []}
+
+        with patch.dict(os.environ, {
+            "SCHWAB_CLIENT_ID": "test-id",
+            "SCHWAB_CLIENT_SECRET": "test-secret",
+            "SCHWAB_REFRESH_TOKEN": "test-refresh",
+        }), patch("tradescanner.schwab._request_json", side_effect=fake_request), patch(
+            "tradescanner.schwab.time.time", return_value=1_800_000_000
+        ):
+            get_price_history("AAPL")
+
+        history_url = next(url for url in urls if "/marketdata/v1/pricehistory?" in url)
+        from urllib.parse import parse_qs, urlparse
+        query = parse_qs(urlparse(history_url).query)
+        self.assertEqual(query["frequencyType"], ["minute"])
+        self.assertEqual(query["frequency"], ["5"])
+        self.assertEqual(query["startDate"], [str(1_800_000_000_000 - 30 * 24 * 60 * 60 * 1000)])
+        self.assertEqual(query["endDate"], [str(1_800_000_000_000)])
+        self.assertEqual(query["needExtendedHoursData"], ["true"])
+        _clear_token_cache()
 
     def test_identifies_oauth_stage_without_exposing_provider_body(self):
         _clear_token_cache()
