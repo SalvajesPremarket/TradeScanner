@@ -13,8 +13,11 @@ from tradescanner.db import DB_ERRORS
 from tradescanner.float_provider import apply_cached_float, refresh_float_cache, refresh_symbol_float
 from tradescanner.infisical_vault import is_configured as infisical_is_configured
 from tradescanner.snapshots import BATCH_SIZE, SnapshotStore, collect_snapshots
-from tradescanner.schwab import SchwabAPIError, SchwabConfigurationError, get_price_history, get_quotes
+from tradescanner.schwab import SchwabAPIError, SchwabConfigurationError, get_daily_history, get_price_history, get_quotes
 from tradescanner.universe import load_symbol_universe
+from tradescanner.strategies import active_strategy
+from tradescanner.momentum import scan as scan_momentum
+from tradescanner.momentum_data import average_daily_volume_30d, recent_stock_news
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -65,6 +68,67 @@ def get_engine_status(store: SnapshotStore | None = None) -> dict[str, Any]:
     state = (store or SnapshotStore()).get_state("engine_status", {})
     return state if isinstance(state, dict) else {}
 
+
+
+
+def _evaluate_active_momentum(store: SnapshotStore, batch: list[str]) -> dict[str, Any] | None:
+    """Evaluate the dedicated Momentum strategy against real stored OHLCV/context."""
+    strategy = active_strategy(store)
+    if not strategy or str(strategy.get("name", "")).casefold() != "momentum":
+        store.set_state("momentum_scan_status", {"status": "inactive", "evaluated_at": _now(), "evaluations": [], "matches": []})
+        return None
+    rows = store.latest_for_symbols(batch)
+    apply_cached_float(rows, store)
+    candidates = [
+        row for row in rows
+        if row.get("quote_is_fresh") is True
+        and isinstance(row.get("price"), (int, float)) and 1 <= row["price"] <= 20
+        and isinstance(row.get("gap_pct"), (int, float)) and row["gap_pct"] >= 3
+    ]
+    candidates.sort(key=lambda row: (row.get("volume") or 0, row.get("gap_pct") or 0), reverse=True)
+    evaluations: list[dict[str, Any]] = []
+    candle_store = CandleStore(store.path)
+    for row in candidates[:3]:
+        symbol = row["symbol"]
+        try:
+            payload = get_price_history(symbol, period=5, frequency=1)
+            candle_store.save(normalize_price_history(symbol, payload))
+        except Exception as exc:
+            evaluations.append({
+                "symbol": symbol, "passed": False, "strategy": "Momentum", "metrics": {},
+                "reasons": ["velas: historial de un minuto no disponible (" + type(exc).__name__ + ")"],
+            })
+            continue
+        candles = candle_store.latest(symbol, limit=6000)
+        daily = average_daily_volume_30d(store, symbol)
+        headlines = recent_stock_news(store, symbol)
+        result = scan_momentum(candles, {
+            "symbol": symbol,
+            "prev_close": row.get("previous_close"),
+            "avg_volume_30d": daily.get("average"),
+            "float_shares": row.get("float_shares"),
+            "news": headlines.get("news", []),
+        })
+        result["data_status"] = {
+            "daily_volume": daily.get("status"),
+            "daily_volume_sessions": daily.get("sessions"),
+            "news": headlines.get("status"),
+            "news_error": headlines.get("error"),
+            "float_source": row.get("float_source"),
+        }
+        evaluations.append(result)
+    state = {
+        "status": "evaluated" if evaluations else "no_candidates",
+        "strategy_id": strategy.get("id"),
+        "strategy": strategy.get("name"),
+        "evaluated_at": _now(),
+        "candidate_count": len(candidates),
+        "evaluations": evaluations,
+        "matches": [item["symbol"] for item in evaluations if item.get("passed")],
+        "note": "Las evaluaciones usan datos reales; campos obligatorios ausentes provocan descarte, nunca se rellenan artificialmente.",
+    }
+    store.set_state("momentum_scan_status", state)
+    return state
 
 def run_scan_cycle(
     store: SnapshotStore | None = None,
@@ -244,6 +308,15 @@ def run_scan_cycle(
         logger.warning("Scan cycle stage=cursor_persist_started cursor=%s", next_cursor)
         target_store.set_state("universe_cursor", next_cursor)
         logger.warning("Scan cycle stage=cursor_persist_finished")
+        momentum_state = None
+        try:
+            momentum_state = _evaluate_active_momentum(target_store, batch)
+        except Exception as exc:
+            logger.warning("Momentum evaluation failed; error_type=%s", type(exc).__name__)
+            target_store.set_state("momentum_scan_status", {
+                "status": "error", "evaluated_at": _now(), "evaluations": [], "matches": [],
+                "error_type": type(exc).__name__,
+            })
         logger.warning("Scan cycle stage=engine_status_persist_started")
         state = record_engine_status(
             target_store,
@@ -265,6 +338,9 @@ def run_scan_cycle(
             targeted_float_status=targeted_float_state.get("status"),
             targeted_float_symbol=targeted_float_state.get("symbol"),
             cycles_completed=int(target_store.get_state("cycles_completed", 0)) + 1,
+            momentum_status=(momentum_state or target_store.get_state("momentum_scan_status", {})).get("status"),
+            momentum_evaluations=len((momentum_state or target_store.get_state("momentum_scan_status", {})).get("evaluations", [])),
+            momentum_matches=len((momentum_state or target_store.get_state("momentum_scan_status", {})).get("matches", [])),
         )
         logger.warning("Scan cycle stage=engine_status_persist_finished cycles_completed=%s", state.get("cycles_completed"))
         # Only mark market-data connectivity from provider timestamps that are
