@@ -382,6 +382,7 @@
     let activeStrategyId = null;
     let activeStrategySymbols = null;
     let activeMomentumState = null;
+    let activeStrategyStates = {};
     let savedStrategies = [];
     let chartRows = [];
     let watchlist = [];
@@ -429,6 +430,7 @@
         const matchPayload = await readJson(await fetch("/api/strategies/active-matches", {cache:"no-store",headers:await strategyHeaders()}));
         activeStrategySymbols = matchPayload.strategy ? new Set(matchPayload.symbols || []) : null;
         activeMomentumState = matchPayload.momentum || null;
+        activeStrategyStates = Object.fromEntries((matchPayload.strategies || []).map(item => [item.id, item.scan || {}]));
         applyFilters();
         renderStrategies();
       } catch (error) {
@@ -457,7 +459,7 @@
             await readJson(await fetch("/api/strategies/" + encodeURIComponent(strategy.id) + "/activate", {
               method:"POST", headers:await strategyHeaders({"Content-Type":"application/json"}), body:JSON.stringify({enabled:!strategy.enabled})
             }));
-            document.getElementById("strategy-message").textContent = strategy.enabled ? "Estrategia desactivada." : "Estrategia activada. Solo esta estrategia filtrará los resultados.";
+            document.getElementById("strategy-message").textContent = strategy.enabled ? "Estrategia desactivada." : "Estrategia activada. Se evaluará automáticamente en cada ciclo; puedes mantener varias estrategias activas.";
             await loadStrategies();
           } catch(error) { document.getElementById("strategy-message").textContent = apiMessage(error); }
         });
@@ -483,12 +485,12 @@
           } catch(error) { document.getElementById("strategy-message").textContent = apiMessage(error); }
         });
         actions.append(toggle,edit,del); card.appendChild(actions);
-        if (strategy.enabled && strategy.name.toLowerCase().includes("momentum")) {
+        if (strategy.enabled) {
           const monitor = document.createElement("div"); monitor.className = "muted";
-          const state = activeMomentumState || {};
+          const state = activeStrategyStates[strategy.id] || (strategy.name.toLowerCase().includes("momentum") ? activeMomentumState : null) || {};
           const evaluations = Array.isArray(state.evaluations) ? state.evaluations : [];
           const summary = document.createElement("p");
-          summary.textContent = "Motor Momentum: " + (state.status || "esperando ciclo")
+          summary.textContent = "Scanner: " + (state.status || "esperando ciclo")
             + " · evaluadas: " + evaluations.length
             + " · señales: " + ((state.matches || []).length)
             + (state.evaluated_at ? " · " + state.evaluated_at : "");
