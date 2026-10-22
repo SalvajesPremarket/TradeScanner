@@ -223,3 +223,28 @@ def get_price_history(
     if candles is not None and not isinstance(candles, list):
         raise SchwabAPIError("Schwab price-history candles were malformed.")
     return payload
+
+
+def get_daily_history(symbol: str) -> dict[str, Any]:
+    """Fetch daily OHLCV history for the 30-session average-volume baseline."""
+    normalized = symbol.strip().upper()
+    if not _SYMBOL_RE.fullmatch(normalized):
+        raise ValueError("Invalid ticker symbol.")
+    query = urllib.parse.urlencode({
+        "symbol": normalized,
+        "periodType": "month",
+        "period": 3,
+        "frequencyType": "daily",
+        "frequency": 1,
+        "needExtendedHoursData": "false",
+        "needPreviousClose": "true",
+    })
+    request = urllib.request.Request(
+        f"{PRICE_HISTORY_URL}?{query}",
+        headers={"Authorization": f"Bearer {_access_token()}", "Accept": "application/json"},
+        method="GET",
+    )
+    payload = _request_json(request)
+    if not isinstance(payload, dict) or not isinstance(payload.get("candles", []), list):
+        raise SchwabAPIError("Schwab daily-history response was malformed.")
+    return payload
