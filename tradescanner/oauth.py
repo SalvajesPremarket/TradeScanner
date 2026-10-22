@@ -127,11 +127,15 @@ def oauth_callback(
         ) from None
 
     response = _private_html("""<!doctype html><html><head><meta charset="utf-8">
-    <meta name="viewport" content="width=device-width,initial-scale=1"><title>TradeScanner OAuth</title></head>
+    <meta name="viewport" content="width=device-width,initial-scale=1"><title>TradeScanner OAuth</title>
+    <meta http-equiv="refresh" content="3;url=https://tradescanner-new-core.onrender.com/"></head>
     <body style="font-family:system-ui;max-width:760px;margin:40px auto;padding:0 18px">
     <h2>Schwab conectado correctamente</h2>
     <p>TradeScanner guardó la autorización en el almacén seguro. No necesitas copiar ni pegar tokens.</p>
     <p>Los tokens de acceso se renovarán automáticamente y los cambios de refresh token se guardarán en el almacén.</p>
-    <p>Puedes volver a la pestaña de TradeScanner.</p></body></html>""")
+    <p>Regresando a TradeScanner en unos segundos…</p>
+    <p><a href="https://tradescanner-new-core.onrender.com/">Volver a TradeScanner ahora</a></p>
+    <script>window.setTimeout(function(){window.location.replace("https://tradescanner-new-core.onrender.com/");},1500);</script>
+    </body></html>""")
     response.delete_cookie("tradescanner_oauth_state", path="/oauth")
     return response
