@@ -515,7 +515,7 @@
         document.getElementById("strategy-id").value = result.strategy.id;
         document.getElementById("strategy-message").textContent = result.strategy.execution_ready
           ? "Guardada y validada. Actívala desde la lista para aplicarla a los resultados."
-          : "Guardada. Este lenguaje aún no está habilitado para ejecución.";
+          : "Estrategia guardada, pero todavía no se puede ejecutar automáticamente: " + (result.strategy.execution_error || "el código usa instrucciones fuera del subconjunto compatible del motor.");
         await loadStrategies();
       } catch(error) { document.getElementById("strategy-message").textContent = apiMessage(error); }
     });
