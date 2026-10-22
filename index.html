@@ -313,23 +313,13 @@
 
     async function refreshScanner() {
       refreshSchwabStatus();
+      // Update engine status independently so a slow snapshot/RVOL query cannot
+      // leave the header stuck at "Conectando con el motor…".
       try {
-        const [engineResponse, snapshotsResponse] = await Promise.all([
-          fetch("/api/engine/status", { cache: "no-store" }),
-          fetch("/api/snapshots/latest?limit=10000", { cache: "no-store" })
-        ]);
-        if (!engineResponse.ok || !snapshotsResponse.ok) throw new Error("API unavailable");
+        const engineResponse = await fetch("/api/engine/status", {cache:"no-store"});
+        if (!engineResponse.ok) throw new Error("engine_status_unavailable");
         const enginePayload = await engineResponse.json();
-        const snapshotPayload = await snapshotsResponse.json();
         const state = enginePayload.state || {};
-        // The snapshots endpoint retains historical rows. Keep known-stale
-        // quotes out of the live radar, and defensively ignore provider metadata
-        // rows that are not actual tickers. Unknown freshness is preserved for
-        // backwards compatibility with older snapshots.
-        allResults = (Array.isArray(snapshotPayload.results) ? snapshotPayload.results : [])
-          .filter(item => item && item.symbol !== "ERROR" && item.symbol !== "ERRORS" && item.quote_is_fresh === true);
-        applyFilters();
-        if (activeStrategyId) loadStrategies();
         if (state.status === "waiting_for_credentials") {
           statusNode.textContent = "Esperando credenciales Schwab";
         } else if (state.status === "error") {
@@ -354,8 +344,23 @@
         if (!details.length) details.push("Esperando el primer lote real.");
         messageNode.textContent = details.join(" · ");
       } catch (_) {
-        statusNode.textContent = "API temporalmente no disponible";
-        messageNode.textContent = "No se pudo actualizar el estado. Se reintentará automáticamente.";
+        statusNode.textContent = "Estado del motor no disponible";
+        messageNode.textContent = "No se pudo consultar el motor. Schwab puede seguir conectado; se reintentará automáticamente.";
+        return;
+      }
+
+      // Keep this bounded: /api/snapshots/latest enriches each fresh row with
+      // RVOL data, so requesting 10,000 rows can stall the UI and exhaust memory.
+      try {
+        const snapshotsResponse = await fetch("/api/snapshots/latest?limit=250", {cache:"no-store"});
+        if (!snapshotsResponse.ok) throw new Error("snapshots_unavailable");
+        const snapshotPayload = await snapshotsResponse.json();
+        allResults = (Array.isArray(snapshotPayload.results) ? snapshotPayload.results : [])
+          .filter(item => item && item.symbol !== "ERROR" && item.symbol !== "ERRORS" && item.quote_is_fresh === true);
+        applyFilters();
+        if (activeStrategyId) loadStrategies();
+      } catch (_) {
+        messageNode.textContent += " · No se pudieron cargar las cotizaciones; el estado del motor se actualizó correctamente.";
       }
     }
 
