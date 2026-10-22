@@ -112,6 +112,7 @@ def status():
     engine = get_engine_status()
     last_quote_at = engine.get("last_quote_received_at")
     connected = False
+    quote_age_seconds = None
     if isinstance(last_quote_at, str):
         try:
             parsed_quote_at = datetime.fromisoformat(last_quote_at)
@@ -120,6 +121,7 @@ def status():
             quote_age_seconds = (datetime.now(timezone.utc) - parsed_quote_at.astimezone(timezone.utc)).total_seconds()
             connected = -30 <= quote_age_seconds <= 300
         except (TypeError, ValueError, OverflowError):
+            quote_age_seconds = None
             connected = False
     try:
         latest_rows = SnapshotStore().latest(limit=1000)
@@ -133,6 +135,11 @@ def status():
         "infisical_configured": infisical_is_configured(),
         "float_provider_configured": bool(os.getenv("FMP_API_KEY", "").strip()),
         "market_data_connected": connected,
+        "quote_age_seconds": round(quote_age_seconds, 1) if quote_age_seconds is not None else None,
+        "last_quote_received_at": last_quote_at if isinstance(last_quote_at, str) else None,
+        "last_error_type": engine.get("last_error") if isinstance(engine.get("last_error"), str) else None,
+        "cycles_completed": engine.get("cycles_completed"),
+        "received_count": engine.get("received_count"),
         "results_published": results_published,
         "engine_status": engine.get("status", "starting"),
         "message": (
