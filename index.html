@@ -145,6 +145,11 @@
           <button class="action secondary" id="diagnose-fmp-float" type="button">Diagnosticar FMP · FLOAT</button>
           <span class="code-hint">Prueba puntual de lectura; no modifica la caché ni las credenciales.</span>
         </div>
+        <div class="tools" style="margin-top:10px">
+          <button class="action secondary" id="resolve-fmp-cooldown" type="button">Resolver cooldown heredado</button>
+          <span class="code-hint">Solo libera un cooldown sin causa ni HTTP registrados, tras verificar FMP en vivo. No elimina bloqueos 402/429 identificados.</span>
+        </div>
+        <div id="fmp-cooldown-result" class="tab-message" role="status" aria-live="polite">Cooldown sin cambios.</div>
         <div id="fmp-diagnostic-result" class="tab-message" role="status" aria-live="polite">Diagnóstico aún no ejecutado.</div>
       </div>
     </section>
@@ -635,6 +640,33 @@
       } catch(error) { target.textContent="No se pudo consultar la configuración: "+apiMessage(error); }
     }
     document.getElementById("refresh-settings").addEventListener("click",loadSettings);
+    document.getElementById("resolve-fmp-cooldown").addEventListener("click", async () => {
+      const button = document.getElementById("resolve-fmp-cooldown");
+      const result = document.getElementById("fmp-cooldown-result");
+      button.disabled = true;
+      result.textContent = "Verificando FMP y el cooldown heredado…";
+      try {
+        if (typeof window.tradeScannerGetAccessToken !== "function") {
+          throw new Error("La sesión Neon todavía se está comprobando. Espera unos segundos e inténtalo de nuevo.");
+        }
+        const token = await window.tradeScannerGetAccessToken();
+        const response = await fetch("/api/diagnostics/float/fmp/resolve-legacy-cooldown", {
+          method: "POST",
+          cache: "no-store",
+          headers: { "Authorization": "Bearer " + token }
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.detail || "No se pudo resolver el cooldown (HTTP " + response.status + ").");
+        result.textContent = data.cooldown_cleared
+          ? "Cooldown heredado liberado tras verificar FMP. Registros masivos: " + data.verified_bulk_records + " · registros NVDA: " + data.verified_targeted_records + " · caché modificada: no. El motor podrá reintentar FLOAT en los próximos ciclos."
+          : "No había un cooldown global activo que liberar.";
+        if (data.cooldown_cleared) loadSettings();
+      } catch (error) {
+        result.textContent = "Cooldown conservado: " + (error.message || "error desconocido");
+      } finally {
+        button.disabled = false;
+      }
+    });
     document.getElementById("diagnose-fmp-float").addEventListener("click", async () => {
       const button = document.getElementById("diagnose-fmp-float");
       const result = document.getElementById("fmp-diagnostic-result");
