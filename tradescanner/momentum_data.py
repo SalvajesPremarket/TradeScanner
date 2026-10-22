@@ -32,13 +32,25 @@ def average_daily_volume_30d(store: Any, symbol: str, *, now: float | None = Non
     try:
         payload = get_daily_history(symbol)
         rows = payload.get("candles", [])
-        values = []
+        # Exclude today's still-forming daily candle: the baseline must use
+        # completed trading sessions only.
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+        today_et = datetime.now(ZoneInfo("America/New_York")).date()
+        completed = []
         for row in rows:
             if not isinstance(row, dict): continue
+            stamp = row.get("datetime")
             volume = row.get("volume")
+            try:
+                candle_date = datetime.fromtimestamp(float(stamp) / 1000, ZoneInfo("America/New_York")).date()
+            except (TypeError, ValueError, OverflowError, OSError):
+                continue
+            if candle_date >= today_et:
+                continue
             if isinstance(volume, (int, float)) and not isinstance(volume, bool) and volume > 0:
-                values.append(float(volume))
-        values = values[-30:]
+                completed.append(float(volume))
+        values = completed[-30:]
         if len(values) < 10:
             return {"status": "insufficient_history", "average": None, "sessions": len(values)}
         average = sum(values) / len(values)
