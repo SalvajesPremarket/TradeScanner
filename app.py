@@ -510,7 +510,7 @@ def strategies_active_matches(request: Request):
     if not strategy:
         return {"strategy": None, "symbols": [], "momentum": {"status": "inactive", "evaluations": [], "matches": []}}
     store = SnapshotStore()
-    if str(strategy.get("name", "")).casefold() == "momentum":
+    if "momentum" in str(strategy.get("name", "")).casefold():
         state = store.get_state("momentum_scan_status", {"status": "waiting_for_cycle", "evaluations": [], "matches": []})
         return {
             "strategy": {"id": strategy["id"], "name": strategy["name"]},
