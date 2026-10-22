@@ -188,7 +188,6 @@ def run_scan_cycle(
         float_status_symbol = targeted_float_state.get("symbol")
         if isinstance(float_status_symbol, str) and float_status_symbol:
             try:
-                from tradescanner.float_provider import apply_cached_float
                 # Prefer the persisted cache row so diagnostics include its source/date.
                 # If the targeted response was just fetched but cache lookup cannot read it,
                 # fall back to the value returned by that request.
