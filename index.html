@@ -381,6 +381,7 @@
 
     let activeStrategyId = null;
     let activeStrategySymbols = null;
+    let activeMomentumState = null;
     let savedStrategies = [];
     let chartRows = [];
     let watchlist = [];
@@ -427,6 +428,7 @@
         activeStrategyId = active ? active.id : null;
         const matchPayload = await readJson(await fetch("/api/strategies/active-matches", {cache:"no-store",headers:await strategyHeaders()}));
         activeStrategySymbols = matchPayload.strategy ? new Set(matchPayload.symbols || []) : null;
+        activeMomentumState = matchPayload.momentum || null;
         applyFilters();
         renderStrategies();
       } catch (error) {
@@ -480,7 +482,35 @@
             await loadStrategies();
           } catch(error) { document.getElementById("strategy-message").textContent = apiMessage(error); }
         });
-        actions.append(toggle,edit,del); card.appendChild(actions); list.appendChild(card);
+        actions.append(toggle,edit,del); card.appendChild(actions);
+        if (strategy.enabled && strategy.name.toLowerCase() === "momentum") {
+          const monitor = document.createElement("div"); monitor.className = "muted";
+          const state = activeMomentumState || {};
+          const evaluations = Array.isArray(state.evaluations) ? state.evaluations : [];
+          const summary = document.createElement("p");
+          summary.textContent = "Motor Momentum: " + (state.status || "esperando ciclo")
+            + " · evaluadas: " + evaluations.length
+            + " · señales: " + ((state.matches || []).length)
+            + (state.evaluated_at ? " · " + state.evaluated_at : "");
+          monitor.appendChild(summary);
+          for (const result of evaluations.slice(0, 3)) {
+            const item = document.createElement("p");
+            const reasons = (result.reasons || []).slice(0, 4).join(" | ");
+            const metrics = result.metrics || {};
+            item.textContent = result.symbol + (result.passed ? " · CUMPLE" : " · descartada")
+              + " · gap " + (metrics.gap_pct == null ? "—" : metrics.gap_pct + "%")
+              + " · RVol " + (metrics.rvol == null ? "—" : metrics.rvol + "x")
+              + (reasons ? " · " + reasons : "");
+            monitor.appendChild(item);
+          }
+          if (!evaluations.length) {
+            const note = document.createElement("p");
+            note.textContent = state.note || "Todavía no hay candidatos evaluados en este ciclo.";
+            monitor.appendChild(note);
+          }
+          card.appendChild(monitor);
+        }
+        list.appendChild(card);
       }
     }
     function updateLanguageHelp() {
