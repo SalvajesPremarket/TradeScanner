@@ -71,34 +71,30 @@ def recent_stock_news(store: Any, symbol: str, *, now: float | None = None) -> d
         if age < NEWS_COOLDOWN_SECONDS and cached.get("status") == "unavailable" and cached.get("rss_error"):
             return {"status": "cooldown", "news": [], "error": cached.get("error")}
     api_key = os.getenv("FMP_API_KEY", "").strip()
-    if not api_key:
-        result = {"status": "not_configured", "news": [], "error": "FMP_API_KEY no está configurada"}
-        store.set_state(key, {**result, "cached_at": current})
-        return result
-    query = urlencode({"symbols": symbol.strip().upper(), "limit": 20, "apikey": api_key})
-    request = Request(
-        "https://financialmodelingprep.com/stable/news/stock-latest?" + query,
-        headers={"Accept": "application/json", "User-Agent": "TradeScanner/1.0"},
-    )
-    try:
-        with urlopen(request, timeout=6) as response:
-            payload = json.loads(response.read().decode("utf-8"))
-        if not isinstance(payload, list):
-            raise ValueError("news_response_malformed")
-        news = []
-        for item in payload:
-            if not isinstance(item, dict): continue
-            published = item.get("publishedDate") or item.get("published_at") or item.get("date")
-            headline = item.get("title") or item.get("headline")
-            if not isinstance(published, str) or not isinstance(headline, str) or not headline.strip(): continue
-            news.append({"published_at": published, "headline": headline.strip()})
-        result = {"status": "ok" if news else "empty", "news": news}
-        store.set_state(key, {**result, "cached_at": current})
-        return result
-    except urllib.error.HTTPError as exc:
-        result = {"status": "unavailable", "news": [], "error": f"HTTP {exc.code}"}
-    except Exception as exc:
-        result = {"status": "unavailable", "news": [], "error": type(exc).__name__}
+    result = {"status": "not_configured", "news": [], "error": "FMP_API_KEY no está configurada"}
+    if api_key:
+        query = urlencode({"symbols": symbol.strip().upper(), "limit": 20, "apikey": api_key})
+        request = Request(
+            "https://financialmodelingprep.com/stable/news/stock-latest?" + query,
+            headers={"Accept": "application/json", "User-Agent": "TradeScanner/1.0"},
+        )
+        try:
+            with urlopen(request, timeout=6) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+            if not isinstance(payload, list):
+                raise ValueError("news_response_malformed")
+            news = []
+            for item in payload:
+                if not isinstance(item, dict): continue
+                published = item.get("publishedDate") or item.get("published_at") or item.get("date")
+                headline = item.get("title") or item.get("headline")
+                if not isinstance(published, str) or not isinstance(headline, str) or not headline.strip(): continue
+                news.append({"published_at": published, "headline": headline.strip()})
+            result = {"status": "ok" if news else "empty", "news": news}
+        except urllib.error.HTTPError as exc:
+            result = {"status": "unavailable", "news": [], "error": f"HTTP {exc.code}"}
+        except Exception as exc:
+            result = {"status": "unavailable", "news": [], "error": type(exc).__name__}
     # FMP's current plan may not include stock news. Fall back to the public
     # Google News RSS feed; keep original publication timestamps and headlines.
     if not result.get("news"):
