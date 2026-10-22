@@ -619,21 +619,30 @@
       async function refreshSession() {
         try {
           const data = await authRequest("/get-session");
-          setSession(data.user || (data.session && data.session.user) || null);
-          if (!data.user && !(data.session && data.session.user)) showMessage("No hay una sesión iniciada.");
-        } catch (_) {
+          const user = data.user || (data.session && data.session.user) || null;
+          setSession(user);
+          if (!user) {
+            const list = document.getElementById("strategy-list");
+            if (list) list.textContent = "Inicia sesión con Neon Auth para acceder a tus estrategias.";
+            showMessage("No hay una sesión iniciada.");
+            return;
+          }
+          await window.tradeScannerGetAccessToken();
+          showMessage("Sesión Neon activa. Editor de estrategias habilitado.");
+          await loadStrategies();
+        } catch (error) {
           setSession(null);
-          showMessage("No se pudo comprobar la sesión. Revisa la conexión con Neon Auth y el dominio autorizado.", true);
+          const list = document.getElementById("strategy-list");
+          if (list) list.textContent = "Inicia sesión con Neon Auth para acceder a tus estrategias.";
+          showMessage(error.message || "No se pudo comprobar la sesión de Neon Auth.", true);
         }
       }
       form.addEventListener("submit", async event => {
         event.preventDefault();
         signIn.disabled = signUp.disabled = true;
         try {
-          const data = await authRequest("/sign-in/email", {email:email.value.trim(), password:password.value});
-          setSession(data.user || (data.session && data.session.user) || null);
-          if (!data.user && !(data.session && data.session.user)) await refreshSession();
-          showMessage("Solicitud de inicio de sesión completada.");
+          await authRequest("/sign-in/email", {email:email.value.trim(), password:password.value});
+          await refreshSession();
         } catch (error) {
           showMessage(error.message || "No se pudo iniciar sesión.", true);
         } finally {
@@ -644,10 +653,8 @@
         if (!form.reportValidity()) return;
         signIn.disabled = signUp.disabled = true;
         try {
-          const data = await authRequest("/sign-up/email", {email:email.value.trim(), password:password.value, name:email.value.trim().split("@")[0]});
-          setSession(data.user || (data.session && data.session.user) || null);
-          if (!data.user && !(data.session && data.session.user)) await refreshSession();
-          showMessage("Solicitud de registro completada.");
+          await authRequest("/sign-up/email", {email:email.value.trim(), password:password.value, name:email.value.trim().split("@")[0]});
+          await refreshSession();
         } catch (error) {
           showMessage(error.message || "No se pudo crear la cuenta.", true);
         } finally {
@@ -659,7 +666,9 @@
           await authRequest("/sign-out", {});
           setSession(null);
           password.value = "";
-          showMessage("Sesión cerrada.");
+          const list = document.getElementById("strategy-list");
+          if (list) list.textContent = "Inicia sesión con Neon Auth para acceder a tus estrategias.";
+          showMessage("Sesión cerrada; el editor quedó bloqueado.");
         } catch (error) {
           showMessage(error.message || "No se pudo cerrar sesión.", true);
         }
