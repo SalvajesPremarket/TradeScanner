@@ -21,6 +21,7 @@ from tradescanner.engine import get_engine_status, record_engine_status, run_sca
 from tradescanner.snapshots import SnapshotStore, collect_snapshots
 from tradescanner.strategies import (active_strategy, delete_strategy, strategy_matches, list_strategies, save_strategy, set_strategy_enabled)
 from tradescanner.momentum import evaluate_momentum
+from tradescanner.news_provider import cached_news_for_symbol
 from tradescanner.universe import UniverseUnavailableError, load_symbol_universe
 from tradescanner.oauth import router as oauth_router
 from tradescanner.schwab import (
@@ -205,6 +206,21 @@ def snapshots_status():
         raise HTTPException(status_code=503, detail="Snapshot storage is unavailable.") from None
 
 
+def _evaluate_native_momentum_row(row: dict[str, Any], strategy: dict[str, Any], store: SnapshotStore, candle_store: CandleStore) -> dict[str, Any]:
+    candles = candle_store.latest(row["symbol"], limit=5000)
+    return evaluate_momentum(
+        candles,
+        {
+            "symbol": row.get("symbol"),
+            "price": row.get("price"),
+            "prev_close": row.get("previous_close"),
+            "float_shares": row.get("float_shares"),
+            "news": cached_news_for_symbol(store, row["symbol"]),
+        },
+        strategy.get("config") if isinstance(strategy.get("config"), dict) else {},
+    )
+
+
 @app.get("/api/snapshots/latest")
 def snapshots_latest(limit: int = Query(10000, ge=1, le=10000)):
     try:
@@ -233,6 +249,17 @@ def snapshots_latest(limit: int = Query(10000, ge=1, le=10000)):
             filtered_rows = []
             for row in rows:
                 if row.get("quote_is_fresh") is not True:
+                    continue
+                if selected_strategy.get("execution_mode") == "momentum_native":
+                    evaluation = _evaluate_native_momentum_row(row, selected_strategy, store, candle_store)
+                    row["momentum_evaluation"] = {
+                        "passed": evaluation["passed"],
+                        "checks": evaluation["checks"],
+                        "reasons": evaluation["reasons"],
+                        "metrics": evaluation["metrics"],
+                    }
+                    if evaluation["passed"]:
+                        filtered_rows.append(row)
                     continue
                 history = (
                     candle_store.latest(row["symbol"], limit=5000)
@@ -358,20 +385,7 @@ def strategies_active_matches(request: Request):
         if row.get("quote_is_fresh") is not True or not row.get("symbol"):
             continue
         if native_momentum:
-            candles = candle_store.latest(row["symbol"], limit=5000)
-            result = evaluate_momentum(
-                candles,
-                {
-                    "symbol": row.get("symbol"),
-                    "price": row.get("price"),
-                    "prev_close": row.get("previous_close"),
-                    "float_shares": row.get("float_shares"),
-                    # News and 30-day volume baselines are intentionally absent until
-                    # a real provider is connected; the evaluator reports these gaps.
-                    "news": [],
-                },
-                strategy.get("config") if isinstance(strategy.get("config"), dict) else {},
-            )
+            result = _evaluate_native_momentum_row(row, strategy, store, candle_store)
             if result["passed"]:
                 matches.append(row["symbol"])
             for name, passed in result["checks"].items():
