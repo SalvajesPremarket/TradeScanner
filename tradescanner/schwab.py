@@ -211,7 +211,6 @@ def get_price_history(
     query = urllib.parse.urlencode({
         "symbol": normalized,
         "periodType": "day",
-        "period": period,
         "frequencyType": "minute",
         "frequency": frequency,
         "startDate": start_ms,
