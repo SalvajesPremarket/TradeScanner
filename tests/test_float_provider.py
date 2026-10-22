@@ -121,6 +121,28 @@ class FMPFloatProviderTests(unittest.TestCase):
         self.assertEqual(second["status"], "cooldown")
         self.assertEqual(calls, ["AAPL"])
 
+    def test_global_cooldown_exposes_safe_reason_and_remaining_time(self):
+        import urllib.error
+        error = urllib.error.HTTPError(
+            "https://provider.invalid/endpoint", 429, "rate limited", {}, None
+        )
+        with patch.dict(os.environ, {"FMP_API_KEY": "test-key"}):
+            refresh_symbol_float(
+                self.store, "AAPL",
+                fetcher=lambda *_: (_ for _ in ()).throw(error),
+                now=100000,
+            )
+            result = refresh_symbol_float(
+                self.store, "MSFT",
+                fetcher=lambda *_: self.fail("global cooldown should prevent request"),
+                now=100120,
+            )
+        self.assertEqual(result["status"], "cooldown")
+        self.assertEqual(result["cooldown_scope"], "global")
+        self.assertEqual(result["cooldown_reason"], "rate_limited")
+        self.assertEqual(result["provider_http_status"], 429)
+        self.assertEqual(result["cooldown_remaining_seconds"], 6 * 60 * 60 - 120)
+
     def test_targeted_global_cooldown_expires_after_six_hours(self):
         import urllib.error
         error = urllib.error.HTTPError(
