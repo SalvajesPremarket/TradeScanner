@@ -319,6 +319,7 @@
 
     let activeStrategyId = null;
     let activeStrategySymbols = null;
+    let activeStrategyDiagnostics = null;
     let savedStrategies = [];
     let chartRows = [];
     let watchlist = [];
@@ -365,6 +366,7 @@
         activeStrategyId = active ? active.id : null;
         const matchPayload = await readJson(await fetch("/api/strategies/active-matches", {cache:"no-store",headers:await strategyHeaders()}));
         activeStrategySymbols = matchPayload.strategy ? new Set(matchPayload.symbols || []) : null;
+        activeStrategyDiagnostics = matchPayload.strategy ? matchPayload : null;
         applyFilters();
         renderStrategies();
       } catch (error) {
@@ -383,8 +385,22 @@
         const card = document.createElement("div"); card.className = "strategy-item";
         const title = document.createElement("strong"); title.textContent = strategy.name; card.appendChild(title);
         const details = document.createElement("div"); details.className = "muted";
-        details.textContent = strategy.language.toUpperCase() + (strategy.enabled ? " · ACTIVA" : " · INACTIVA") + (strategy.execution_ready ? " · EJECUTABLE (SUBCONJUNTO SEGURO)" : " · SOLO GUARDADA");
+        if (strategy.execution_mode === "momentum_native") {
+          details.textContent = "PYTHON · " + (strategy.enabled ? "ACTIVA" : "INACTIVA") + " · EVALUADOR MOMENTUM NATIVO · REQUIERE HISTORIAL, VOLUMEN BASE Y NOTICIAS";
+        } else {
+          details.textContent = strategy.language.toUpperCase() + (strategy.enabled ? " · ACTIVA" : " · INACTIVA") + (strategy.execution_ready ? " · EJECUTABLE (SUBCONJUNTO SEGURO)" : " · SOLO GUARDADA");
+        }
         card.appendChild(details);
+        if (strategy.enabled && strategy.execution_mode === "momentum_native" && activeStrategyDiagnostics) {
+          const diag = document.createElement("div"); diag.className = "tab-message";
+          const evaluated = (activeStrategyDiagnostics.evaluations || []).length;
+          const matches = (activeStrategyDiagnostics.symbols || []).length;
+          const gaps = activeStrategyDiagnostics.data_gaps || [];
+          const names = {history:"historial de velas", price:"precio", gap:"GAP", session:"horario", rvol:"RVOL/volumen base", float:"FLOAT", first_candle_above_ema:"EMA", macd:"MACD", news:"noticias recientes"};
+          diag.textContent = "Diagnóstico del escáner: " + evaluated + " símbolos evaluados · " + matches + " coincidencias · " +
+            (evaluated ? (gaps.length ? "Datos pendientes: " + gaps.map(key => names[key] || key).join(", ") + "." : "Sin datos pendientes detectados.") : "No hay cotizaciones frescas para evaluar.");
+          card.appendChild(diag);
+        }
         const actions = document.createElement("div"); actions.className = "strategy-actions";
         const toggle = document.createElement("button"); toggle.className = "action " + (strategy.enabled ? "secondary" : "");
         toggle.textContent = strategy.enabled ? "Desactivar" : "Activar";
