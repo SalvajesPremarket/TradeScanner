@@ -483,7 +483,7 @@
           } catch(error) { document.getElementById("strategy-message").textContent = apiMessage(error); }
         });
         actions.append(toggle,edit,del); card.appendChild(actions);
-        if (strategy.enabled && strategy.name.toLowerCase() === "momentum") {
+        if (strategy.enabled && strategy.name.toLowerCase().includes("momentum")) {
           const monitor = document.createElement("div"); monitor.className = "muted";
           const state = activeMomentumState || {};
           const evaluations = Array.isArray(state.evaluations) ? state.evaluations : [];
