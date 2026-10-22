@@ -189,9 +189,14 @@ def run_scan_cycle(
         if isinstance(float_status_symbol, str) and float_status_symbol:
             try:
                 from tradescanner.float_provider import apply_cached_float
-                float_status_row = {"symbol": float_status_symbol, "float_shares": targeted_float_state.get("float_shares"),
+                # Prefer the persisted cache row so diagnostics include its source/date.
+                # If the targeted response was just fetched but cache lookup cannot read it,
+                # fall back to the value returned by that request.
+                float_status_row = {"symbol": float_status_symbol, "float_shares": None,
                                     "float_source": None, "float_as_of": None}
                 apply_cached_float([float_status_row], target_store)
+                if float_status_row.get("float_shares") is None:
+                    float_status_row["float_shares"] = targeted_float_state.get("float_shares")
                 candle_state["float_symbol"] = float_status_symbol if float_status_row.get("float_shares") is not None else None
                 candle_state["float_shares"] = float_status_row.get("float_shares")
                 candle_state["float_as_of"] = float_status_row.get("float_as_of")
