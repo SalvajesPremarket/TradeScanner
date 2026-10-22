@@ -208,6 +208,7 @@ def snapshots_status():
 
 def _evaluate_native_momentum_row(row: dict[str, Any], strategy: dict[str, Any], store: SnapshotStore, candle_store: CandleStore) -> dict[str, Any]:
     candles = candle_store.latest(row["symbol"], limit=5000)
+    historical_rvol = candle_store.rvol(row["symbol"])
     return evaluate_momentum(
         candles,
         {
@@ -215,6 +216,8 @@ def _evaluate_native_momentum_row(row: dict[str, Any], strategy: dict[str, Any],
             "price": row.get("price"),
             "prev_close": row.get("previous_close"),
             "float_shares": row.get("float_shares"),
+            "rvol": historical_rvol.get("rvol"),
+            "rvol_sessions_used": historical_rvol.get("sessions_used", 0),
             "news": cached_news_for_symbol(store, row["symbol"]),
         },
         strategy.get("config") if isinstance(strategy.get("config"), dict) else {},
