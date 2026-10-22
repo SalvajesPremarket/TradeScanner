@@ -88,13 +88,22 @@ class StrategyTests(unittest.TestCase):
         self.assertTrue(strategy_matches(edited, {"gap_pct": 4}))
         self.assertEqual(active_strategy(self.store)["language"], "python")
 
-    def test_simple_thinkscript_style_scan_is_supported_but_history_is_not(self):
-        strategy = save_strategy("ThinkScript", "thinkscript", "plot scan = close > 5;", store=self.store)
+    def test_thinkscript_supports_safe_indicators_and_historical_references(self):
+        strategy = save_strategy("ThinkScript", "thinkscript", "plot scan = close > Average(close, 3);", store=self.store)
         self.assertTrue(strategy["execution_ready"])
-        self.assertTrue(strategy_matches(strategy, {"price": 10}))
-        self.assertFalse(strategy_matches(strategy, {"price": 4}))
-        with self.assertRaises(ValueError):
-            save_strategy("History unsupported", "thinkscript", "plot scan = close > Average(close, 20);", store=self.store)
+        history = [
+            {"open": 10, "high": 11, "low": 9, "close": 10, "volume": 100},
+            {"open": 11, "high": 12, "low": 10, "close": 11, "volume": 110},
+            {"open": 12, "high": 13, "low": 11, "close": 12, "volume": 120},
+            {"open": 13, "high": 14, "low": 12, "close": 13, "volume": 130},
+            {"open": 14, "high": 15, "low": 13, "close": 14, "volume": 140},
+        ]
+        self.assertTrue(strategy_matches(strategy, {"price": 14}, history))
+        self.assertFalse(strategy_matches(strategy, {"price": 11}, history))
+        previous = save_strategy("Previous close", "thinkscript", "plot scan = close > close[1];", store=self.store)
+        self.assertTrue(strategy_matches(previous, {"price": 14}, history))
+        highest = save_strategy("High breakout", "thinkscript", "plot scan = close >= Highest(high, 3);", store=self.store)
+        self.assertFalse(strategy_matches(highest, {"price": 14}, history))
 
     def test_edit_preserves_id_and_delete_removes_strategy(self):
         saved = save_strategy("First name", "formula", "price > 5", store=self.store)
