@@ -129,29 +129,39 @@ class AppEntrypointTests(unittest.TestCase):
         self.assertFalse(hasattr(oauth_module, "_PENDING"))
 
 
-    def test_strategy_api_requires_private_token_and_rejects_wrong_token(self):
-        request = Request({
+    def test_strategy_api_requires_neon_bearer_and_rejects_invalid_token(self):
+        missing_token = Request({
             "type": "http", "method": "GET", "path": "/api/strategies",
-            "headers": [(b"x-strategy-admin-token", b"wrong-token")],
-            "query_string": b"", "server": ("test", 443), "scheme": "https",
+            "headers": [], "query_string": b"", "server": ("test", 443), "scheme": "https",
             "client": ("test", 123), "root_path": "",
         })
         with patch.dict(os.environ, {}, clear=True):
-            with self.assertRaises(HTTPException) as missing:
-                app_module._authorize_strategy_access(request)
-        self.assertEqual(missing.exception.status_code, 503)
-        with patch.dict(os.environ, {"TRADESCANNER_STRATEGY_ADMIN_TOKEN": "expected-secret-value-that-is-long-enough-32"}):
-            with self.assertRaises(HTTPException) as wrong:
-                app_module._authorize_strategy_access(request)
-        self.assertEqual(wrong.exception.status_code, 401)
-        authorized = Request({
+            with self.assertRaises(HTTPException) as missing_config:
+                app_module._authorize_strategy_access(missing_token)
+        self.assertEqual(missing_config.exception.status_code, 503)
+
+        env = {"NEON_AUTH_JWKS_URL": "https://auth.example.test/.well-known/jwks.json",
+               "NEON_AUTH_ISSUER": "https://auth.example.test"}
+        with patch.dict(os.environ, env, clear=True):
+            with self.assertRaises(HTTPException) as missing_bearer:
+                app_module._authorize_strategy_access(missing_token)
+        self.assertEqual(missing_bearer.exception.status_code, 401)
+
+        invalid_token_request = Request({
             "type": "http", "method": "GET", "path": "/api/strategies",
-            "headers": [(b"x-strategy-admin-token", b"expected-secret-value-that-is-long-enough-32")],
+            "headers": [(b"authorization", b"Bearer wrong-token")],
             "query_string": b"", "server": ("test", 443), "scheme": "https",
             "client": ("test", 123), "root_path": "",
         })
-        with patch.dict(os.environ, {"TRADESCANNER_STRATEGY_ADMIN_TOKEN": "expected-secret-value-that-is-long-enough-32"}):
-            self.assertIsNone(app_module._authorize_strategy_access(authorized))
+        fake_client = type("FakeJWKClient", (), {
+            "get_signing_key_from_jwt": lambda self, token: type("Key", (), {"key": "test-key"})()
+        })()
+        with patch.dict(os.environ, env, clear=True), patch.object(
+            app_module.jwt, "PyJWKClient", return_value=fake_client
+        ), patch.object(app_module.jwt, "decode", side_effect=app_module.jwt.InvalidTokenError("invalid")):
+            with self.assertRaises(HTTPException) as wrong:
+                app_module._authorize_strategy_access(invalid_token_request)
+        self.assertEqual(wrong.exception.status_code, 401)
 
     def test_all_strategy_admin_endpoints_fail_closed_without_private_token(self):
         request = Request({
