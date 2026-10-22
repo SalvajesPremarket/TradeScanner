@@ -238,7 +238,7 @@ def strategy_matches(strategy: dict[str, Any], row: dict[str, Any]) -> bool:
     language = strategy.get("language")
     source = strategy.get("source", "")
     try:
-        if strategy.get("name", "").casefold() == "momentum" and language == "python":
+        if "momentum" in strategy.get("name", "").casefold() and language == "python":
             return False  # Dedicated OHLCV/context pipeline evaluates this strategy.
         if language == "formula":
             expression = source
@@ -274,7 +274,7 @@ def save_strategy(name: str, language: str, source: str, strategy_id: str | None
     # Such strategies remain stored but cannot be activated until adapted.
     execution_error = None
     # Momentum has a dedicated, bounded evaluator in tradescanner.momentum.
-    is_momentum = clean_name.casefold() == "momentum" and language == "python"
+    is_momentum = "momentum" in clean_name.casefold() and language == "python"
     try:
         if is_momentum:
             if "def scan(" not in source or "STRATEGY_NAME" not in source:
@@ -320,7 +320,7 @@ def set_strategy_enabled(strategy_id: str, enabled: bool,
         if not selected.get("execution_ready", False):
             detail = selected.get("execution_error") or "El código no pertenece al subconjunto ejecutable del motor."
             raise ValueError("La estrategia se guardó, pero no se puede activar todavía: " + detail)
-        if selected.get("name", "").casefold() == "momentum" and selected.get("language") == "python":
+        if "momentum" in selected.get("name", "").casefold() and selected.get("language") == "python":
             source = selected.get("source", "")
             if "def scan(" not in source or "STRATEGY_NAME" not in source:
                 raise ValueError("La estrategia Momentum debe incluir la función scan y su configuración.")
