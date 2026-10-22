@@ -126,7 +126,7 @@ class SnapshotStore:
         return [json.loads(row[0]) for row in rows]
 
     def latest(self, limit: int = 100) -> list[dict[str, Any]]:
-        bounded_limit = max(1, min(int(limit), 1000))
+        bounded_limit = max(1, min(int(limit), 10000))
         with self._connect() as connection:
             rows = connection.execute(
                 """
