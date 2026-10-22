@@ -229,11 +229,22 @@
     }
 
     function applyFilters() {
-      const filtered = filteredResults();
-      countNode.textContent = "Resultados: " + filtered.length + " / " + allResults.length;
-      renderRows(filtered);
+      const filtered = filteredResults().sort((a, b) => {
+        // Ranking: mayor cambio porcentual, luego RVOL y finalmente volumen.
+        const changeA = Number.isFinite(Number(a.change_pct)) ? Number(a.change_pct) : -Infinity;
+        const changeB = Number.isFinite(Number(b.change_pct)) ? Number(b.change_pct) : -Infinity;
+        if (changeA !== changeB) return changeB - changeA;
+        const rvolA = Number.isFinite(Number(a.rvol)) ? Number(a.rvol) : -Infinity;
+        const rvolB = Number.isFinite(Number(b.rvol)) ? Number(b.rvol) : -Infinity;
+        if (rvolA !== rvolB) return rvolB - rvolA;
+        const volumeA = Number.isFinite(Number(a.volume)) ? Number(a.volume) : -Infinity;
+        const volumeB = Number.isFinite(Number(b.volume)) ? Number(b.volume) : -Infinity;
+        return volumeB - volumeA;
+      });
+      const topTen = filtered.slice(0, 10);
+      countNode.textContent = "Mostrando " + topTen.length + " mejores de " + filtered.length + " que cumplen · " + allResults.length + " analizadas";
+      renderRows(topTen);
     }
-
     function setToggle(id, enabled) {
       const button = document.getElementById(id);
       button.setAttribute("aria-pressed", String(enabled));
