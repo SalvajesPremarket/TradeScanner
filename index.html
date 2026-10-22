@@ -90,7 +90,7 @@
     <section id="tab-strategies" class="panel tab-panel" hidden aria-label="Editor de estrategias">
       <div class="panel-head"><h2>EDITOR DE ESTRATEGIAS · ESTILO THINKORSWIM</h2><span class="muted">Una sola estrategia activa a la vez</span></div>
       <div class="tab-body">
-        <div class="field" style="max-width:520px"><label for="strategy-token">Clave privada del editor</label><input id="strategy-token" type="password" autocomplete="off" placeholder="Configura esta clave en Render como TRADESCANNER_STRATEGY_ADMIN_TOKEN"><div class="code-hint">Por seguridad, la API permanece bloqueada hasta configurar la variable secreta en el servicio. La clave no se guarda en el navegador.</div></div>
+        <p class="code-hint" id="strategy-access-message">Acceso al editor mediante tu sesión de Neon Auth. Inicia sesión arriba para consultar y gestionar estrategias.</p>
         <div class="grid-two"><div>
           <h2>Mis estrategias</h2>
           <p class="code-hint">Cada estrategia se guarda por separado. Solo la estrategia activada se aplica a los resultados, después de los filtros fijos.</p>
@@ -309,7 +309,6 @@
     let activeStrategyId = null;
     let activeStrategySymbols = null;
     let savedStrategies = [];
-    let strategyToken = "";
     let chartRows = [];
     let watchlist = [];
 
@@ -339,18 +338,21 @@
     }
     document.querySelectorAll("nav [data-tab]").forEach(button => button.addEventListener("click", () => showTab(button.dataset.tab)));
 
-    function strategyHeaders(extra = {}) {
-      strategyToken = document.getElementById("strategy-token").value.trim();
-      return Object.assign({"X-Strategy-Admin-Token":strategyToken}, extra);
+    async function strategyHeaders(extra = {}) {
+      if (typeof window.tradeScannerGetAccessToken !== "function") {
+        throw new Error("Inicia sesión con Neon para acceder al editor de estrategias.");
+      }
+      const token = await window.tradeScannerGetAccessToken();
+      return Object.assign({"Authorization":"Bearer " + token}, extra);
     }
     async function loadStrategies() {
       const list = document.getElementById("strategy-list");
       try {
-        const payload = await readJson(await fetch("/api/strategies", {cache:"no-store",headers:strategyHeaders()}));
+        const payload = await readJson(await fetch("/api/strategies", {cache:"no-store",headers:await strategyHeaders()}));
         savedStrategies = payload.strategies || [];
         const active = savedStrategies.find(item => item.enabled);
         activeStrategyId = active ? active.id : null;
-        const matchPayload = await readJson(await fetch("/api/strategies/active-matches", {cache:"no-store",headers:strategyHeaders()}));
+        const matchPayload = await readJson(await fetch("/api/strategies/active-matches", {cache:"no-store",headers:await strategyHeaders()}));
         activeStrategySymbols = matchPayload.strategy ? new Set(matchPayload.symbols || []) : null;
         applyFilters();
         renderStrategies();
@@ -378,7 +380,7 @@
         toggle.addEventListener("click", async () => {
           try {
             await readJson(await fetch("/api/strategies/" + encodeURIComponent(strategy.id) + "/activate", {
-              method:"POST", headers:strategyHeaders({"Content-Type":"application/json"}), body:JSON.stringify({enabled:!strategy.enabled})
+              method:"POST", headers:await strategyHeaders({"Content-Type":"application/json"}), body:JSON.stringify({enabled:!strategy.enabled})
             }));
             document.getElementById("strategy-message").textContent = strategy.enabled ? "Estrategia desactivada." : "Estrategia activada. Solo esta estrategia filtrará los resultados.";
             await loadStrategies();
@@ -399,7 +401,7 @@
         del.addEventListener("click", async () => {
           if (!confirm("¿Eliminar la estrategia «" + strategy.name + "»?")) return;
           try {
-            await readJson(await fetch("/api/strategies/" + encodeURIComponent(strategy.id), {method:"DELETE",headers:strategyHeaders()}));
+            await readJson(await fetch("/api/strategies/" + encodeURIComponent(strategy.id), {method:"DELETE",headers:await strategyHeaders()}));
             document.getElementById("strategy-message").textContent = "Estrategia eliminada.";
             if (document.getElementById("strategy-id").value === strategy.id) clearStrategyForm();
             await loadStrategies();
@@ -425,7 +427,6 @@
       updateLanguageHelp();
     }
     document.getElementById("strategy-new").addEventListener("click", clearStrategyForm);
-    document.getElementById("strategy-token").addEventListener("change", loadStrategies);
     document.getElementById("strategy-form").addEventListener("submit", async event => {
       event.preventDefault();
       const payload = {
@@ -436,7 +437,7 @@
       };
       try {
         const result = await readJson(await fetch("/api/strategies", {
-          method:"POST", headers:strategyHeaders({"Content-Type":"application/json"}), body:JSON.stringify(payload)
+          method:"POST", headers:await strategyHeaders({"Content-Type":"application/json"}), body:JSON.stringify(payload)
         }));
         document.getElementById("strategy-id").value = result.strategy.id;
         document.getElementById("strategy-message").textContent = result.strategy.execution_ready
@@ -563,7 +564,6 @@
 
     refreshScanner();
     window.setInterval(refreshScanner, 15000);
-    loadStrategies();
     updateLanguageHelp();
   </script>
 
@@ -596,6 +596,15 @@
         if (!response.ok || data.error) throw new Error(data.message || data.error || "Error de autenticación (" + response.status + ").");
         return data;
       }
+      // Exchange Neon Auth's HTTP-only session cookie for a short-lived signed JWT.
+      window.tradeScannerGetAccessToken = async function() {
+        const data = await authRequest("/token");
+        const token = data.token || data.access_token || (data.session && data.session.access_token);
+        if (typeof token !== "string" || token.split(".").length !== 3) {
+          throw new Error("Neon no devolvió un token de acceso. Cierra sesión y vuelve a iniciarla.");
+        }
+        return token;
+      };
       function setSession(user) {
         if (user) {
           form.style.display = "none";
@@ -610,21 +619,30 @@
       async function refreshSession() {
         try {
           const data = await authRequest("/get-session");
-          setSession(data.user || (data.session && data.session.user) || null);
-          if (!data.user && !(data.session && data.session.user)) showMessage("No hay una sesión iniciada.");
-        } catch (_) {
+          const user = data.user || (data.session && data.session.user) || null;
+          setSession(user);
+          if (!user) {
+            const list = document.getElementById("strategy-list");
+            if (list) list.textContent = "Inicia sesión con Neon Auth para acceder a tus estrategias.";
+            showMessage("No hay una sesión iniciada.");
+            return;
+          }
+          await window.tradeScannerGetAccessToken();
+          showMessage("Sesión Neon activa. Editor de estrategias habilitado.");
+          await loadStrategies();
+        } catch (error) {
           setSession(null);
-          showMessage("No se pudo comprobar la sesión. Revisa la conexión con Neon Auth y el dominio autorizado.", true);
+          const list = document.getElementById("strategy-list");
+          if (list) list.textContent = "Inicia sesión con Neon Auth para acceder a tus estrategias.";
+          showMessage(error.message || "No se pudo comprobar la sesión de Neon Auth.", true);
         }
       }
       form.addEventListener("submit", async event => {
         event.preventDefault();
         signIn.disabled = signUp.disabled = true;
         try {
-          const data = await authRequest("/sign-in/email", {email:email.value.trim(), password:password.value});
-          setSession(data.user || (data.session && data.session.user) || null);
-          if (!data.user && !(data.session && data.session.user)) await refreshSession();
-          showMessage("Solicitud de inicio de sesión completada.");
+          await authRequest("/sign-in/email", {email:email.value.trim(), password:password.value});
+          await refreshSession();
         } catch (error) {
           showMessage(error.message || "No se pudo iniciar sesión.", true);
         } finally {
@@ -635,10 +653,8 @@
         if (!form.reportValidity()) return;
         signIn.disabled = signUp.disabled = true;
         try {
-          const data = await authRequest("/sign-up/email", {email:email.value.trim(), password:password.value, name:email.value.trim().split("@")[0]});
-          setSession(data.user || (data.session && data.session.user) || null);
-          if (!data.user && !(data.session && data.session.user)) await refreshSession();
-          showMessage("Solicitud de registro completada.");
+          await authRequest("/sign-up/email", {email:email.value.trim(), password:password.value, name:email.value.trim().split("@")[0]});
+          await refreshSession();
         } catch (error) {
           showMessage(error.message || "No se pudo crear la cuenta.", true);
         } finally {
@@ -650,7 +666,9 @@
           await authRequest("/sign-out", {});
           setSession(null);
           password.value = "";
-          showMessage("Sesión cerrada.");
+          const list = document.getElementById("strategy-list");
+          if (list) list.textContent = "Inicia sesión con Neon Auth para acceder a tus estrategias.";
+          showMessage("Sesión cerrada; el editor quedó bloqueado.");
         } catch (error) {
           showMessage(error.message || "No se pudo cerrar sesión.", true);
         }

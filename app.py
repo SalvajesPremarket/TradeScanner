@@ -1,5 +1,6 @@
 import asyncio
 import hmac
+import jwt
 import logging
 import os
 import time
@@ -238,18 +239,35 @@ def snapshots_latest(limit: int = Query(100, ge=1, le=1000)):
 
 
 def _authorize_strategy_access(request: Request) -> None:
-    expected = os.getenv("TRADESCANNER_STRATEGY_ADMIN_TOKEN", "").strip()
-    if len(expected) < 32:
-        raise HTTPException(
-            status_code=503,
-            detail=(
-                "Editor de estrategias bloqueado: configura TRADESCANNER_STRATEGY_ADMIN_TOKEN "
-                "con al menos 32 caracteres aleatorios en el entorno privado del servicio."
-            ),
+    """Require a valid Neon Auth JWT for strategy editor operations."""
+    jwks_url = os.getenv("NEON_AUTH_JWKS_URL", "").strip()
+    issuer = os.getenv("NEON_AUTH_ISSUER", "").strip()
+    if not jwks_url or not issuer:
+        raise HTTPException(status_code=503, detail="Autenticación Neon no está configurada en el servidor.")
+
+    authorization = request.headers.get("authorization", "")
+    scheme, _, token = authorization.partition(" ")
+    if scheme.lower() != "bearer" or not token.strip():
+        raise HTTPException(status_code=401, detail="Inicia sesión con tu cuenta Neon para acceder al editor.")
+
+    try:
+        signing_key = jwt.PyJWKClient(jwks_url, cache_jwk_set=True).get_signing_key_from_jwt(token.strip()).key
+    except jwt.PyJWKClientError:
+        logger.exception("No se pudo consultar la clave pública de Neon Auth.")
+        raise HTTPException(status_code=503, detail="No se pudo verificar Neon Auth temporalmente. Inténtalo de nuevo.") from None
+
+    try:
+        claims = jwt.decode(
+            token.strip(),
+            signing_key,
+            algorithms=["EdDSA", "ES256", "RS256"],
+            issuer=issuer,
+            options={"require": ["exp", "sub", "iss"]},
         )
-    supplied = request.headers.get("x-strategy-admin-token", "")
-    if not supplied or not hmac.compare_digest(supplied, expected):
-        raise HTTPException(status_code=401, detail="Clave del editor incorrecta o ausente.")
+        if not isinstance(claims.get("sub"), str) or not claims["sub"].strip():
+            raise jwt.InvalidTokenError("Missing subject")
+    except jwt.InvalidTokenError:
+        raise HTTPException(status_code=401, detail="La sesión Neon no es válida o ha expirado. Inicia sesión de nuevo.") from None
 
 
 @app.get("/api/strategies")
