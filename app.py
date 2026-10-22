@@ -19,6 +19,7 @@ from tradescanner.infisical_vault import is_configured as infisical_is_configure
 from tradescanner.engine import get_engine_status, record_engine_status, run_scan_cycle
 from tradescanner.snapshots import SnapshotStore, collect_snapshots
 from tradescanner.strategies import (active_strategy, delete_strategy, strategy_matches, list_strategies, save_strategy, set_strategy_enabled)
+from tradescanner.momentum import evaluate_momentum
 from tradescanner.universe import UniverseUnavailableError, load_symbol_universe
 from tradescanner.oauth import router as oauth_router
 from tradescanner.schwab import (
@@ -338,21 +339,55 @@ def strategies_active_matches(request: Request):
     _authorize_strategy_access(request)
     strategy = active_strategy()
     if not strategy:
-        return {"strategy": None, "symbols": []}
+        return {"strategy": None, "symbols": [], "evaluations": [], "data_gaps": []}
     store = SnapshotStore()
     rows = store.latest(10000)
     candle_store = CandleStore(store.path)
+    matches: list[str] = []
+    evaluations: list[dict[str, Any]] = []
+    data_gaps: set[str] = set()
+    native_momentum = strategy.get("execution_mode") == "momentum_native"
     for row in rows:
-        row["rvol"] = (
-            candle_store.rvol(row["symbol"])["rvol"]
-            if row.get("quote_is_fresh") is True else None
-        )
-    matches = [
-        row.get("symbol") for row in rows
-        if row.get("symbol") and row.get("quote_is_fresh") is True
-        and strategy_matches(strategy, row)
-    ]
-    return {"strategy": {"id": strategy["id"], "name": strategy["name"]}, "symbols": matches}
+        if row.get("quote_is_fresh") is not True or not row.get("symbol"):
+            continue
+        if native_momentum:
+            candles = candle_store.latest(row["symbol"], limit=5000)
+            result = evaluate_momentum(
+                candles,
+                {
+                    "symbol": row.get("symbol"),
+                    "price": row.get("price"),
+                    "prev_close": row.get("previous_close"),
+                    "float_shares": row.get("float_shares"),
+                    # News and 30-day volume baselines are intentionally absent until
+                    # a real provider is connected; the evaluator reports these gaps.
+                    "news": [],
+                },
+                strategy.get("config") if isinstance(strategy.get("config"), dict) else {},
+            )
+            if result["passed"]:
+                matches.append(row["symbol"])
+            for name, passed in result["checks"].items():
+                if not passed:
+                    data_gaps.add(name)
+            evaluations.append({
+                "symbol": row["symbol"],
+                "passed": result["passed"],
+                "checks": result["checks"],
+                "reasons": result["reasons"],
+                "metrics": result["metrics"],
+            })
+        else:
+            row["rvol"] = candle_store.rvol(row["symbol"])["rvol"]
+            if strategy_matches(strategy, row):
+                matches.append(row["symbol"])
+    return {
+        "strategy": {"id": strategy["id"], "name": strategy["name"],
+                     "execution_mode": strategy.get("execution_mode", "safe_expression")},
+        "symbols": matches,
+        "evaluations": evaluations,
+        "data_gaps": sorted(data_gaps),
+    }
 
 
 @app.get("/api/candles/{symbol}")
