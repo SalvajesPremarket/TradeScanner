@@ -74,7 +74,7 @@ def get_engine_status(store: SnapshotStore | None = None) -> dict[str, Any]:
 def _evaluate_active_momentum(store: SnapshotStore, batch: list[str]) -> dict[str, Any] | None:
     """Evaluate the dedicated Momentum strategy against real stored OHLCV/context."""
     strategy = active_strategy(store)
-    if not strategy or str(strategy.get("name", "")).casefold() != "momentum":
+    if not strategy or "momentum" not in str(strategy.get("name", "")).casefold():
         store.set_state("momentum_scan_status", {"status": "inactive", "evaluated_at": _now(), "evaluations": [], "matches": []})
         return None
     rows = store.latest_for_symbols(batch)
