@@ -6,7 +6,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 NY = ZoneInfo("America/New_York")
-DEFAULT_CONFIG = {"session_start": "04:00", "session_end": "09:30", "price_min": 1.0, "price_max": 20.0, "gap_min_pct": 5.0, "rvol_min": 5.0, "float_max": 20_000_000, "ema_period": 20, "max_first_candles": 1, "macd_fast": 12, "macd_slow": 26, "macd_signal": 9, "macd_require_above_signal": False, "news_required": True, "news_max_age_hours": 16, "news_require_keyword": False, "min_bars": 35}
+DEFAULT_CONFIG = {"timezone": "America/New_York", "session_start": "04:00", "session_end": "09:30", "price_min": 1.0, "price_max": 20.0, "gap_min_pct": 5.0, "gap_ideal_pct": 10.0, "rvol_min": 5.0, "float_max": 20_000_000, "ema_period": 20, "max_first_candles": 1, "macd_fast": 12, "macd_slow": 26, "macd_signal": 9, "macd_require_above_signal": False, "news_required": True, "news_max_age_hours": 16, "news_require_keyword": False, "min_bars": 35}
 CATALYSTS = {"earnings": ("earnings", "resultados", "revenue", "guidance"), "fda": ("fda", "clinical trial", "ensayo clínico", "aprobación"), "contract": ("contract", "award", "agreement", "contrato"), "merger": ("merger", "acquisition", "fusión", "adquisición"), "partnership": ("partnership", "collaboration", "alianza", "colaboración")}
 
 
@@ -44,13 +44,53 @@ def _macd(values: list[float], fast: int, slow: int, signal: int) -> tuple[list[
     return line, _ema(line, signal)
 
 
+
+def normalize_momentum_config(config: dict[str, Any] | None = None) -> dict[str, Any]:
+    supplied = config or {}
+    if not isinstance(supplied, dict) or set(supplied) - set(DEFAULT_CONFIG):
+        raise ValueError("La CONFIG de Momentum contiene claves no reconocidas.")
+    cfg = {**DEFAULT_CONFIG, **supplied}
+    for key, default in DEFAULT_CONFIG.items():
+        value = cfg[key]
+        if isinstance(default, bool):
+            valid = isinstance(value, bool)
+        elif isinstance(default, int):
+            valid = isinstance(value, int) and not isinstance(value, bool)
+        elif isinstance(default, float):
+            valid = isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
+        else:
+            valid = isinstance(value, str)
+        if not valid:
+            raise ValueError(f"Tipo de configuración inválido: {key}.")
+    try:
+        ZoneInfo(cfg["timezone"])
+    except (KeyError, ValueError):
+        raise ValueError("Zona horaria inválida en CONFIG de Momentum.") from None
+    for key in ("session_start", "session_end"):
+        try:
+            hour, minute = (int(part) for part in cfg[key].split(":"))
+            if not (0 <= hour <= 23 and 0 <= minute <= 59):
+                raise ValueError
+        except (ValueError, AttributeError):
+            raise ValueError(f"Hora inválida en CONFIG de Momentum: {key}.") from None
+    if cfg["price_min"] <= 0 or cfg["price_max"] < cfg["price_min"] or cfg["gap_min_pct"] < 0 or cfg["rvol_min"] < 0:
+        raise ValueError("Los límites de precio, GAP o RVOL de Momentum no son válidos.")
+    if cfg["float_max"] <= 0 or cfg["min_bars"] < 1 or cfg["min_bars"] > 10000:
+        raise ValueError("Los límites de FLOAT o historial de Momentum no son válidos.")
+    if min(cfg["ema_period"], cfg["macd_fast"], cfg["macd_slow"], cfg["macd_signal"]) < 1 or max(cfg["ema_period"], cfg["macd_fast"], cfg["macd_slow"], cfg["macd_signal"]) > 5000:
+        raise ValueError("Los períodos de EMA/MACD deben estar entre 1 y 5000.")
+    if cfg["news_max_age_hours"] < 0 or cfg["news_max_age_hours"] > 720:
+        raise ValueError("La antigüedad de noticias debe estar entre 0 y 720 horas.")
+    return cfg
+
+
 def evaluate_momentum(candles: list[dict[str, Any]], context: dict[str, Any], config: dict[str, Any] | None = None, *, now: datetime | None = None) -> dict[str, Any]:
     """Evaluate the provided Momentum conditions against candles and explicit context.
 
     Context keys: symbol, prev_close, avg_volume_30d, avg_premarket_volume_30d,
     float_shares, news. Candles use datetime/timestamp/candle_time_ms, close, volume.
     """
-    cfg = {**DEFAULT_CONFIG, **(config or {})}
+    cfg = normalize_momentum_config(config)
     current = now or datetime.now(timezone.utc)
     if current.tzinfo is None:
         current = current.replace(tzinfo=timezone.utc)
@@ -65,6 +105,10 @@ def evaluate_momentum(candles: list[dict[str, Any]], context: dict[str, Any], co
             bars.append((stamp, close, volume))
     bars.sort(key=lambda x: x[0])
     closes = [b[1] for b in bars]
+    if now is None and bars:
+        current = bars[-1][0]
+    current = current.astimezone(timezone.utc)
+    market_tz = ZoneInfo(cfg["timezone"])
     checks: dict[str, bool] = {}
     reasons: list[str] = []
     metrics: dict[str, Any] = {}
@@ -83,7 +127,7 @@ def evaluate_momentum(candles: list[dict[str, Any]], context: dict[str, Any], co
     check("gap", gap is not None and gap >= cfg["gap_min_pct"], f"GAP inferior a {cfg['gap_min_pct']}% o cierre previo desconocido.")
 
     if bars:
-        local = bars[-1][0].astimezone(NY)
+        local = bars[-1][0].astimezone(market_tz)
         sh, sm = map(int, cfg["session_start"].split(":")); eh, em = map(int, cfg["session_end"].split(":"))
         minute = local.hour * 60 + local.minute
         session_ok = sh * 60 + sm <= minute < eh * 60 + em
@@ -94,8 +138,8 @@ def evaluate_momentum(candles: list[dict[str, Any]], context: dict[str, Any], co
 
     day_volume = None
     if bars:
-        local_day = bars[-1][0].astimezone(NY).date()
-        day_volume = sum(v for t, _, v in bars if t.astimezone(NY).date() == local_day)
+        local_day = bars[-1][0].astimezone(market_tz).date()
+        day_volume = sum(v for t, _, v in bars if t.astimezone(market_tz).date() == local_day)
     baseline = _num(context.get("avg_premarket_volume_30d")) or _num(context.get("avg_volume_30d"))
     rvol = day_volume / baseline if day_volume is not None and baseline is not None and baseline > 0 else None
     metrics.update(today_volume=day_volume, volume_baseline=baseline, rvol=round(rvol, 4) if rvol is not None else None)
