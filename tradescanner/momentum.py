@@ -142,8 +142,18 @@ def evaluate_momentum(candles: list[dict[str, Any]], context: dict[str, Any], co
         local_day = bars[-1][0].astimezone(market_tz).date()
         day_volume = sum(v for t, _, v in bars if t.astimezone(market_tz).date() == local_day)
     baseline = _num(context.get("avg_premarket_volume_30d")) or _num(context.get("avg_volume_30d"))
-    rvol = day_volume / baseline if day_volume is not None and baseline is not None and baseline > 0 else None
-    metrics.update(today_volume=day_volume, volume_baseline=baseline, rvol=round(rvol, 4) if rvol is not None else None)
+    supplied_rvol = _num(context.get("rvol"))
+    rvol = supplied_rvol if supplied_rvol is not None and supplied_rvol >= 0 else (
+        day_volume / baseline if day_volume is not None and baseline is not None and baseline > 0 else None
+    )
+    metrics.update(
+        today_volume=day_volume,
+        volume_baseline=baseline,
+        rvol=round(rvol, 4) if rvol is not None else None,
+        rvol_source="intraday_history_same_time" if supplied_rvol is not None else (
+            "provided_30d_baseline" if baseline is not None else None
+        ),
+    )
     check("rvol", rvol is not None and rvol >= cfg["rvol_min"], f"RVOL inferior a {cfg['rvol_min']} o no hay volumen base.")
 
     float_shares = _num(context.get("float_shares")); metrics["float_shares"] = float_shares
