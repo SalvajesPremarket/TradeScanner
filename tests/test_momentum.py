@@ -26,7 +26,7 @@ class MomentumTests(unittest.TestCase):
         )
         self.assertIsNotNone(result["metrics"]["ema"])
         self.assertIsNotNone(result["metrics"]["macd"])
-        self.assertEqual(len(result["checks"]), 8)
+        self.assertEqual(len(result["checks"]), 9)
 
     def test_configurable_news_keyword_requirement(self):
         now = datetime(2026, 10, 22, 12, tzinfo=timezone.utc)
