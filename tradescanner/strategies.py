@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from tradescanner.snapshots import SnapshotStore
+from tradescanner.momentum import normalize_momentum_config
 
 STATE_KEY = "user_strategies_v1"
 MAX_NAME_LENGTH = 80
@@ -303,8 +304,8 @@ def _native_momentum_config(source: str) -> dict[str, Any]:
                 raise ValueError("La CONFIG de Momentum debe ser un diccionario literal.") from None
             if not isinstance(config, dict) or len(config) > 100:
                 raise ValueError("La CONFIG de Momentum debe ser un diccionario válido.")
-            return config
-    return {}
+            return normalize_momentum_config(config)
+    return normalize_momentum_config({})
 
 
 
