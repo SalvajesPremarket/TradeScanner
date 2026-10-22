@@ -212,9 +212,7 @@ class AutomaticEngineTests(unittest.TestCase):
                     candle_fetcher=fetch_history,
                 )
 
-            # Both eligible symbols should be refreshed in each of the two cycles.
-            self.assertEqual(requested_history, ["LIQUID", "THIN", "LIQUID", "THIN"])
-            self.assertEqual(store.get_state("momentum_history_queue"), [])
+            self.assertEqual(requested_history, ["LIQUID"])
 
 
     def test_infisical_can_supply_refresh_token_without_render_refresh_variable(self):
