@@ -186,55 +186,87 @@ def run_scan_cycle(
                 rows = target_store.latest_for_symbols(batch)
                 eligible = [
                     row for row in rows
-                    if isinstance(row.get("price"), (int, float)) and row["price"] > 0
+                    if isinstance(row.get("price"), (int, float))
+                    and not isinstance(row.get("price"), bool)
+                    and row["price"] > 0
                 ]
-                if eligible:
-                    strategy = active_strategy(target_store)
-                    candidate = None
-                    if strategy and strategy.get("execution_mode") == "momentum_native":
-                        config = strategy.get("config") if isinstance(strategy.get("config"), dict) else {}
-                        price_min = config.get("price_min", 1.0)
-                        price_max = config.get("price_max", 20.0)
-                        gap_min = config.get("gap_min_pct", 5.0)
-                        candidates = [
-                            row for row in eligible
-                            if isinstance(row.get("price"), (int, float))
-                            and price_min <= row["price"] <= price_max
-                            and isinstance(row.get("gap_pct"), (int, float))
-                            and row["gap_pct"] >= gap_min
-                        ]
-                        if candidates:
-                            candidates.sort(
-                                key=lambda row: (
-                                    row.get("volume") if isinstance(row.get("volume"), (int, float)) else -1,
-                                    row.get("symbol", ""),
-                                ),
-                                reverse=True,
-                            )
-                            offset = int(target_store.get_state("momentum_history_cursor", 0)) % len(candidates)
-                            candidate = candidates[offset]
-                            target_store.set_state("momentum_history_cursor", offset + 1)
-                    else:
-                        # Without a history-based strategy, prefer liquid symbols so the
-                        # bounded history request is more likely to establish RVOL.
-                        candidate = max(
-                            eligible,
-                            key=lambda row: (
-                                row.get("volume") if isinstance(row.get("volume"), (int, float)) else -1,
-                                abs(row.get("gap_pct") or 0.0),
-                            ),
-                        )
-                    if candidate is not None:
-                        candle_payload = history_fetch(candidate["symbol"])
-                        candles = normalize_price_history(candidate["symbol"], candle_payload)
-                        candle_store = CandleStore(target_store.path)
-                        candle_state["candle_symbol"] = candidate["symbol"]
-                        candle_state["candles_saved"] = candle_store.save(candles)
-                        rvol = candle_store.rvol(candidate["symbol"])
-                        candle_state["rvol"] = rvol.get("rvol")
-                        candle_state["rvol_sessions_used"] = rvol.get("sessions_used", 0)
-                        # Keep FLOAT diagnostics tied to the independently queried FLOAT symbol.
-                        # Candle sampling can select a different ticker and must not overwrite it.
+                strategy = active_strategy(target_store)
+                candidate = None
+                if strategy and strategy.get("execution_mode") == "momentum_native":
+                    config = strategy.get("config") if isinstance(strategy.get("config"), dict) else {}
+                    price_min = config.get("price_min", 1.0)
+                    price_max = config.get("price_max", 20.0)
+                    gap_min = config.get("gap_min_pct", 5.0)
+                    candidates = [
+                        row for row in eligible
+                        if isinstance(row.get("symbol"), str)
+                        and isinstance(row.get("price"), (int, float))
+                        and not isinstance(row.get("price"), bool)
+                        and price_min <= row["price"] <= price_max
+                        and isinstance(row.get("gap_pct"), (int, float))
+                        and not isinstance(row.get("gap_pct"), bool)
+                        and row["gap_pct"] >= gap_min
+                    ]
+                    candidates.sort(
+                        key=lambda row: (
+                            row.get("volume") if isinstance(row.get("volume"), (int, float)) else -1,
+                            row.get("symbol", ""),
+                        ),
+                        reverse=True,
+                    )
+                    # Keep a bounded persistent queue so every eligible Momentum
+                    # candidate gets a history turn, instead of restarting at index
+                    # zero whenever the quote batch changes.
+                    queue = target_store.get_state("momentum_history_queue", [])
+                    if not isinstance(queue, list):
+                        queue = []
+                    queued = {item for item in queue if isinstance(item, str)}
+                    for row in candidates:
+                        symbol = row["symbol"].strip().upper()
+                        if symbol and symbol not in queued:
+                            queue.append(symbol)
+                            queued.add(symbol)
+                    queue = [item for item in queue if isinstance(item, str) and item.strip()]
+                    queue = queue[-500:]
+                    candidate_symbol = queue.pop(0) if queue else None
+                    target_store.set_state("momentum_history_queue", queue)
+                    if candidate_symbol:
+                        current = target_store.latest_for_symbols([candidate_symbol])
+                        if current:
+                            row = current[0]
+                            price = row.get("price")
+                            gap = row.get("gap_pct")
+                            if (
+                                isinstance(price, (int, float)) and not isinstance(price, bool)
+                                and price_min <= price <= price_max
+                                and isinstance(gap, (int, float)) and not isinstance(gap, bool)
+                                and gap >= gap_min
+                            ):
+                                candidate = row
+                elif eligible:
+                    # Without a history-based strategy, prefer liquid symbols so the
+                    # bounded history request is more likely to establish RVOL.
+                    candidate = max(
+                        eligible,
+                        key=lambda row: (
+                            row.get("volume") if isinstance(row.get("volume"), (int, float)) else -1,
+                            abs(row.get("gap_pct") or 0.0),
+                        ),
+                    )
+                if candidate is not None:
+                    candle_payload = history_fetch(candidate["symbol"])
+                    candles = normalize_price_history(candidate["symbol"], candle_payload)
+                    candle_store = CandleStore(target_store.path)
+                    candle_state["candle_symbol"] = candidate["symbol"]
+                    candle_state["candles_saved"] = candle_store.save(candles)
+                    rvol = candle_store.rvol(candidate["symbol"])
+                    candle_state["rvol"] = rvol.get("rvol")
+                    candle_state["rvol_sessions_used"] = rvol.get("sessions_used", 0)
+                    candle_state["history_queue_remaining"] = len(
+                        target_store.get_state("momentum_history_queue", [])
+                    )
+                    # Keep FLOAT diagnostics tied to the independently queried FLOAT symbol.
+                    # Candle sampling can select a different ticker and must not overwrite it.
             except (SchwabAPIError, SchwabConfigurationError, ValueError, OSError, RuntimeError) + DB_ERRORS as exc:
                 candle_state["candle_error"] = type(exc).__name__
         logger.warning("Scan cycle stage=price_history_finished candles_saved=%s", candle_state.get("candles_saved", 0))
