@@ -128,6 +128,9 @@ def run_scan_cycle(
             "float_as_of": None,
             "float_source": None,
             "float_error": None,
+            "targeted_float_cooldown_reason": None,
+            "targeted_float_provider_http_status": None,
+            "targeted_float_cooldown_remaining_seconds": None,
         }
         # If Schwab does not provide FLOAT, fill the current scan candidate from
         # FMP's symbol endpoint. This is at most one additional bounded request per cycle.
@@ -147,6 +150,15 @@ def run_scan_cycle(
             targeted_float_state = {"status": "unavailable", "provider": "FMP", "error": type(exc).__name__}
         if targeted_float_state.get("status") in {"unavailable", "not_found", "cooldown", "not_configured"}:
             candle_state["float_error"] = targeted_float_state.get("error") or targeted_float_state["status"]
+        candle_state["targeted_float_cooldown_reason"] = targeted_float_state.get("cooldown_reason")
+        candle_state["targeted_float_provider_http_status"] = targeted_float_state.get("provider_http_status")
+        candle_state["targeted_float_cooldown_remaining_seconds"] = targeted_float_state.get("cooldown_remaining_seconds")
+        logger.warning(
+            "Scan cycle FLOAT targeted_status=%s provider_http_status=%s cooldown_remaining_seconds=%s",
+            targeted_float_state.get("status", "unknown"),
+            targeted_float_state.get("provider_http_status"),
+            targeted_float_state.get("cooldown_remaining_seconds"),
+        )
         # Reflect cached/updated FLOAT in engine diagnostics too. The endpoint
         # decorates displayed snapshots from this cache, but engine status used
         # to misleadingly show null even when a targeted cache hit had succeeded.
