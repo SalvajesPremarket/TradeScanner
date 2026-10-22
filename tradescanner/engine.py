@@ -136,6 +136,7 @@ def _evaluate_active_strategies(store: SnapshotStore, batch: list[str]) -> dict[
         inactive = {"status": "inactive", "evaluated_at": _now(), "evaluations": [], "matches": []}
         store.set_state("momentum_scan_status", inactive)
         store.set_state("active_strategies_scan_status", {"status": "inactive", "strategies": [], "evaluated_at": _now()})
+        logger.warning("Scan cycle strategy evaluation active=0 status=inactive")
         return {"status": "inactive", "evaluations": [], "matches": [], "strategies": []}
 
     rows = store.latest_for_symbols(batch)
@@ -193,6 +194,11 @@ def _evaluate_active_strategies(store: SnapshotStore, batch: list[str]) -> dict[
         "matches": list(dict.fromkeys(symbol for state in states for symbol in state.get("matches", []))),
     }
     store.set_state("active_strategies_scan_status", combined)
+    logger.warning(
+        "Scan cycle strategy evaluation active=%s evaluations=%s matches=%s statuses=%s",
+        len(strategies), len(combined["evaluations"]), len(combined["matches"]),
+        ",".join(str(state.get("strategy", "unknown")) + ":" + str(state.get("status", "unknown")) for state in states),
+    )
     return combined
 
 def run_scan_cycle(
