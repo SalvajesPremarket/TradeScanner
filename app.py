@@ -20,7 +20,7 @@ from tradescanner.float_provider import apply_cached_float, _fetch_page, _fetch_
 from tradescanner.infisical_vault import is_configured as infisical_is_configured
 from tradescanner.engine import get_engine_status, record_engine_status, run_scan_cycle
 from tradescanner.snapshots import SnapshotStore, collect_snapshots
-from tradescanner.strategies import (active_strategy, delete_strategy, strategy_matches, list_strategies, save_strategy, set_strategy_enabled)
+from tradescanner.strategies import (active_strategy, active_strategies, delete_strategy, strategy_matches, list_strategies, save_strategy, set_strategy_enabled)
 from tradescanner.universe import UniverseUnavailableError, load_symbol_universe
 from tradescanner.oauth import router as oauth_router
 from tradescanner.schwab import (
@@ -506,31 +506,34 @@ def strategies_delete(strategy_id: str, request: Request):
 @app.get("/api/strategies/active-matches")
 def strategies_active_matches(request: Request):
     _authorize_strategy_access(request)
-    strategy = active_strategy()
-    if not strategy:
-        return {"strategy": None, "symbols": [], "momentum": {"status": "inactive", "evaluations": [], "matches": []}}
+    strategies = active_strategies()
+    if not strategies:
+        return {"strategy": None, "strategies": [], "symbols": [], "momentum": {"status": "inactive", "evaluations": [], "matches": []}}
     store = SnapshotStore()
-    if "momentum" in str(strategy.get("name", "")).casefold():
-        state = store.get_state("momentum_scan_status", {"status": "waiting_for_cycle", "evaluations": [], "matches": []})
-        return {
-            "strategy": {"id": strategy["id"], "name": strategy["name"]},
-            "symbols": state.get("matches", []),
-            "momentum": state,
-        }
-    rows = store.latest(10000)
-    candle_store = CandleStore(store.path)
-    for row in rows:
-        row["rvol"] = (
-            candle_store.rvol(row["symbol"])["rvol"]
-            if row.get("quote_is_fresh") is True else None
+    states = []
+    all_symbols = []
+    momentum_state = {"status": "inactive", "evaluations": [], "matches": []}
+    for strategy in strategies:
+        state = store.get_state(
+            "strategy_scan_status:" + str(strategy.get("id")),
+            {"status": "waiting_for_cycle", "evaluations": [], "matches": []},
         )
-    matches = [
-        row.get("symbol") for row in rows
-        if row.get("symbol") and row.get("quote_is_fresh") is True
-        and strategy_matches(strategy, row)
-    ]
-    return {"strategy": {"id": strategy["id"], "name": strategy["name"]}, "symbols": matches}
-
+        states.append({
+            "id": strategy.get("id"),
+            "name": strategy.get("name"),
+            "language": strategy.get("language"),
+            "scan": state,
+        })
+        all_symbols.extend(state.get("matches", []))
+        if "momentum" in str(strategy.get("name", "")).casefold() and momentum_state.get("status") == "inactive":
+            momentum_state = state
+    primary = strategies[0]
+    return {
+        "strategy": {"id": primary.get("id"), "name": primary.get("name")},
+        "strategies": states,
+        "symbols": list(dict.fromkeys(all_symbols)),
+        "momentum": momentum_state,
+    }
 
 @app.get("/api/candles/{symbol}")
 def candles_status(symbol: str, limit: int = Query(500, ge=1, le=5000)):
