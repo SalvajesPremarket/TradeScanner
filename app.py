@@ -14,7 +14,9 @@ from fastapi.responses import FileResponse
 from tradescanner.candles import CandleStore
 from tradescanner.db import DB_ERRORS, is_postgres
 from tradescanner.core import apply_filters, normalize_schwab_quotes
-from tradescanner.float_provider import apply_cached_float
+import urllib.error
+
+from tradescanner.float_provider import apply_cached_float, _fetch_page
 from tradescanner.infisical_vault import is_configured as infisical_is_configured
 from tradescanner.engine import get_engine_status, record_engine_status, run_scan_cycle
 from tradescanner.snapshots import SnapshotStore, collect_snapshots
@@ -141,6 +143,61 @@ def status():
             else "Schwab credentials are not configured."
         ),
     }
+
+
+@app.post("/api/diagnostics/float/fmp")
+def diagnose_fmp_float(request: Request):
+    """One-shot, read-only FMP FLOAT check; requires a valid Neon session."""
+    _authorize_strategy_access(request)
+    api_key = os.getenv("FMP_API_KEY", "").strip()
+    if not api_key:
+        return {
+            "provider": "FMP",
+            "status": "not_configured",
+            "key_configured": False,
+            "provider_http_status": None,
+            "usable_records": 0,
+        }
+
+    try:
+        records = _fetch_page(0, api_key)
+        usable = sum(
+            1 for item in records
+            if isinstance(item.get("symbol"), str)
+            and item.get("symbol", "").strip()
+            and isinstance(item.get("floatShares"), (int, float))
+            and not isinstance(item.get("floatShares"), bool)
+            and item.get("floatShares", 0) > 0
+        )
+        return {
+            "provider": "FMP",
+            "status": "ok" if usable else "no_usable_data",
+            "key_configured": True,
+            "provider_http_status": 200,
+            "records_received": len(records),
+            "usable_records": usable,
+            "cache_modified": False,
+        }
+    except urllib.error.HTTPError as exc:
+        return {
+            "provider": "FMP",
+            "status": "unavailable",
+            "key_configured": True,
+            "provider_http_status": exc.code,
+            "usable_records": 0,
+            "cache_modified": False,
+        }
+    except Exception as exc:
+        logger.warning("FMP FLOAT diagnostic failed; error_type=%s", type(exc).__name__)
+        return {
+            "provider": "FMP",
+            "status": "unavailable",
+            "key_configured": True,
+            "provider_http_status": None,
+            "error_type": type(exc).__name__,
+            "usable_records": 0,
+            "cache_modified": False,
+        }
 
 
 @app.get("/api/engine/status")
