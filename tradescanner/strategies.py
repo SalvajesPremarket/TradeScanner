@@ -267,12 +267,19 @@ def save_strategy(name: str, language: str, source: str, strategy_id: str | None
         raise ValueError("Lenguaje no reconocido.")
     if not isinstance(source, str) or not source.strip() or len(source) > MAX_SOURCE_LENGTH:
         raise ValueError("El código está vacío o supera el límite de 50.000 caracteres.")
-    if language == "formula":
-        _validate_formula(source)
-    elif language == "python":
-        _python_expression(source)
-    elif language == "thinkscript":
-        _thinkscript_expression(source)
+    # Saving is separate from execution support: preserve the user's full source
+    # even when it uses constructs outside this scanner's safe execution subset.
+    # Such strategies remain stored but cannot be activated until adapted.
+    execution_error = None
+    try:
+        if language == "formula":
+            _validate_formula(source)
+        elif language == "python":
+            _python_expression(source)
+        elif language == "thinkscript":
+            _thinkscript_expression(source)
+    except (SyntaxError, TypeError, ValueError) as exc:
+        execution_error = str(exc) or "El código no pertenece al subconjunto ejecutable del motor."
     target = _store(store)
     items = list_strategies(target)
     existing = next((item for item in items if item.get("id") == strategy_id), None) if strategy_id else None
@@ -281,7 +288,9 @@ def save_strategy(name: str, language: str, source: str, strategy_id: str | None
     item = {
         "id": strategy_id or str(uuid.uuid4()), "name": clean_name,
         "language": language, "source": source, "enabled": bool(existing and existing.get("enabled")),
-        "execution_ready": language in LANGUAGES, "updated_at": datetime.now(timezone.utc).isoformat(),
+        "execution_ready": execution_error is None,
+        "execution_error": execution_error,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
     }
     if item["enabled"] and language == "formula":
         _validate_formula(source)
@@ -301,6 +310,9 @@ def set_strategy_enabled(strategy_id: str, enabled: bool,
     if selected is None:
         raise KeyError("Estrategia no encontrada.")
     if enabled:
+        if not selected.get("execution_ready", False):
+            detail = selected.get("execution_error") or "El código no pertenece al subconjunto ejecutable del motor."
+            raise ValueError("La estrategia se guardó, pero no se puede activar todavía: " + detail)
         strategy_matches(selected, {})
         if selected.get("language") == "formula": _validate_formula(selected.get("source", ""))
         elif selected.get("language") == "python": _python_expression(selected.get("source", ""))
