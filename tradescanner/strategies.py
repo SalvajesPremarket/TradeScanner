@@ -214,10 +214,10 @@ def _thinkscript_expression(source: str, history: list[dict[str, Any]] | None = 
     if not source or len(source) > MAX_SOURCE_LENGTH:
         raise ValueError("El script está vacío o supera el límite permitido.")
     cleaned = source.strip()
-    match = re.fullmatch(r"(?is)plot\\s+scan\\s*=\\s*(.*?)\\s*;?", cleaned)
+    match = re.fullmatch(r"(?is)plot\s+scan\s*=\s*(.*?)\s*;?", cleaned)
     if match:
         cleaned = match.group(1)
-    if ";" in cleaned or re.search(r"(?i)\\b(def|input|script|rec|fold|reference|addlabel|assignpricecolor)\\b", cleaned):
+    if ";" in cleaned or re.search(r"(?i)\b(def|input|script|rec|fold|reference|addlabel|assignpricecolor)\b", cleaned):
         raise ValueError("ThinkScript: no se admiten bloques, variables recursivas ni scripts auxiliares.")
 
     bars = history if isinstance(history, list) else None
@@ -261,7 +261,7 @@ def _thinkscript_expression(source: str, history: list[dict[str, Any]] | None = 
                 result = alpha * value + (1.0 - alpha) * result
         return repr(result)
 
-    indicator_pattern = r"(?i)\\b(Average|ExpAverage|Highest|Lowest|Sum|StDev)\\s*\\(\\s*(close|open|high|low|volume)\\s*,\\s*(\\d+)\\s*\\)"
+    indicator_pattern = r"(?i)\b(Average|ExpAverage|Highest|Lowest|Sum|StDev)\s*\(\s*(close|open|high|low|volume)\s*,\s*(\d+)\s*\)"
     cleaned = re.sub(indicator_pattern, indicator, cleaned)
 
     def historical_value(match_obj: re.Match[str]) -> str:
@@ -272,13 +272,13 @@ def _thinkscript_expression(source: str, history: list[dict[str, Any]] | None = 
         index = len(values) - 1 - offset
         return repr(values[index]) if 0 <= index < len(values) else "None"
 
-    cleaned = re.sub(r"(?i)\\b(close|open|high|low|volume)\\s*\\[\\s*(\\d+)\\s*\\]", historical_value, cleaned)
+    cleaned = re.sub(r"(?i)\b(close|open|high|low|volume)\s*\[\s*(\d+)\s*\]", historical_value, cleaned)
     aliases = {"close": "price", "last": "price"}
     for name, replacement in aliases.items():
-        cleaned = re.sub(r"(?i)\\b" + re.escape(name) + r"\\b", replacement, cleaned)
-    cleaned = re.sub(r"(?i)\\band\\b", "and", cleaned)
-    cleaned = re.sub(r"(?i)\\bor\\b", "or", cleaned)
-    cleaned = re.sub(r"(?i)\\bnot\\b", "not", cleaned)
+        cleaned = re.sub(r"(?i)\b" + re.escape(name) + r"\b", replacement, cleaned)
+    cleaned = re.sub(r"(?i)\band\b", "and", cleaned)
+    cleaned = re.sub(r"(?i)\bor\b", "or", cleaned)
+    cleaned = re.sub(r"(?i)\bnot\b", "not", cleaned)
     _validate_formula(cleaned)
     return cleaned
 
