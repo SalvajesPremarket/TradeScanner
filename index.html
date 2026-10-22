@@ -19,6 +19,10 @@
     .heading-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
     .oauth-button{display:inline-flex;align-items:center;justify-content:center;padding:10px 14px;border-radius:4px;background:#2f6f9f;color:#fff;text-decoration:none;font-size:12px;font-weight:700;border:1px solid #245879}
     .oauth-button:hover{background:#245879}
+    .oauth-button[hidden]{display:none!important}
+    .connection-good{color:#176b46;border-color:#9bcab3;background:#f0faf4}
+    .connection-warn{color:#8a5200;border-color:#e5c58c;background:#fff9ec}
+    .connection-bad{color:#9b2c2c;border-color:#e4b0b0;background:#fff5f5}
     .oauth-button:focus-visible{outline:3px solid #a9d6b8;outline-offset:2px}
     .panel{background:var(--paper);border:1px solid var(--line);border-radius:4px}
     .panel-head{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;padding:14px 15px;border-bottom:1px solid var(--line)}
@@ -51,7 +55,7 @@
   <main>
     <section class="heading">
       <div><h1>Radar de acciones</h1><div class="subtitle">Interfaz limpia · cotizaciones observadas de Schwab</div></div>
-      <div class="heading-actions"><a class="oauth-button" href="/oauth/start" rel="nofollow">Connect Schwab</a><div class="status" id="engine-status" role="status">Conectando con el motor…</div></div>
+      <div class="heading-actions"><a class="oauth-button" id="schwab-connect" href="/oauth/start" rel="nofollow">Conectar Schwab</a><div class="status" id="schwab-status" role="status" aria-live="polite">Comprobando conexión Schwab…</div><div class="status" id="engine-status" role="status">Conectando con el motor…</div></div>
     </section>
     <section class="panel" aria-label="Acceso de usuario" style="margin-bottom:16px">
       <div class="panel-head"><h2>CUENTA · NEON AUTH</h2><span class="muted">Acceso seguro</span></div>
@@ -270,7 +274,45 @@
       applyFilters();
     });
 
+    async function refreshSchwabStatus() {
+      const node = document.getElementById("schwab-status");
+      const connectLink = document.getElementById("schwab-connect");
+      try {
+        const response = await fetch("/api/status", {cache:"no-store"});
+        if (!response.ok) throw new Error("status_unavailable");
+        const data = await response.json();
+        node.className = "status";
+        if (data.market_data_connected === true) {
+          node.textContent = "Schwab conectado · cotizaciones recientes";
+          node.classList.add("connection-good");
+          connectLink.hidden = true;
+        } else if (data.provider_configured === true) {
+          node.textContent = "Schwab configurado · sin cotizaciones recientes";
+          node.classList.add("connection-warn");
+          connectLink.textContent = "Revisar conexión";
+          connectLink.hidden = false;
+        } else {
+          node.textContent = "Schwab no configurado";
+          node.classList.add("connection-bad");
+          connectLink.textContent = "Conectar Schwab";
+          connectLink.hidden = false;
+        }
+        if (data.last_quote_received_at) {
+          node.title = "Último lote recibido: " + data.last_quote_received_at + (data.quote_age_seconds != null ? " · hace " + Math.max(0, Math.round(data.quote_age_seconds)) + " s" : "");
+        } else {
+          node.title = data.message || "Todavía no hay un lote de cotizaciones confirmado.";
+        }
+      } catch (_) {
+        node.textContent = "Estado de Schwab no disponible";
+        node.className = "status connection-warn";
+        node.title = "Fallo al consultar el estado; esto no confirma que Schwab se haya desconectado.";
+        connectLink.textContent = "Revisar conexión";
+        connectLink.hidden = false;
+      }
+    }
+
     async function refreshScanner() {
+      refreshSchwabStatus();
       try {
         const [engineResponse, snapshotsResponse] = await Promise.all([
           fetch("/api/engine/status", { cache: "no-store" }),
