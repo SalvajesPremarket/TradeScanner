@@ -28,6 +28,17 @@ class MomentumTests(unittest.TestCase):
         self.assertIsNotNone(result["metrics"]["macd"])
         self.assertEqual(len(result["checks"]), 9)
 
+    def test_supplied_same_time_rvol_is_used_without_claiming_30_day_baseline(self):
+        result = evaluate_momentum(
+            [],
+            {"symbol": "TEST", "rvol": 2.5, "rvol_sessions_used": 4},
+            {"news_required": False},
+            now=datetime(2026, 10, 22, 12, tzinfo=timezone.utc),
+        )
+        self.assertEqual(result["metrics"]["rvol"], 2.5)
+        self.assertEqual(result["metrics"]["rvol_source"], "intraday_history_same_time")
+        self.assertIsNone(result["metrics"]["volume_baseline"])
+
     def test_configurable_news_keyword_requirement(self):
         now = datetime(2026, 10, 22, 12, tzinfo=timezone.utc)
         context = {"news": [{"published_at": "2026-10-22T11:00:00Z", "headline": "Company announces new contract"}]}
