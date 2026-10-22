@@ -654,10 +654,12 @@
         if (!response.ok) throw new Error(data.detail || "Diagnóstico no disponible (HTTP " + response.status + ").");
         const parts = ["FMP: " + (data.status || "desconocido")];
         if (data.key_configured === false) parts.push("API key no detectada por el servidor");
-        if (data.provider_http_status != null) parts.push("HTTP " + data.provider_http_status);
-        if (data.records_received != null) parts.push("registros recibidos: " + data.records_received);
-        if (data.usable_records != null) parts.push("registros FLOAT utilizables: " + data.usable_records);
-        if (data.error_type) parts.push("tipo de error: " + data.error_type);
+        if (data.bulk_status) parts.push("endpoint masivo: " + data.bulk_status + (data.bulk_http_status != null ? " HTTP " + data.bulk_http_status : ""));
+        if (data.records_received != null) parts.push("registros masivos: " + data.records_received);
+        if (data.usable_records != null) parts.push("FLOAT masivos utilizables: " + data.usable_records);
+        if (data.targeted_status) parts.push("endpoint por símbolo (NVDA): " + data.targeted_status + (data.targeted_http_status != null ? " HTTP " + data.targeted_http_status : ""));
+        if (data.targeted_records_received != null) parts.push("registros NVDA: " + data.targeted_records_received);
+        if (data.targeted_error_type || data.bulk_error_type) parts.push("tipo de error: " + (data.targeted_error_type || data.bulk_error_type));
         parts.push("caché modificada: no");
         result.textContent = parts.join(" · ");
       } catch (error) {
