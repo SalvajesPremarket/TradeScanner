@@ -204,16 +204,23 @@ def snapshots_status():
 
 
 @app.get("/api/snapshots/latest")
-def snapshots_latest(limit: int = Query(100, ge=1, le=1000)):
+def snapshots_latest(limit: int = Query(10000, ge=1, le=10000)):
     try:
         store = SnapshotStore()
         rows = store.latest(limit)
         candle_store = CandleStore(store.path)
         for row in rows:
-            metrics = candle_store.rvol(row["symbol"])
-            row["rvol"] = metrics["rvol"]
-            row["rvol_sessions_used"] = metrics["sessions_used"]
-            row["rvol_as_of"] = metrics.get("as_of")
+            # RVOL is only needed for fresh quotes shown in the live scanner.
+            # Avoid thousands of expensive candle-history reads for stale snapshots.
+            if row.get("quote_is_fresh") is True:
+                metrics = candle_store.rvol(row["symbol"])
+                row["rvol"] = metrics["rvol"]
+                row["rvol_sessions_used"] = metrics["sessions_used"]
+                row["rvol_as_of"] = metrics.get("as_of")
+            else:
+                row["rvol"] = None
+                row["rvol_sessions_used"] = 0
+                row["rvol_as_of"] = None
             row.setdefault("float_shares", None)
             row.setdefault("float_as_of", None)
             row.setdefault("float_source", None)
@@ -325,10 +332,13 @@ def strategies_active_matches(request: Request):
     if not strategy:
         return {"strategy": None, "symbols": []}
     store = SnapshotStore()
-    rows = store.latest(1000)
+    rows = store.latest(10000)
     candle_store = CandleStore(store.path)
     for row in rows:
-        row["rvol"] = candle_store.rvol(row["symbol"])["rvol"]
+        row["rvol"] = (
+            candle_store.rvol(row["symbol"])["rvol"]
+            if row.get("quote_is_fresh") is True else None
+        )
     matches = [
         row.get("symbol") for row in rows
         if row.get("symbol") and row.get("quote_is_fresh") is True
