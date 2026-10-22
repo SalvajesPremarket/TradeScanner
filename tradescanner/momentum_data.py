@@ -66,7 +66,7 @@ def recent_stock_news(store: Any, symbol: str, *, now: float | None = None) -> d
     cached = store.get_state(key, {})
     if isinstance(cached, dict):
         age = current - float(cached.get("cached_at", 0) or 0)
-        if age < NEWS_CACHE_SECONDS and isinstance(cached.get("news"), list) and len(cached.get("news", [])) > 0:
+        if age < NEWS_CACHE_SECONDS and isinstance(cached.get("news"), list):
             return {"status": "cached", "news": cached["news"]}
         if age < NEWS_COOLDOWN_SECONDS and cached.get("status") == "unavailable" and cached.get("rss_error"):
             return {"status": "cooldown", "news": [], "error": cached.get("error")}
