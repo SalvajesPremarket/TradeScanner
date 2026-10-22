@@ -141,6 +141,11 @@
       <div class="tab-body">
         <p class="code-hint">Panel de solo lectura. Las credenciales, variables de Render y el escaneo automático no se modifican desde aquí.</p>
         <div id="settings-cards" class="grid-two"><div class="empty">Consultando estado del servicio…</div></div>
+        <div class="tools" style="margin-top:16px">
+          <button class="action secondary" id="diagnose-fmp-float" type="button">Diagnosticar FMP · FLOAT</button>
+          <span class="code-hint">Prueba puntual de lectura; no modifica la caché ni las credenciales.</span>
+        </div>
+        <div id="fmp-diagnostic-result" class="tab-message" role="status" aria-live="polite">Diagnóstico aún no ejecutado.</div>
       </div>
     </section>
   </main>
@@ -630,6 +635,37 @@
       } catch(error) { target.textContent="No se pudo consultar la configuración: "+apiMessage(error); }
     }
     document.getElementById("refresh-settings").addEventListener("click",loadSettings);
+    document.getElementById("diagnose-fmp-float").addEventListener("click", async () => {
+      const button = document.getElementById("diagnose-fmp-float");
+      const result = document.getElementById("fmp-diagnostic-result");
+      button.disabled = true;
+      result.textContent = "Consultando FMP una sola vez…";
+      try {
+        if (typeof window.tradeScannerGetAccessToken !== "function") {
+          throw new Error("La sesión Neon todavía se está comprobando. Espera unos segundos e inténtalo de nuevo.");
+        }
+        const token = await window.tradeScannerGetAccessToken();
+        const response = await fetch("/api/diagnostics/float/fmp", {
+          method: "POST",
+          cache: "no-store",
+          headers: { "Authorization": "Bearer " + token }
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.detail || "Diagnóstico no disponible (HTTP " + response.status + ").");
+        const parts = ["FMP: " + (data.status || "desconocido")];
+        if (data.key_configured === false) parts.push("API key no detectada por el servidor");
+        if (data.provider_http_status != null) parts.push("HTTP " + data.provider_http_status);
+        if (data.records_received != null) parts.push("registros recibidos: " + data.records_received);
+        if (data.usable_records != null) parts.push("registros FLOAT utilizables: " + data.usable_records);
+        if (data.error_type) parts.push("tipo de error: " + data.error_type);
+        parts.push("caché modificada: no");
+        result.textContent = parts.join(" · ");
+      } catch (error) {
+        result.textContent = "No se pudo completar el diagnóstico: " + (error.message || "error desconocido");
+      } finally {
+        button.disabled = false;
+      }
+    });
 
     refreshScanner();
     window.setInterval(refreshScanner, 15000);
