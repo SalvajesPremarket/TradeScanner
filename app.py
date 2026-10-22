@@ -264,9 +264,16 @@ def _authorize_strategy_access(request: Request) -> None:
         raise HTTPException(status_code=503, detail="No se pudo verificar Neon Auth temporalmente. Inténtalo de nuevo.") from None
 
     try:
-        # Neon Auth deployments may emit the configured issuer with or without a
-        # trailing slash. Verify signature, expiry and required identity claims first,
-        # then compare normalized issuer values to avoid rejecting an otherwise valid session.
+        # Neon Auth JWTs carry an audience claim. Validate it explicitly instead of
+        # letting PyJWT reject every token when no audience was configured.
+        audience = os.getenv("NEON_AUTH_AUDIENCE", "authenticated").strip()
+        claims = jwt.decode(
+            token.strip(),
+            signing_key,
+            algorithms=["EdDSA", "ES256", "RS256"],
+            audience=audience,
+            options={"require": ["exp", "sub", "iss", "aud"]},
+        )        # trailing slash. Signature, audience, expiry, and identity claims remain validated.
         claims = jwt.decode(
             token.strip(),
             signing_key,
