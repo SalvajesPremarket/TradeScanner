@@ -264,16 +264,22 @@ def _authorize_strategy_access(request: Request) -> None:
         raise HTTPException(status_code=503, detail="No se pudo verificar Neon Auth temporalmente. Inténtalo de nuevo.") from None
 
     try:
+        # Neon Auth deployments may emit the configured issuer with or without a
+        # trailing slash. Verify signature, expiry and required identity claims first,
+        # then compare normalized issuer values to avoid rejecting an otherwise valid session.
         claims = jwt.decode(
             token.strip(),
             signing_key,
             algorithms=["EdDSA", "ES256", "RS256"],
-            issuer=issuer,
             options={"require": ["exp", "sub", "iss"]},
         )
+        token_issuer = claims.get("iss")
+        if not isinstance(token_issuer, str) or token_issuer.rstrip("/") != issuer.rstrip("/"):
+            raise jwt.InvalidIssuerError("Issuer does not match NEON_AUTH_ISSUER")
         if not isinstance(claims.get("sub"), str) or not claims["sub"].strip():
             raise jwt.InvalidTokenError("Missing subject")
-    except jwt.InvalidTokenError:
+    except jwt.InvalidTokenError as exc:
+        logger.warning("Neon Auth JWT rejected: %s", type(exc).__name__)
         raise HTTPException(status_code=401, detail="La sesión Neon no es válida o ha expirado. Inicia sesión de nuevo.") from None
 
 
