@@ -13,6 +13,8 @@ from tradescanner.db import DB_ERRORS
 from tradescanner.float_provider import refresh_float_cache, refresh_symbol_float
 from tradescanner.infisical_vault import is_configured as infisical_is_configured
 from tradescanner.snapshots import BATCH_SIZE, SnapshotStore, collect_snapshots
+from tradescanner.strategies import active_strategy
+from tradescanner.news_provider import refresh_news_cache
 from tradescanner.schwab import SchwabAPIError, SchwabConfigurationError, get_price_history, get_quotes
 from tradescanner.universe import load_symbol_universe
 
@@ -112,6 +114,14 @@ def run_scan_cycle(
             raise SchwabAPIError(
                 "Schwab returned no persistable quotes; the universe cursor was not advanced."
             )
+        news_state = {"status": "not_needed", "provider": "FMP", "articles_saved": 0}
+        try:
+            configured_strategy = active_strategy(target_store)
+            if configured_strategy and configured_strategy.get("execution_mode") == "momentum_native":
+                news_state = refresh_news_cache(target_store, batch)
+        except (OSError, RuntimeError, ValueError) + DB_ERRORS as exc:
+            news_state = {"status": "unavailable", "provider": "FMP", "error": type(exc).__name__}
+        # FMP news is optional and cached; unavailable news never becomes a positive signal.
         # FMP is used only for public float. Its cached bulk dataset refreshes at
         # most daily (six-hour cooldown on failures); it never supplies quotes.
         logger.warning("Scan cycle stage=float_cache_refresh_started")
@@ -128,6 +138,8 @@ def run_scan_cycle(
             "float_as_of": None,
             "float_source": None,
             "float_error": None,
+            "news_provider_status": news_state.get("status"),
+            "news_articles_saved": news_state.get("articles_saved", 0),
         }
         # If Schwab does not provide FLOAT, fill the current scan candidate from
         # FMP's symbol endpoint. This is at most one additional bounded request per cycle.
@@ -174,13 +186,66 @@ def run_scan_cycle(
                 rows = target_store.latest_for_symbols(batch)
                 eligible = [
                     row for row in rows
-                    if isinstance(row.get("price"), (int, float)) and row["price"] > 0
+                    if isinstance(row.get("price"), (int, float))
+                    and not isinstance(row.get("price"), bool)
+                    and row["price"] > 0
                 ]
-                if eligible:
-                    # Prefer the most actively traded symbol so the bounded
-                    # history request is more likely to return enough candles for RVOL.
-                    # Use absolute GAP only as a tie-breaker; thin/illiquid names often
-                    # have sparse histories and cannot establish a reliable baseline.
+                strategy = active_strategy(target_store)
+                candidate = None
+                if strategy and strategy.get("execution_mode") == "momentum_native":
+                    config = strategy.get("config") if isinstance(strategy.get("config"), dict) else {}
+                    price_min = config.get("price_min", 1.0)
+                    price_max = config.get("price_max", 20.0)
+                    gap_min = config.get("gap_min_pct", 5.0)
+                    candidates = [
+                        row for row in eligible
+                        if isinstance(row.get("symbol"), str)
+                        and isinstance(row.get("price"), (int, float))
+                        and not isinstance(row.get("price"), bool)
+                        and price_min <= row["price"] <= price_max
+                        and isinstance(row.get("gap_pct"), (int, float))
+                        and not isinstance(row.get("gap_pct"), bool)
+                        and row["gap_pct"] >= gap_min
+                    ]
+                    candidates.sort(
+                        key=lambda row: (
+                            row.get("volume") if isinstance(row.get("volume"), (int, float)) else -1,
+                            row.get("symbol", ""),
+                        ),
+                        reverse=True,
+                    )
+                    # Keep a bounded persistent queue so every eligible Momentum
+                    # candidate gets a history turn, instead of restarting at index
+                    # zero whenever the quote batch changes.
+                    queue = target_store.get_state("momentum_history_queue", [])
+                    if not isinstance(queue, list):
+                        queue = []
+                    queued = {item for item in queue if isinstance(item, str)}
+                    for row in candidates:
+                        symbol = row["symbol"].strip().upper()
+                        if symbol and symbol not in queued:
+                            queue.append(symbol)
+                            queued.add(symbol)
+                    queue = [item for item in queue if isinstance(item, str) and item.strip()]
+                    queue = queue[-500:]
+                    candidate_symbol = queue.pop(0) if queue else None
+                    target_store.set_state("momentum_history_queue", queue)
+                    if candidate_symbol:
+                        current = target_store.latest_for_symbols([candidate_symbol])
+                        if current:
+                            row = current[0]
+                            price = row.get("price")
+                            gap = row.get("gap_pct")
+                            if (
+                                isinstance(price, (int, float)) and not isinstance(price, bool)
+                                and price_min <= price <= price_max
+                                and isinstance(gap, (int, float)) and not isinstance(gap, bool)
+                                and gap >= gap_min
+                            ):
+                                candidate = row
+                elif eligible:
+                    # Without a history-based strategy, prefer liquid symbols so the
+                    # bounded history request is more likely to establish RVOL.
                     candidate = max(
                         eligible,
                         key=lambda row: (
@@ -188,14 +253,61 @@ def run_scan_cycle(
                             abs(row.get("gap_pct") or 0.0),
                         ),
                     )
-                    candle_payload = history_fetch(candidate["symbol"])
-                    candles = normalize_price_history(candidate["symbol"], candle_payload)
+                if candidate is not None:
+                    history_candidates = [candidate]
+                    if strategy and strategy.get("execution_mode") == "momentum_native":
+                        # Spend a small, explicit request budget each cycle so history coverage
+                        # grows faster than one ticker per minute without flooding Schwab.
+                        history_candidates = [candidate]
+                        queue = target_store.get_state("momentum_history_queue", [])
+                        while queue and len(history_candidates) < 3:
+                            next_symbol = queue.pop(0)
+                            if next_symbol == candidate.get("symbol"):
+                                continue
+                            next_rows = target_store.latest_for_symbols([next_symbol])
+                            if not next_rows:
+                                continue
+                            next_row = next_rows[0]
+                            next_price, next_gap = next_row.get("price"), next_row.get("gap_pct")
+                            if (
+                                isinstance(next_price, (int, float)) and not isinstance(next_price, bool)
+                                and price_min <= next_price <= price_max
+                                and isinstance(next_gap, (int, float)) and not isinstance(next_gap, bool)
+                                and next_gap >= gap_min
+                            ):
+                                history_candidates.append(next_row)
+                        target_store.set_state("momentum_history_queue", queue)
                     candle_store = CandleStore(target_store.path)
-                    candle_state["candle_symbol"] = candidate["symbol"]
-                    candle_state["candles_saved"] = candle_store.save(candles)
-                    rvol = candle_store.rvol(candidate["symbol"])
-                    candle_state["rvol"] = rvol.get("rvol")
-                    candle_state["rvol_sessions_used"] = rvol.get("sessions_used", 0)
+                    history_results = []
+                    for history_candidate in history_candidates:
+                        symbol = history_candidate["symbol"]
+                        try:
+                            candle_payload = history_fetch(symbol)
+                            candles = normalize_price_history(symbol, candle_payload)
+                            saved = candle_store.save(candles)
+                            rvol = candle_store.rvol(symbol)
+                            history_results.append({
+                                "symbol": symbol,
+                                "candles_saved": saved,
+                                "rvol": rvol.get("rvol"),
+                                "rvol_sessions_used": rvol.get("sessions_used", 0),
+                            })
+                        except (SchwabAPIError, SchwabConfigurationError, ValueError, OSError, RuntimeError) + DB_ERRORS as exc:
+                            history_results.append({"symbol": symbol, "error": type(exc).__name__})
+                    if history_results:
+                        primary = history_results[0]
+                        candle_state["candle_symbol"] = primary["symbol"]
+                        candle_state["candles_saved"] = sum(item.get("candles_saved", 0) for item in history_results)
+                        candle_state["rvol"] = primary.get("rvol")
+                        candle_state["rvol_sessions_used"] = primary.get("rvol_sessions_used", 0)
+                    candle_state["history_symbols_processed"] = [item["symbol"] for item in history_results]
+                    candle_state["history_symbol_errors"] = [
+                        {"symbol": item["symbol"], "error": item["error"]}
+                        for item in history_results if item.get("error")
+                    ]
+                    candle_state["history_queue_remaining"] = len(
+                        target_store.get_state("momentum_history_queue", [])
+                    )
                     # Keep FLOAT diagnostics tied to the independently queried FLOAT symbol.
                     # Candle sampling can select a different ticker and must not overwrite it.
             except (SchwabAPIError, SchwabConfigurationError, ValueError, OSError, RuntimeError) + DB_ERRORS as exc:

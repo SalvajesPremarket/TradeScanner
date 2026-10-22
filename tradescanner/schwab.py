@@ -189,22 +189,32 @@ def get_quotes(symbols: list[str]) -> dict[str, Any]:
 def get_price_history(
     symbol: str,
     *,
-    period: int = 5,
-    frequency: int = 1,
+    period: int = 10,
+    frequency: int = 5,
+    lookback_days: int = 30,
 ) -> dict[str, Any]:
-    """Fetch recent intraday candles for one validated symbol from Schwab."""
+    """Fetch intraday candles including a 30-calendar-day comparable-volume window.
+
+    Schwab supports minute bars with a date range; five-minute bars have a
+    longer lookback window than one-minute bars and are sufficient for RVOL.
+    """
     normalized = symbol.strip().upper()
     if not _SYMBOL_RE.fullmatch(normalized):
         raise ValueError("Invalid ticker symbol.")
     if period not in {1, 2, 3, 4, 5, 10} or frequency not in {1, 5, 10, 15, 30}:
         raise ValueError("Unsupported Schwab price-history period or frequency.")
+    if isinstance(lookback_days, bool) or not isinstance(lookback_days, int) or not 1 <= lookback_days <= 180:
+        raise ValueError("Historical lookback must be between 1 and 180 calendar days.")
 
+    end_ms = int(time.time() * 1000)
+    start_ms = end_ms - lookback_days * 24 * 60 * 60 * 1000
     query = urllib.parse.urlencode({
         "symbol": normalized,
         "periodType": "day",
-        "period": period,
         "frequencyType": "minute",
         "frequency": frequency,
+        "startDate": start_ms,
+        "endDate": end_ms,
         "needExtendedHoursData": "true",
         "needPreviousClose": "false",
     })

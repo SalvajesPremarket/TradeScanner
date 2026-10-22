@@ -7,6 +7,7 @@ import time
 from datetime import datetime, timezone
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Any
 
 from fastapi import FastAPI, HTTPException, Query, Body, Request
 from fastapi.responses import FileResponse
@@ -19,6 +20,8 @@ from tradescanner.infisical_vault import is_configured as infisical_is_configure
 from tradescanner.engine import get_engine_status, record_engine_status, run_scan_cycle
 from tradescanner.snapshots import SnapshotStore, collect_snapshots
 from tradescanner.strategies import (active_strategy, delete_strategy, strategy_matches, list_strategies, save_strategy, set_strategy_enabled)
+from tradescanner.momentum import evaluate_momentum
+from tradescanner.news_provider import cached_news_for_symbol
 from tradescanner.universe import UniverseUnavailableError, load_symbol_universe
 from tradescanner.oauth import router as oauth_router
 from tradescanner.schwab import (
@@ -203,6 +206,24 @@ def snapshots_status():
         raise HTTPException(status_code=503, detail="Snapshot storage is unavailable.") from None
 
 
+def _evaluate_native_momentum_row(row: dict[str, Any], strategy: dict[str, Any], store: SnapshotStore, candle_store: CandleStore) -> dict[str, Any]:
+    candles = candle_store.latest(row["symbol"], limit=5000)
+    historical_rvol = candle_store.rvol(row["symbol"])
+    return evaluate_momentum(
+        candles,
+        {
+            "symbol": row.get("symbol"),
+            "price": row.get("price"),
+            "prev_close": row.get("previous_close"),
+            "float_shares": row.get("float_shares"),
+            "rvol": historical_rvol.get("rvol"),
+            "rvol_sessions_used": historical_rvol.get("sessions_used", 0),
+            "news": cached_news_for_symbol(store, row["symbol"]),
+        },
+        strategy.get("config") if isinstance(strategy.get("config"), dict) else {},
+    )
+
+
 @app.get("/api/snapshots/latest")
 def snapshots_latest(limit: int = Query(10000, ge=1, le=10000)):
     try:
@@ -228,11 +249,28 @@ def snapshots_latest(limit: int = Query(10000, ge=1, le=10000)):
         apply_cached_float(rows, store)
         selected_strategy = active_strategy()
         if selected_strategy:
-            rows = [
-                row for row in rows
-                if row.get("quote_is_fresh") is True
-                and strategy_matches(selected_strategy, row)
-            ]
+            filtered_rows = []
+            for row in rows:
+                if row.get("quote_is_fresh") is not True:
+                    continue
+                if selected_strategy.get("execution_mode") == "momentum_native":
+                    evaluation = _evaluate_native_momentum_row(row, selected_strategy, store, candle_store)
+                    row["momentum_evaluation"] = {
+                        "passed": evaluation["passed"],
+                        "checks": evaluation["checks"],
+                        "reasons": evaluation["reasons"],
+                        "metrics": evaluation["metrics"],
+                    }
+                    if evaluation["passed"]:
+                        filtered_rows.append(row)
+                    continue
+                history = (
+                    candle_store.latest(row["symbol"], limit=5000)
+                    if selected_strategy.get("language") == "thinkscript" else None
+                )
+                if strategy_matches(selected_strategy, row, history):
+                    filtered_rows.append(row)
+            rows = filtered_rows
         return {
             "results": rows,
             "limit": limit,
@@ -338,21 +376,46 @@ def strategies_active_matches(request: Request):
     _authorize_strategy_access(request)
     strategy = active_strategy()
     if not strategy:
-        return {"strategy": None, "symbols": []}
+        return {"strategy": None, "symbols": [], "evaluations": [], "data_gaps": []}
     store = SnapshotStore()
     rows = store.latest(10000)
     candle_store = CandleStore(store.path)
+    matches: list[str] = []
+    evaluations: list[dict[str, Any]] = []
+    data_gaps: set[str] = set()
+    native_momentum = strategy.get("execution_mode") == "momentum_native"
     for row in rows:
-        row["rvol"] = (
-            candle_store.rvol(row["symbol"])["rvol"]
-            if row.get("quote_is_fresh") is True else None
-        )
-    matches = [
-        row.get("symbol") for row in rows
-        if row.get("symbol") and row.get("quote_is_fresh") is True
-        and strategy_matches(strategy, row)
-    ]
-    return {"strategy": {"id": strategy["id"], "name": strategy["name"]}, "symbols": matches}
+        if row.get("quote_is_fresh") is not True or not row.get("symbol"):
+            continue
+        if native_momentum:
+            result = _evaluate_native_momentum_row(row, strategy, store, candle_store)
+            if result["passed"]:
+                matches.append(row["symbol"])
+            for name, passed in result["checks"].items():
+                if not passed:
+                    data_gaps.add(name)
+            evaluations.append({
+                "symbol": row["symbol"],
+                "passed": result["passed"],
+                "checks": result["checks"],
+                "reasons": result["reasons"],
+                "metrics": result["metrics"],
+            })
+        else:
+            row["rvol"] = candle_store.rvol(row["symbol"])["rvol"]
+            history = (
+                candle_store.latest(row["symbol"], limit=5000)
+                if strategy.get("language") == "thinkscript" else None
+            )
+            if strategy_matches(strategy, row, history):
+                matches.append(row["symbol"])
+    return {
+        "strategy": {"id": strategy["id"], "name": strategy["name"],
+                     "execution_mode": strategy.get("execution_mode", "safe_expression")},
+        "symbols": matches,
+        "evaluations": evaluations,
+        "data_gaps": sorted(data_gaps),
+    }
 
 
 @app.get("/api/candles/{symbol}")

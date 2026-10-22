@@ -151,7 +151,7 @@ class CandleStore:
         }
         current_volume = sum(current_by_minute.values())
 
-        previous_days = sorted((day for day in sessions if day < current_day), reverse=True)[:5]
+        previous_days = sorted((day for day in sessions if day < current_day), reverse=True)[:20]
         historical_totals: list[int] = []
         for day in previous_days:
             bars = sessions[day]
@@ -164,7 +164,8 @@ class CandleStore:
             historical_totals.append(sum(
                 volume for minute, volume in bars if minute <= cutoff
             ))
-        # One prior session is too fragile to establish a reliable baseline.
+        # One prior session is too fragile to establish a reliable baseline. The 30-day
+        # Schwab lookback supports up to 20 prior trading sessions for this comparison.
         # Keep RVOL unavailable until at least two comparable historical sessions exist.
         if len(historical_totals) < 2:
             return {
