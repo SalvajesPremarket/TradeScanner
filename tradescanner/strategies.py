@@ -31,7 +31,7 @@ _COMPARE = {
 }
 _ALLOWED_NAMES = {
     "price", "previous_close", "change", "change_pct", "gap_pct",
-    "float_shares", "rvol", "volume", "sector", "symbol",
+    "float_shares", "rvol", "volume", "sector", "symbol", "open", "high", "low",
 }
 _ALLOWED_CALLS = {"abs": abs, "min": min, "max": max}
 
@@ -209,27 +209,76 @@ def _python_expression(source: str) -> str:
     return result
 
 
-def _thinkscript_expression(source: str) -> str:
-    """Translate a deliberately small, stateless ThinkScript-like scan subset."""
+def _thinkscript_expression(source: str, history: list[dict[str, Any]] | None = None) -> str:
+    """Translate a bounded ThinkScript scan subset, including common history indicators."""
     if not source or len(source) > MAX_SOURCE_LENGTH:
         raise ValueError("El script está vacío o supera el límite permitido.")
     cleaned = source.strip()
-    # Permit a single plot assignment, optionally ending with a semicolon.
-    match = re.fullmatch(r"(?is)plot\s+scan\s*=\s*(.*?)\s*;?", cleaned)
+    match = re.fullmatch(r"(?is)plot\\s+scan\\s*=\\s*(.*?)\\s*;?", cleaned)
     if match:
         cleaned = match.group(1)
-    if ";" in cleaned or re.search(r"(?i)\b(def|input|script|rec|fold|reference|addlabel|assignpricecolor)\b", cleaned):
-        raise ValueError("ThinkScript: este adaptador admite una expresión de escaneo simple, no bloques ni indicadores con historial.")
-    aliases = {
-        "close": "price", "last": "price", "volume": "volume",
-        "gap_pct": "gap_pct", "change_pct": "change_pct", "rvol": "rvol",
-        "float_shares": "float_shares", "open": "price",
-    }
+    if ";" in cleaned or re.search(r"(?i)\\b(def|input|script|rec|fold|reference|addlabel|assignpricecolor)\\b", cleaned):
+        raise ValueError("ThinkScript: no se admiten bloques, variables recursivas ni scripts auxiliares.")
+
+    bars = history if isinstance(history, list) else None
+    series_names = {"close": "close", "open": "open", "high": "high", "low": "low", "volume": "volume"}
+
+    def values_for(series: str) -> list[float]:
+        values = []
+        for bar in bars or []:
+            value = bar.get(series) if isinstance(bar, dict) else None
+            if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value):
+                values.append(float(value))
+        return values
+
+    def indicator(match_obj: re.Match[str]) -> str:
+        name, series, raw_period = match_obj.group(1), match_obj.group(2).lower(), match_obj.group(3)
+        period = int(raw_period)
+        if period < 1 or period > 5000:
+            raise ValueError("ThinkScript: el período de indicador debe estar entre 1 y 5000.")
+        if bars is None:
+            return "1.0"  # Syntax-check only; the real value is computed per symbol at scan time.
+        values = values_for(series_names[series])
+        if len(values) < period:
+            return "None"
+        recent = values[-period:]
+        lowered = name.lower()
+        if lowered == "average":
+            result = sum(recent) / period
+        elif lowered == "highest":
+            result = max(recent)
+        elif lowered == "lowest":
+            result = min(recent)
+        elif lowered == "sum":
+            result = sum(recent)
+        elif lowered == "stdev":
+            mean = sum(recent) / period
+            result = math.sqrt(sum((value - mean) ** 2 for value in recent) / (period - 1)) if period > 1 else 0.0
+        else:
+            alpha = 2.0 / (period + 1)
+            result = values[0]
+            for value in values[1:]:
+                result = alpha * value + (1.0 - alpha) * result
+        return repr(result)
+
+    indicator_pattern = r"(?i)\\b(Average|ExpAverage|Highest|Lowest|Sum|StDev)\\s*\\(\\s*(close|open|high|low|volume)\\s*,\\s*(\\d+)\\s*\\)"
+    cleaned = re.sub(indicator_pattern, indicator, cleaned)
+
+    def historical_value(match_obj: re.Match[str]) -> str:
+        series, offset = match_obj.group(1).lower(), int(match_obj.group(2))
+        if bars is None:
+            return "1.0"
+        values = values_for(series_names[series])
+        index = len(values) - 1 - offset
+        return repr(values[index]) if 0 <= index < len(values) else "None"
+
+    cleaned = re.sub(r"(?i)\\b(close|open|high|low|volume)\\s*\\[\\s*(\\d+)\\s*\\]", historical_value, cleaned)
+    aliases = {"close": "price", "last": "price"}
     for name, replacement in aliases.items():
-        cleaned = re.sub(r"(?i)\b" + re.escape(name) + r"\b", replacement, cleaned)
-    cleaned = re.sub(r"(?i)\band\b", "and", cleaned)
-    cleaned = re.sub(r"(?i)\bor\b", "or", cleaned)
-    cleaned = re.sub(r"(?i)\bnot\b", "not", cleaned)
+        cleaned = re.sub(r"(?i)\\b" + re.escape(name) + r"\\b", replacement, cleaned)
+    cleaned = re.sub(r"(?i)\\band\\b", "and", cleaned)
+    cleaned = re.sub(r"(?i)\\bor\\b", "or", cleaned)
+    cleaned = re.sub(r"(?i)\\bnot\\b", "not", cleaned)
     _validate_formula(cleaned)
     return cleaned
 
@@ -271,7 +320,7 @@ def _is_native_momentum(strategy: dict[str, Any]) -> bool:
     return strategy.get("execution_mode") == "momentum_native"
 
 
-def strategy_matches(strategy: dict[str, Any], row: dict[str, Any]) -> bool:
+def strategy_matches(strategy: dict[str, Any], row: dict[str, Any], history: list[dict[str, Any]] | None = None) -> bool:
     language = strategy.get("language")
     source = strategy.get("source", "")
     try:
@@ -282,7 +331,14 @@ def strategy_matches(strategy: dict[str, Any], row: dict[str, Any]) -> bool:
                 return False  # Needs OHLCV history and context; see the Momentum evaluator.
             expression = _python_expression(source)
         elif language == "thinkscript":
-            expression = _thinkscript_expression(source)
+            expression = _thinkscript_expression(source, history)
+            enriched = dict(row)
+            if history:
+                latest = history[-1]
+                for field in ("open", "high", "low", "volume"):
+                    if field in latest:
+                        enriched[field] = latest[field]
+            return formula_matches(expression, enriched)
         else:
             return False
         return formula_matches(expression, row)
