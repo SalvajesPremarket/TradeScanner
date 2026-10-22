@@ -329,7 +329,8 @@ def set_strategy_enabled(strategy_id: str, enabled: bool,
         elif selected.get("language") == "thinkscript": _thinkscript_expression(selected.get("source", ""))
         else: raise ValueError("Lenguaje no compatible.")
     for item in items:
-        item["enabled"] = bool(enabled and item.get("id") == strategy_id)
+        if item.get("id") == strategy_id:
+            item["enabled"] = bool(enabled)
     target.set_state(STATE_KEY, items)
     return next(item for item in items if item.get("id") == strategy_id)
 
@@ -344,5 +345,11 @@ def delete_strategy(strategy_id: str, store: SnapshotStore | None = None) -> boo
     return True
 
 
+def active_strategies(store: SnapshotStore | None = None) -> list[dict[str, Any]]:
+    """Return every enabled strategy; activation is independent per strategy."""
+    return [item for item in list_strategies(store) if item.get("enabled")]
+
+
 def active_strategy(store: SnapshotStore | None = None) -> dict[str, Any] | None:
-    return next((item for item in list_strategies(store) if item.get("enabled")), None)
+    """Backward-compatible accessor for callers that need one active strategy."""
+    return next(iter(active_strategies(store)), None)
