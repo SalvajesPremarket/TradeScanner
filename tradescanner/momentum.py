@@ -150,6 +150,7 @@ def evaluate_momentum(candles: list[dict[str, Any]], context: dict[str, Any], co
         today_volume=day_volume,
         volume_baseline=baseline,
         rvol=round(rvol, 4) if rvol is not None else None,
+        rvol_sessions_used=int(context.get("rvol_sessions_used", 0)) if isinstance(context.get("rvol_sessions_used", 0), int) else 0,
         rvol_source="intraday_history_same_time" if supplied_rvol is not None else (
             "provided_30d_baseline" if baseline is not None else None
         ),
