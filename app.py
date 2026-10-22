@@ -230,11 +230,17 @@ def snapshots_latest(limit: int = Query(10000, ge=1, le=10000)):
         apply_cached_float(rows, store)
         selected_strategy = active_strategy()
         if selected_strategy:
-            rows = [
-                row for row in rows
-                if row.get("quote_is_fresh") is True
-                and strategy_matches(selected_strategy, row)
-            ]
+            filtered_rows = []
+            for row in rows:
+                if row.get("quote_is_fresh") is not True:
+                    continue
+                history = (
+                    candle_store.latest(row["symbol"], limit=5000)
+                    if selected_strategy.get("language") == "thinkscript" else None
+                )
+                if strategy_matches(selected_strategy, row, history):
+                    filtered_rows.append(row)
+            rows = filtered_rows
         return {
             "results": rows,
             "limit": limit,
@@ -380,7 +386,11 @@ def strategies_active_matches(request: Request):
             })
         else:
             row["rvol"] = candle_store.rvol(row["symbol"])["rvol"]
-            if strategy_matches(strategy, row):
+            history = (
+                candle_store.latest(row["symbol"], limit=5000)
+                if strategy.get("language") == "thinkscript" else None
+            )
+            if strategy_matches(strategy, row, history):
                 matches.append(row["symbol"])
     return {
         "strategy": {"id": strategy["id"], "name": strategy["name"],
