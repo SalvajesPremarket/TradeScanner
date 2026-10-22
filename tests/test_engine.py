@@ -309,6 +309,66 @@ class AutomaticEngineTests(unittest.TestCase):
             self.assertEqual(result["candle_symbol"], "MSFT")
 
 
+    def test_momentum_history_queue_rotates_across_cycles(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = SnapshotStore(Path(directory) / "engine.sqlite3")
+            store.set_state("user_strategies_v1", [{
+                "id": "momentum-test",
+                "name": "Momentum test",
+                "language": "python",
+                "source": "recognized native momentum script",
+                "enabled": True,
+                "execution_mode": "momentum_native",
+                "config": {
+                    "price_min": 1.0,
+                    "price_max": 20.0,
+                    "gap_min_pct": 5.0,
+                },
+            }])
+
+            def fetch(batch):
+                return {
+                    "THIN": {
+                        "quote": {"lastPrice": 12.0, "closePrice": 10.0, "totalVolume": 100},
+                        "reference": {"description": "Thin stock"},
+                    },
+                    "LIQUID": {
+                        "quote": {"lastPrice": 11.0, "closePrice": 10.0, "totalVolume": 10000},
+                        "reference": {"description": "Liquid stock"},
+                    },
+                }
+
+            requested_history = []
+            def fetch_history(symbol):
+                requested_history.append(symbol)
+                return {"candles": []}
+
+            with patch.dict(os.environ, {
+                "SCHWAB_CLIENT_ID": "test-id",
+                "SCHWAB_CLIENT_SECRET": "test-secret",
+                "SCHWAB_REFRESH_TOKEN": "test-refresh",
+            }), patch("tradescanner.engine.refresh_news_cache", return_value={
+                "status": "cached", "provider": "FMP", "articles_saved": 0
+            }), patch("tradescanner.engine.refresh_float_cache", return_value={
+                "status": "cached", "provider": "FMP", "rows_saved": 0
+            }):
+                run_scan_cycle(
+                    store,
+                    universe_loader=lambda: {"symbols": ["THIN", "LIQUID"]},
+                    quote_fetcher=fetch,
+                    candle_fetcher=fetch_history,
+                )
+                run_scan_cycle(
+                    store,
+                    universe_loader=lambda: {"symbols": ["THIN", "LIQUID"]},
+                    quote_fetcher=fetch,
+                    candle_fetcher=fetch_history,
+                )
+
+            self.assertEqual(requested_history, ["LIQUID", "THIN"])
+            self.assertEqual(store.get_state("momentum_history_queue"), [])
+
+
 
 if __name__ == "__main__":
     unittest.main()
