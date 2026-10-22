@@ -234,6 +234,43 @@ def _thinkscript_expression(source: str) -> str:
     return cleaned
 
 
+
+def _native_momentum_config(source: str) -> dict[str, Any]:
+    """Recognize the known Momentum script shape without executing its source."""
+    try:
+        tree = ast.parse(source, mode="exec")
+    except (SyntaxError, ValueError):
+        raise ValueError("El script no es una estrategia Momentum reconocida ni una expresión Python segura.") from None
+    functions = {node.name for node in tree.body if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))}
+    required = {"scan", "_ema", "_macd", "_f_session", "_f_price", "_f_gap", "_f_rvol",
+                "_f_float", "_f_first_candle_above_ema", "_f_macd", "_f_news"}
+    if not required.issubset(functions):
+        raise ValueError("Python seguro acepta expresiones evaluate(stock) o el script Momentum compatible; no ejecuta Python arbitrario.")
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and any(isinstance(target, ast.Name) and target.id == "CONFIG" for target in node.targets):
+            try:
+                config = ast.literal_eval(node.value)
+            except (ValueError, TypeError, SyntaxError, MemoryError, RecursionError):
+                raise ValueError("La CONFIG de Momentum debe ser un diccionario literal.") from None
+            if not isinstance(config, dict) or len(config) > 100:
+                raise ValueError("La CONFIG de Momentum debe ser un diccionario válido.")
+            return config
+    return {}
+
+
+
+def _looks_like_momentum(source: str) -> bool:
+    try:
+        _native_momentum_config(source)
+        return True
+    except ValueError:
+        return False
+
+
+def _is_native_momentum(strategy: dict[str, Any]) -> bool:
+    return strategy.get("execution_mode") == "momentum_native"
+
+
 def strategy_matches(strategy: dict[str, Any], row: dict[str, Any]) -> bool:
     language = strategy.get("language")
     source = strategy.get("source", "")
@@ -241,6 +278,8 @@ def strategy_matches(strategy: dict[str, Any], row: dict[str, Any]) -> bool:
         if language == "formula":
             expression = source
         elif language == "python":
+            if _is_native_momentum(strategy):
+                return False  # Needs OHLCV history and context; see the Momentum evaluator.
             expression = _python_expression(source)
         elif language == "thinkscript":
             expression = _thinkscript_expression(source)
@@ -270,9 +309,13 @@ def save_strategy(name: str, language: str, source: str, strategy_id: str | None
     if language == "formula":
         _validate_formula(source)
     elif language == "python":
-        _python_expression(source)
+        try:
+            _python_expression(source)
+        except ValueError:
+            _native_momentum_config(source)
     elif language == "thinkscript":
         _thinkscript_expression(source)
+    native_momentum = language == "python" and _looks_like_momentum(source)
     target = _store(store)
     items = list_strategies(target)
     existing = next((item for item in items if item.get("id") == strategy_id), None) if strategy_id else None
@@ -282,6 +325,8 @@ def save_strategy(name: str, language: str, source: str, strategy_id: str | None
         "id": strategy_id or str(uuid.uuid4()), "name": clean_name,
         "language": language, "source": source, "enabled": bool(existing and existing.get("enabled")),
         "execution_ready": language in LANGUAGES, "updated_at": datetime.now(timezone.utc).isoformat(),
+        "execution_mode": "momentum_native" if native_momentum else "safe_expression",
+        "config": _native_momentum_config(source) if native_momentum else {},
     }
     if item["enabled"] and language == "formula":
         _validate_formula(source)
@@ -303,7 +348,11 @@ def set_strategy_enabled(strategy_id: str, enabled: bool,
     if enabled:
         strategy_matches(selected, {})
         if selected.get("language") == "formula": _validate_formula(selected.get("source", ""))
-        elif selected.get("language") == "python": _python_expression(selected.get("source", ""))
+        elif selected.get("language") == "python":
+            if _is_native_momentum(selected):
+                _native_momentum_config(selected.get("source", ""))
+            else:
+                _python_expression(selected.get("source", ""))
         elif selected.get("language") == "thinkscript": _thinkscript_expression(selected.get("source", ""))
         else: raise ValueError("Lenguaje no compatible.")
     for item in items:
