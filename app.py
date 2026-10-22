@@ -235,6 +235,84 @@ def diagnose_fmp_float(request: Request):
     return result
 
 
+@app.post("/api/diagnostics/float/fmp/resolve-legacy-cooldown")
+def resolve_legacy_fmp_float_cooldown(request: Request):
+    """Clear only an unclassified legacy cooldown after live FMP checks pass."""
+    _authorize_strategy_access(request)
+    api_key = os.getenv("FMP_API_KEY", "").strip()
+    if not api_key:
+        raise HTTPException(status_code=503, detail="FMP_API_KEY no está configurada.")
+
+    store = SnapshotStore()
+    now = time.time()
+    try:
+        until = float(store.get_state("fmp_float_global_cooldown_until", 0) or 0)
+        reason = store.get_state("fmp_float_global_cooldown_reason", "provider_cooldown")
+        http_status = store.get_state("fmp_float_global_cooldown_http_status")
+    except Exception as exc:
+        logger.warning("Unable to read FMP cooldown state; error_type=%s", type(exc).__name__)
+        raise HTTPException(status_code=503, detail="No se pudo leer el estado del cooldown.") from None
+
+    if until <= now:
+        return {"status": "already_expired", "cooldown_cleared": False}
+    if reason != "provider_cooldown" or http_status is not None:
+        raise HTTPException(
+            status_code=409,
+            detail="Cooldown conservado: tiene una causa explícita. No se eliminará automáticamente.",
+        )
+
+    # Verify both FMP routes now; never clear a known billing/rate-limit cooldown.
+    try:
+        bulk = _fetch_page(0, api_key)
+        bulk_usable = any(
+            isinstance(item.get("symbol"), str) and item.get("symbol", "").strip()
+            and isinstance(item.get("floatShares"), (int, float))
+            and not isinstance(item.get("floatShares"), bool)
+            and item.get("floatShares", 0) > 0
+            for item in bulk
+        )
+        targeted = _fetch_symbol_float("NVDA", api_key)
+        targeted_usable = any(
+            isinstance(item, dict)
+            and str(item.get("symbol", "")).strip().upper() == "NVDA"
+            and isinstance(item.get("floatShares"), (int, float))
+            and not isinstance(item.get("floatShares"), bool)
+            and item.get("floatShares", 0) > 0
+            for item in targeted
+        )
+    except urllib.error.HTTPError as exc:
+        logger.warning("FMP cooldown recovery check failed; provider_http_status=%s", exc.code)
+        raise HTTPException(
+            status_code=502,
+            detail=f"FMP no superó la verificación actual (HTTP {exc.code}); cooldown conservado.",
+        ) from None
+    except Exception as exc:
+        logger.warning("FMP cooldown recovery check failed; error_type=%s", type(exc).__name__)
+        raise HTTPException(
+            status_code=502,
+            detail="FMP no superó la verificación actual; cooldown conservado.",
+        ) from None
+
+    if not bulk_usable or not targeted_usable:
+        raise HTTPException(
+            status_code=502,
+            detail="FMP respondió, pero faltan datos FLOAT utilizables; cooldown conservado.",
+        )
+
+    # Expire the old global guard only after successful current checks.
+    store.set_state("fmp_float_global_cooldown_until", 0)
+    store.set_state("fmp_float_global_cooldown_reason", "cleared_after_verified_endpoints")
+    store.set_state("fmp_float_global_cooldown_http_status", 0)
+    logger.info("Cleared legacy FMP FLOAT cooldown after successful bulk and targeted checks.")
+    return {
+        "status": "ok",
+        "cooldown_cleared": True,
+        "verified_bulk_records": len(bulk),
+        "verified_targeted_records": len(targeted),
+        "cache_modified": False,
+    }
+
+
 @app.get("/api/engine/status")
 def engine_status():
     state = get_engine_status()
