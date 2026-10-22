@@ -189,7 +189,7 @@ def get_quotes(symbols: list[str]) -> dict[str, Any]:
 def get_price_history(
     symbol: str,
     *,
-    period: int = 5,
+    period: int = 10,
     frequency: int = 1,
 ) -> dict[str, Any]:
     """Fetch recent intraday candles for one validated symbol from Schwab."""
