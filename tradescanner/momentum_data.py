@@ -5,8 +5,10 @@ import json
 import os
 import time
 import urllib.error
+import xml.etree.ElementTree as ET
+from email.utils import parsedate_to_datetime
 from datetime import datetime, timezone
-from urllib.parse import urlencode
+from urllib.parse import urlencode, quote_plus
 from urllib.request import Request, urlopen
 from typing import Any
 
@@ -85,5 +87,33 @@ def recent_stock_news(store: Any, symbol: str, *, now: float | None = None) -> d
         result = {"status": "unavailable", "news": [], "error": f"HTTP {exc.code}"}
     except Exception as exc:
         result = {"status": "unavailable", "news": [], "error": type(exc).__name__}
+    # FMP's current plan may not include stock news. Fall back to the public
+    # Google News RSS feed; keep original publication timestamps and headlines.
+    if not result.get("news"):
+        try:
+            rss_url = "https://news.google.com/rss/search?q=" + quote_plus(symbol.strip().upper() + " stock when:1d") + "&hl=en-US&gl=US&ceid=US:en"
+            rss_request = Request(rss_url, headers={"Accept": "application/rss+xml, application/xml", "User-Agent": "TradeScanner/1.0"})
+            with urlopen(rss_request, timeout=6) as response:
+                root = ET.fromstring(response.read())
+            rss_news = []
+            for item in root.findall("./channel/item")[:20]:
+                title = item.findtext("title")
+                published = item.findtext("pubDate")
+                if not title or not published: continue
+                try:
+                    stamp = parsedate_to_datetime(published)
+                    if stamp.tzinfo is None: stamp = stamp.replace(tzinfo=timezone.utc)
+                    rss_news.append({"published_at": stamp.astimezone(timezone.utc).isoformat(), "headline": title.strip()})
+                except (TypeError, ValueError, OverflowError):
+                    continue
+            if rss_news:
+                result = {"status": "ok_google_news_rss", "news": rss_news, "provider": "Google News RSS"}
+            elif result.get("status") == "unavailable":
+                result["error"] = str(result.get("error") or "No se encontraron titulares RSS")
+        except Exception as exc:
+            if result.get("status") != "unavailable":
+                result = {"status": "unavailable", "news": [], "error": type(exc).__name__}
+            else:
+                result["rss_error"] = type(exc).__name__
     store.set_state(key, {**result, "cached_at": current})
     return result
