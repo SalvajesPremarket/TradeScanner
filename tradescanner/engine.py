@@ -254,14 +254,57 @@ def run_scan_cycle(
                         ),
                     )
                 if candidate is not None:
-                    candle_payload = history_fetch(candidate["symbol"])
-                    candles = normalize_price_history(candidate["symbol"], candle_payload)
+                    history_candidates = [candidate]
+                    if strategy and strategy.get("execution_mode") == "momentum_native":
+                        # Spend a small, explicit request budget each cycle so history coverage
+                        # grows faster than one ticker per minute without flooding Schwab.
+                        history_candidates = [candidate]
+                        queue = target_store.get_state("momentum_history_queue", [])
+                        while queue and len(history_candidates) < 3:
+                            next_symbol = queue.pop(0)
+                            if next_symbol == candidate.get("symbol"):
+                                continue
+                            next_rows = target_store.latest_for_symbols([next_symbol])
+                            if not next_rows:
+                                continue
+                            next_row = next_rows[0]
+                            next_price, next_gap = next_row.get("price"), next_row.get("gap_pct")
+                            if (
+                                isinstance(next_price, (int, float)) and not isinstance(next_price, bool)
+                                and price_min <= next_price <= price_max
+                                and isinstance(next_gap, (int, float)) and not isinstance(next_gap, bool)
+                                and next_gap >= gap_min
+                            ):
+                                history_candidates.append(next_row)
+                        target_store.set_state("momentum_history_queue", queue)
                     candle_store = CandleStore(target_store.path)
-                    candle_state["candle_symbol"] = candidate["symbol"]
-                    candle_state["candles_saved"] = candle_store.save(candles)
-                    rvol = candle_store.rvol(candidate["symbol"])
-                    candle_state["rvol"] = rvol.get("rvol")
-                    candle_state["rvol_sessions_used"] = rvol.get("sessions_used", 0)
+                    history_results = []
+                    for history_candidate in history_candidates:
+                        symbol = history_candidate["symbol"]
+                        try:
+                            candle_payload = history_fetch(symbol)
+                            candles = normalize_price_history(symbol, candle_payload)
+                            saved = candle_store.save(candles)
+                            rvol = candle_store.rvol(symbol)
+                            history_results.append({
+                                "symbol": symbol,
+                                "candles_saved": saved,
+                                "rvol": rvol.get("rvol"),
+                                "rvol_sessions_used": rvol.get("sessions_used", 0),
+                            })
+                        except (SchwabAPIError, SchwabConfigurationError, ValueError, OSError, RuntimeError) + DB_ERRORS as exc:
+                            history_results.append({"symbol": symbol, "error": type(exc).__name__})
+                    if history_results:
+                        primary = history_results[0]
+                        candle_state["candle_symbol"] = primary["symbol"]
+                        candle_state["candles_saved"] = sum(item.get("candles_saved", 0) for item in history_results)
+                        candle_state["rvol"] = primary.get("rvol")
+                        candle_state["rvol_sessions_used"] = primary.get("rvol_sessions_used", 0)
+                    candle_state["history_symbols_processed"] = [item["symbol"] for item in history_results]
+                    candle_state["history_symbol_errors"] = [
+                        {"symbol": item["symbol"], "error": item["error"]}
+                        for item in history_results if item.get("error")
+                    ]
                     candle_state["history_queue_remaining"] = len(
                         target_store.get_state("momentum_history_queue", [])
                     )
