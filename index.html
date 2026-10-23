@@ -44,6 +44,10 @@
     .results-table th:last-child,.results-table td:last-child{border-right:0}
     .results-table td:nth-child(10){min-width:240px;max-width:360px;white-space:normal;line-height:1.45}
     .results-table td:nth-child(11){white-space:nowrap}
+    .results-table tr.trend-bearish td{background:#fff0f0}
+    .results-table tr.trend-bullish td{background:#effaf1}
+    .results-table td.ticker-bearish{color:#b42318;font-weight:800}
+    .results-table td.ticker-bullish{color:#16703c;font-weight:800}
     thead th{padding:11px 10px;background:var(--head);border-top:1px solid var(--line);border-bottom:1px solid var(--line);color:#4a5e72;text-align:left;white-space:nowrap;font-size:10px}
     tbody td{height:43px;padding:10px;border-bottom:1px solid #e9eef3}
     .empty{padding:27px 15px;text-align:center;color:var(--muted);font-size:12px}
@@ -231,9 +235,19 @@
           : (item.news_status === "unavailable" || item.news_status === "cooldown")
             ? "Noticias no disponibles"
             : "Sin noticia post/pre verificada";
+        const ema20 = item.ema20 ?? (item.metrics && item.metrics.ema20);
+        const price = item.quote_price ?? (item.metrics && item.metrics.price);
+        const zone = item.trend_zone || (
+          typeof price === "number" && typeof ema20 === "number"
+            ? (price < ema20 ? "bearish" : price > ema20 ? "bullish" : null)
+            : null
+        );
         return {
           news,
-          timeframe: item.timeframe || (item.metrics && item.metrics.timeframe) || "No reportada"
+          timeframe: item.timeframe || (item.metrics && item.metrics.timeframe) || "No reportada",
+          ema20,
+          price,
+          zone
         };
       }
       return {news:"—", timeframe:"—"};
@@ -255,7 +269,19 @@
       }
       for (const item of results) {
         const tr = document.createElement("tr");
+        const details = strategyDetailsForSymbol(item.symbol);
+        const tickerCellIndex = tr.children.length;
         cell(tr, item.symbol);
+        const tickerCell = tr.children[tickerCellIndex];
+        if (details.zone === "bearish") {
+          tr.classList.add("trend-bearish");
+          tickerCell.classList.add("ticker-bearish");
+          tickerCell.title = "BAJO EMA20 · ZONA BAJISTA" + (typeof details.ema20 === "number" ? " · EMA20: " + details.ema20 : "");
+        } else if (details.zone === "bullish") {
+          tr.classList.add("trend-bullish");
+          tickerCell.classList.add("ticker-bullish");
+          tickerCell.title = "SOBRE EMA20 · ZONA ALCISTA" + (typeof details.ema20 === "number" ? " · EMA20: " + details.ema20 : "");
+        }
         cell(tr, item.company);
         cell(tr, item.price == null ? "—" : "$" + displayNumber(item.price));
         cell(tr, item.change_pct == null ? "—" : displayNumber(item.change_pct) + "%");
@@ -264,7 +290,6 @@
         cell(tr, item.rvol == null ? null : displayNumber(item.rvol) + "x", "RVOL no disponible: hacen falta velas actuales y al menos dos sesiones históricas comparables.");
         cell(tr, item.volume == null ? null : displayNumber(item.volume, 0));
         cell(tr, item.sector, "Sector no proporcionado en los datos actuales del proveedor.");
-        const details = strategyDetailsForSymbol(item.symbol);
         cell(tr, details.news, "Solo se muestran titulares con fecha verificada en postmarket, overnight o premarket; no se inventan noticias.");
         cell(tr, details.timeframe, "La temporalidad se muestra solo cuando la evaluación la informa explícitamente.");
         cell(tr, "—", "Gráfico no disponible en esta fila; consulta la pestaña GRÁFICOS para un ticker con velas guardadas.");
