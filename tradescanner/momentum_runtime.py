@@ -42,6 +42,7 @@ def feed_quote_rows(store: Any, rows: list[dict[str, Any]]) -> dict[str, Any]:
     actions: list[dict[str, Any]] = []
     processed = 0
     skipped: dict[str, str] = {}
+    evaluations: list[dict[str, Any]] = []
     with _LOCK:
         for row in rows:
             symbol = row.get("symbol")
@@ -91,17 +92,23 @@ def feed_quote_rows(store: Any, rows: list[dict[str, Any]]) -> dict[str, Any]:
             emitted = trader.on_tick(float(price), ts, float(volume) if isinstance(volume, (int, float)) else None)
             _LAST_QUOTE[symbol] = (stamp, float(price))
             processed += 1
+            evaluations.append({
+                "symbol": symbol,
+                "quote_time_ms": stamp,
+                "price": float(price),
+                "position_open_in_strategy_state": trader.pos is not None,
+                "metrics": dict(trader.last_metrics),
+                "reasons": list(trader.last_reject),
+                "actions": [action.get("action") for action in emitted],
+            })
             for action in emitted:
                 actions.append({**action, "quote_time_ms": stamp, "data_source": "schwab_observed_quote"})
-                # Keep strategy state independent from any downstream order execution.
-                if action.get("action") == "ENTER":
-                    # Scanner reports a candidate; it does not simulate a fill or place an order.
-                    trader.cancel_entry()
         state = {
             "status": "fed_quotes" if processed else "waiting_for_new_quotes",
             "evaluated_at": datetime.now(ET).isoformat(),
             "processed_quotes": processed,
             "actions": actions,
+            "evaluations": evaluations,
             "skipped": skipped,
             "note": "MomentumTrader original alimentado solo con actualizaciones observadas de Schwab; no se fabrican ticks ni se ejecutan órdenes.",
         }
