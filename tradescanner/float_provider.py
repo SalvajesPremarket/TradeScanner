@@ -57,8 +57,9 @@ def refresh_float_cache(
     *,
     fetcher: Callable[[int, str], list[dict[str, Any]]] | None = None,
     now: float | None = None,
+    force: bool = False,
 ) -> dict[str, Any]:
-    """Refresh cached float data infrequently; never raise into the quote scanner."""
+    """Refresh cached float data infrequently; force=True is for an authenticated manual refresh."""
     api_key = os.getenv("FMP_API_KEY", "").strip()
     if not api_key:
         return {"status": "not_configured", "provider": "FMP", "rows_saved": 0}
@@ -79,9 +80,9 @@ def refresh_float_cache(
     except (TypeError, ValueError):
         last_success = last_attempt = 0.0
 
-    if cached_rows > 0 and current - last_success < CACHE_TTL_SECONDS:
+    if not force and cached_rows > 0 and current - last_success < CACHE_TTL_SECONDS:
         return {"status": "cached", "provider": "FMP", "rows_saved": 0}
-    if current - last_attempt < FAILURE_COOLDOWN_SECONDS:
+    if not force and current - last_attempt < FAILURE_COOLDOWN_SECONDS:
         return {"status": "cooldown", "provider": "FMP", "rows_saved": 0}
 
     # Persist the attempt before networking, preventing rapid retry loops after a crash.
