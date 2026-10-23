@@ -39,6 +39,11 @@
     .muted{color:var(--muted);font-size:11px}
     .table-wrap{overflow-x:auto}
     table{width:100%;min-width:850px;border-collapse:collapse}
+    .results-table{min-width:1250px}
+    .results-table th,.results-table td{border-right:1px solid var(--line);border-bottom:1px solid var(--line);vertical-align:top}
+    .results-table th:last-child,.results-table td:last-child{border-right:0}
+    .results-table td:nth-child(10){min-width:240px;max-width:360px;white-space:normal;line-height:1.45}
+    .results-table td:nth-child(11){white-space:nowrap}
     thead th{padding:11px 10px;background:var(--head);border-top:1px solid var(--line);border-bottom:1px solid var(--line);color:#4a5e72;text-align:left;white-space:nowrap;font-size:10px}
     tbody td{height:43px;padding:10px;border-bottom:1px solid #e9eef3}
     .empty{padding:27px 15px;text-align:center;color:var(--muted);font-size:12px}
@@ -83,9 +88,9 @@
       </div>
       <div class="tools"><span class="muted" id="result-count">Resultados: 0</span><span class="muted" id="engine-message">Esperando estado del motor.</span></div>
       <div class="table-wrap">
-        <table aria-label="Resultados del radar">
-          <thead><tr><th>TICKER</th><th>EMPRESA</th><th>PRECIO</th><th>CAMBIO %</th><th>GAP %</th><th>FLOAT</th><th>RVOL</th><th>VOLUMEN</th><th>SECTOR</th><th>GRÁFICO</th></tr></thead>
-          <tbody id="result-rows"><tr><td colspan="10"><div class="empty">Esperando primeras cotizaciones reales de Schwab.</div></td></tr></tbody>
+        <table class="results-table" aria-label="Resultados del radar">
+          <thead><tr><th>TICKER</th><th>EMPRESA</th><th>PRECIO</th><th>CAMBIO %</th><th>GAP %</th><th>FLOAT</th><th>RVOL</th><th>VOLUMEN</th><th>SECTOR</th><th>NOTICIA POST/PRE</th><th>TEMPORALIDAD</th><th>GRÁFICO</th></tr></thead>
+          <tbody id="result-rows"><tr><td colspan="12"><div class="empty">Esperando primeras cotizaciones reales de Schwab.</div></td></tr></tbody>
         </table>
       </div>
       <footer>Los filtros no generan ni completan datos faltantes. RVOL y FLOAT solo filtran filas cuando hay valores reales almacenados.</footer>
@@ -214,12 +219,32 @@
       });
     }
 
+    function strategyDetailsForSymbol(symbol) {
+      for (const state of Object.values(activeStrategyStates || {})) {
+        const evaluations = Array.isArray(state && state.evaluations) ? state.evaluations : [];
+        const item = evaluations.find(row => row && row.symbol === symbol && row.passed)
+          || evaluations.find(row => row && row.symbol === symbol);
+        if (!item) continue;
+        const headlines = Array.isArray(item.news_headlines) ? item.news_headlines : [];
+        const news = headlines.length
+          ? headlines.map(article => (article.session || "NOTICIA") + ": " + article.headline).join(" | ")
+          : (item.news_status === "unavailable" || item.news_status === "cooldown")
+            ? "Noticias no disponibles"
+            : "Sin noticia post/pre verificada";
+        return {
+          news,
+          timeframe: item.timeframe || (item.metrics && item.metrics.timeframe) || "No reportada"
+        };
+      }
+      return {news:"—", timeframe:"—"};
+    }
+
     function renderRows(results) {
       rowsNode.replaceChildren();
       if (!results.length) {
         const tr = document.createElement("tr");
         const td = document.createElement("td");
-        td.colSpan = 10;
+        td.colSpan = 12;
         const empty = document.createElement("div");
         empty.className = "empty";
         empty.textContent = allResults.length
@@ -239,6 +264,9 @@
         cell(tr, item.rvol == null ? null : displayNumber(item.rvol) + "x", "RVOL no disponible: hacen falta velas actuales y al menos dos sesiones históricas comparables.");
         cell(tr, item.volume == null ? null : displayNumber(item.volume, 0));
         cell(tr, item.sector, "Sector no proporcionado en los datos actuales del proveedor.");
+        const details = strategyDetailsForSymbol(item.symbol);
+        cell(tr, details.news, "Solo se muestran titulares con fecha verificada en postmarket, overnight o premarket; no se inventan noticias.");
+        cell(tr, details.timeframe, "La temporalidad se muestra solo cuando la evaluación la informa explícitamente.");
         cell(tr, "—", "Gráfico no disponible en esta fila; consulta la pestaña GRÁFICOS para un ticker con velas guardadas.");
         rowsNode.appendChild(tr);
       }
