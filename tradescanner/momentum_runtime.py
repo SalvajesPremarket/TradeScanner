@@ -142,12 +142,17 @@ def feed_quote_rows(
             if previous is not None and stamp < previous[0]:
                 skipped[symbol] = "out_of_order_quote"
                 continue
+            cfg = _strategy_config(strategy)
+            config_signature = (side, tuple(sorted(cfg.items())))
             trader = _TRADERS.get(runtime_key)
-            if trader is None:
-                cfg = _strategy_config(strategy)
+            previous_config = _TRADER_CONFIGS.get(runtime_key)
+            if trader is None or (previous_config != config_signature and trader.pos is None):
+                # Apply edits to the original source when flat. If a paper position
+                # is open, retain its existing trader until it exits.
                 trader = MomentumTrader(symbol, side=side, cfg=cfg)
                 _TRADERS[runtime_key] = trader
-                _TRADER_CONFIGS[runtime_key] = (side, tuple(sorted(cfg.items())))
+                _TRADER_CONFIGS[runtime_key] = config_signature
+                _SEEDED.discard(runtime_key)
             if runtime_key not in _SEEDED:
                 candles = candle_store.latest(symbol, limit=6000)
                 # Seed only closed candles strictly older than this quote's minute.
