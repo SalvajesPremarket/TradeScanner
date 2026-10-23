@@ -33,6 +33,24 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _ema20_from_candles(candles: list[dict[str, Any]]) -> float | None:
+    """Calculate EMA20 from chronologically ordered OHLCV candles."""
+    closes: list[float] = []
+    for candle in candles:
+        try:
+            close = float(candle.get("close"))
+        except (TypeError, ValueError):
+            continue
+        if close > 0 and close == close and close != float("inf"):
+            closes.append(close)
+    if len(closes) < 20:
+        return None
+    alpha = 2.0 / 21.0
+    ema = closes[0]
+    for close in closes[1:]:
+        ema = alpha * close + (1.0 - alpha) * ema
+    return round(ema, 4)
+
 def _credentials_configured() -> bool:
     has_schwab_client = all(os.getenv(key, "").strip() for key in (
         "SCHWAB_CLIENT_ID", "SCHWAB_CLIENT_SECRET"
@@ -188,6 +206,12 @@ def _evaluate_original_scan_strategy(store: SnapshotStore, batch: list[str], str
             "strategy": strategy.get("name", "Momentum"),
             "strategy_id": strategy.get("id"),
             "metrics": result.get("metrics", {}),
+            "ema20": result.get("metrics", {}).get("ema20") or _ema20_from_candles(candles),
+            "trend_zone": (
+                "bearish" if isinstance(row.get("price"), (int, float)) and isinstance(result.get("metrics", {}).get("ema20") or _ema20_from_candles(candles), (int, float)) and row.get("price") < (result.get("metrics", {}).get("ema20") or _ema20_from_candles(candles))
+                else "bullish" if isinstance(row.get("price"), (int, float)) and isinstance(result.get("metrics", {}).get("ema20") or _ema20_from_candles(candles), (int, float)) and row.get("price") > (result.get("metrics", {}).get("ema20") or _ema20_from_candles(candles))
+                else None
+            ),
             "reasons": result.get("reasons", []),
             "news_headlines": news_headlines[:3],
             "timeframe": timeframe,
@@ -237,24 +261,38 @@ def _evaluate_active_strategies(store: SnapshotStore, batch: list[str]) -> dict[
         else:
             evaluations: list[dict[str, Any]] = []
             needs_rvol = "rvol" in str(strategy.get("source", "")).casefold()
-            candle_store = CandleStore(store.path) if needs_rvol else None
+            candle_store = CandleStore(store.path)
             for row in rows:
                 if row.get("quote_is_fresh") is not True:
                     continue
                 evaluated_row = dict(row)
-                if candle_store is not None:
+                if needs_rvol:
                     try:
                         evaluated_row["rvol"] = candle_store.rvol(row["symbol"]).get("rvol")
                     except Exception:
                         evaluated_row["rvol"] = None
+                try:
+                    candles_for_ema = candle_store.latest(row["symbol"], limit=6000)
+                    ema20 = _ema20_from_candles(candles_for_ema)
+                except Exception:
+                    ema20 = None
+                current_price = row.get("price")
+                trend_zone = (
+                    "bearish" if isinstance(current_price, (int, float)) and isinstance(ema20, (int, float)) and current_price < ema20
+                    else "bullish" if isinstance(current_price, (int, float)) and isinstance(ema20, (int, float)) and current_price > ema20
+                    else None
+                )
                 passed = strategy_matches(strategy, evaluated_row)
                 evaluations.append({
                     "symbol": row.get("symbol"),
                     "passed": passed,
                     "strategy": strategy.get("name"),
                     "strategy_id": strategy.get("id"),
+                    "ema20": ema20,
+                    "trend_zone": trend_zone,
                     "metrics": {
                         "price": evaluated_row.get("price"),
+                        "ema20": ema20,
                         "gap_pct": evaluated_row.get("gap_pct"),
                         "rvol": evaluated_row.get("rvol"),
                         "volume": evaluated_row.get("volume"),
