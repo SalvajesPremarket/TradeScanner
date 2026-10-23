@@ -140,33 +140,38 @@ def _run_stream() -> None:
                         if ("momentum" in str(item.get("name", "")).casefold() and item.get("language") == "python")
                         or is_momentum_trader_program(item)
                     ]
-                    runtime = feed_quote_rows(store, rows) if enabled else {"status": "no_active_momentum_strategy"}
-                    if enabled:
+                    runtime_status = "no_active_momentum_strategy"
+                    for strategy in enabled:
+                        # Every uploaded strategy gets its own MomentumTrader state.
+                        # This preserves LONG/SHORT side and prevents one strategy's
+                        # position/actions from leaking into another strategy's monitor.
+                        runtime = feed_quote_rows(store, rows, strategy)
+                        runtime_status = runtime.get("status", "waiting_for_new_quotes")
                         runtime_evaluations = runtime.get("evaluations", [])
                         runtime_actions = runtime.get("actions", [])
                         actions_by_symbol = {}
                         for action in runtime_actions:
                             actions_by_symbol.setdefault(str(action.get("symbol")), []).append(action)
-                        for strategy in enabled:
-                            per_symbol = []
-                            for evaluation in runtime_evaluations:
-                                symbol = str(evaluation.get("symbol", ""))
-                                symbol_actions = actions_by_symbol.get(symbol, [])
-                                entry = next((action for action in symbol_actions if action.get("action") == "ENTER"), None)
-                                per_symbol.append({
-                                    **evaluation, "passed": entry is not None,
-                                    "action": entry.get("action") if entry else None,
-                                    "strategy_id": strategy.get("id"), "strategy": strategy.get("name"),
-                                    "stop": entry.get("stop") if entry else None,
-                                })
-                            store.set_state("strategy_scan_status:" + str(strategy.get("id")), {
-                                "status": runtime.get("status", "waiting_for_new_quotes"),
+                        per_symbol = []
+                        for evaluation in runtime_evaluations:
+                            symbol = str(evaluation.get("symbol", ""))
+                            symbol_actions = actions_by_symbol.get(symbol, [])
+                            entry = next((action for action in symbol_actions if action.get("action") == "ENTER"), None)
+                            per_symbol.append({
+                                **evaluation, "passed": entry is not None,
+                                "action": entry.get("action") if entry else None,
                                 "strategy_id": strategy.get("id"), "strategy": strategy.get("name"),
-                                "evaluated_at": time.time(), "processed_quotes": runtime.get("processed_quotes", 0),
-                                "evaluations": per_symbol, "actions": runtime_actions,
-                                "matches": list(dict.fromkeys(str(a.get("symbol")) for a in runtime_actions if a.get("action") == "ENTER")),
-                                "note": runtime.get("note"),
+                                "stop": entry.get("stop") if entry else None,
                             })
+                        store.set_state("strategy_scan_status:" + str(strategy.get("id")), {
+                            "status": runtime_status,
+                            "strategy_id": strategy.get("id"), "strategy": strategy.get("name"),
+                            "evaluated_at": time.time(), "processed_quotes": runtime.get("processed_quotes", 0),
+                            "evaluations": per_symbol, "actions": runtime_actions,
+                            "matches": list(dict.fromkeys(str(a.get("symbol")) for a in runtime_actions if a.get("action") == "ENTER")),
+                            "note": runtime.get("note"),
+                        })
+                    runtime = {"status": runtime_status}
                     store.set_state("schwab_stream_status", {
                         "status": "connected", "provider": "Schwab Level One websocket",
                         "subscribed_symbols": len(symbols), "last_message_at": time.time(),
