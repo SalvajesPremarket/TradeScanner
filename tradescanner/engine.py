@@ -76,7 +76,7 @@ def _evaluate_momentum_strategy(store: SnapshotStore, batch: list[str], strategy
 
     rows = store.latest_for_symbols(batch)
     apply_cached_float(rows, store)
-    runtime = feed_quote_rows(store, rows)
+    runtime = feed_quote_rows(store, rows, strategy)
     actions = runtime.get("actions", [])
     actions_by_symbol: dict[str, list[dict[str, Any]]] = {}
     for action in actions:
