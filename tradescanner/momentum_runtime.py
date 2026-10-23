@@ -7,12 +7,13 @@ from __future__ import annotations
 
 import ast
 import threading
-from datetime import datetime
+from datetime import datetime, time as dtime
 from typing import Any
 from zoneinfo import ZoneInfo
 
 from tradescanner.candles import CandleStore
 from tradescanner.momentum_trader import CONFIG as DEFAULT_CONFIG, MomentumTrader
+from tradescanner.momentum import CONFIG as SCAN_DEFAULT_CONFIG
 from tradescanner.momentum_data import average_daily_volume_30d, recent_stock_news
 
 ET = ZoneInfo("America/New_York")
@@ -88,6 +89,73 @@ def _strategy_config(strategy: dict[str, Any] | None) -> dict[str, Any]:
                 if number == number and abs(number) != float("inf") and abs(number) <= 1_000_000:
                     parsed[key] = number
         elif isinstance(default, str) and isinstance(value, str) and len(value) <= 256:
+            parsed[key] = value
+    return parsed
+
+
+def _scan_strategy_config(strategy: dict[str, Any] | None) -> dict[str, Any]:
+    """Read the original scan(df, ctx) CONFIG using literals only."""
+    source = strategy.get("source", "") if isinstance(strategy, dict) else ""
+    try:
+        tree = ast.parse(source, mode="exec")
+    except (SyntaxError, ValueError):
+        return {}
+    config_node = None
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and any(
+            isinstance(target, ast.Name) and target.id == "CONFIG" for target in node.targets
+        ):
+            config_node = node.value
+            break
+        if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) and node.target.id == "CONFIG":
+            config_node = node.value
+            break
+    if not isinstance(config_node, ast.Dict):
+        return {}
+
+    def literal(node: ast.AST) -> Any:
+        try:
+            return ast.literal_eval(node)
+        except (ValueError, TypeError, SyntaxError):
+            # The original program expresses session bounds as dtime(hour, minute).
+            # Parse that narrow literal form; never evaluate arbitrary source.
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id in {"dtime", "time"}
+                and not node.keywords
+                and len(node.args) in {2, 3}
+            ):
+                parts = [ast.literal_eval(arg) for arg in node.args]
+                if all(isinstance(part, int) and not isinstance(part, bool) for part in parts):
+                    try:
+                        return dtime(*parts)
+                    except (TypeError, ValueError, OverflowError):
+                        return None
+            return None
+
+    parsed: dict[str, Any] = {}
+    for key_node, value_node in zip(config_node.keys, config_node.values):
+        key = literal(key_node)
+        if not isinstance(key, str) or key not in SCAN_DEFAULT_CONFIG:
+            continue
+        value = literal(value_node)
+        default = SCAN_DEFAULT_CONFIG[key]
+        if isinstance(default, bool):
+            valid = isinstance(value, bool)
+        elif isinstance(default, dtime):
+            valid = isinstance(value, dtime)
+        elif isinstance(default, int) and not isinstance(default, bool):
+            valid = isinstance(value, int) and not isinstance(value, bool) and 0 <= value <= 1_000_000_000_000
+        elif isinstance(default, float):
+            valid = isinstance(value, (int, float)) and not isinstance(value, bool) and abs(float(value)) <= 1_000_000
+            if valid:
+                value = float(value)
+        elif isinstance(default, str):
+            valid = isinstance(value, str) and len(value) <= 256
+        else:
+            valid = False
+        if valid:
             parsed[key] = value
     return parsed
 
