@@ -44,7 +44,16 @@ def list_strategies(store: SnapshotStore | None = None) -> list[dict[str, Any]]:
     value = _store(store).get_state(STATE_KEY, [])
     if not isinstance(value, list):
         return []
-    return [item for item in value if isinstance(item, dict)]
+    items = [dict(item) for item in value if isinstance(item, dict)]
+    # Upgrade previously saved original scan(df, ctx) programs in memory. Their
+    # source was preserved, but older builds marked them non-executable because
+    # they were not a class-based MomentumTrader. Activation will persist the
+    # corrected metadata; simply listing strategies does not alter enabled state.
+    for item in items:
+        if is_momentum_scan_program(item) or is_momentum_trader_program(item):
+            item["execution_ready"] = True
+            item["execution_error"] = None
+    return items
 
 
 def _validate_formula(source: str) -> ast.Expression:
