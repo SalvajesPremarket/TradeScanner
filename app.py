@@ -22,6 +22,7 @@ from tradescanner.engine import get_engine_status, record_engine_status, run_sca
 from tradescanner.snapshots import SnapshotStore, collect_snapshots
 from tradescanner.strategies import (active_strategy, active_strategies, delete_strategy, strategy_matches, list_strategies, save_strategy, set_strategy_enabled)
 from tradescanner.universe import UniverseUnavailableError, load_symbol_universe
+from tradescanner.schwab_stream import start_schwab_stream, stop_schwab_stream
 from tradescanner.oauth import router as oauth_router
 from tradescanner.schwab import (
     SchwabAPIError,
@@ -74,6 +75,7 @@ async def lifespan(application: FastAPI):
     stop = asyncio.Event()
     task = asyncio.create_task(_automatic_scan_loop(stop))
     application.state.scan_task = task
+    start_schwab_stream()
     await asyncio.sleep(0)  # Give the scan coroutine a scheduling turn before startup completes.
     logger.warning(
         "TradeScanner lifespan started; automatic_scan_enabled=%s",
@@ -84,6 +86,7 @@ async def lifespan(application: FastAPI):
         yield
     finally:
         stop.set()
+        stop_schwab_stream()
         task.cancel()
         await asyncio.gather(task, return_exceptions=True)
 
