@@ -248,6 +248,19 @@ def is_momentum_trader_program(strategy: dict[str, Any]) -> bool:
     )
 
 
+def is_momentum_scan_program(strategy: dict[str, Any]) -> bool:
+    """Recognize the original scan(df, ctx) Momentum contract without executing it."""
+    if strategy.get("language") != "python":
+        return False
+    source = strategy.get("source", "")
+    return (
+        isinstance(source, str)
+        and "STRATEGY_NAME" in source
+        and re.search(r"(?m)^\\s*def\\s+scan\\s*\\(", source) is not None
+        and re.search(r"(?m)^\\s*CONFIG(?:\\s*:[^=]+)?\\s*=", source) is not None
+    )
+
+
 def strategy_matches(strategy: dict[str, Any], row: dict[str, Any]) -> bool:
     language = strategy.get("language")
     source = strategy.get("source", "")
@@ -288,10 +301,10 @@ def save_strategy(name: str, language: str, source: str, strategy_id: str | None
     # Such strategies remain stored but cannot be activated until adapted.
     execution_error = None
     # Momentum has a dedicated, bounded evaluator in tradescanner.momentum.
-    is_momentum = (("momentum" in clean_name.casefold() and language == "python") or is_momentum_trader_program({"language": language, "source": source}))
+    is_momentum = (("momentum" in clean_name.casefold() and language == "python") or is_momentum_trader_program({"language": language, "source": source}) or is_momentum_scan_program({"language": language, "source": source}))
     try:
         if is_momentum:
-            if not (("def scan(" in source and "STRATEGY_NAME" in source) or is_momentum_trader_program({"language": language, "source": source})):
+            if not (is_momentum_scan_program({"language": language, "source": source}) or is_momentum_trader_program({"language": language, "source": source})):
                 raise ValueError("La estrategia debe coincidir con el contrato Momentum registrado (scan o MomentumTrader completo).")
         elif language == "formula":
             _validate_formula(source)
@@ -334,9 +347,9 @@ def set_strategy_enabled(strategy_id: str, enabled: bool,
         if not selected.get("execution_ready", False):
             detail = selected.get("execution_error") or "El código no pertenece al subconjunto ejecutable del motor."
             raise ValueError("La estrategia se guardó, pero no se puede activar todavía: " + detail)
-        if ("momentum" in selected.get("name", "").casefold() and selected.get("language") == "python") or is_momentum_trader_program(selected):
+        if ("momentum" in selected.get("name", "").casefold() and selected.get("language") == "python") or is_momentum_trader_program(selected) or is_momentum_scan_program(selected):
             source = selected.get("source", "")
-            if not (("def scan(" in source and "STRATEGY_NAME" in source) or is_momentum_trader_program(selected)):
+            if not (is_momentum_scan_program(selected) or is_momentum_trader_program(selected)):
                 raise ValueError("La estrategia debe coincidir con el contrato Momentum registrado (scan o MomentumTrader completo).")
         elif selected.get("language") == "formula": _validate_formula(selected.get("source", ""))
         elif selected.get("language") == "python": _python_expression(selected.get("source", ""))
