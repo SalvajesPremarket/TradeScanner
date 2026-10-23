@@ -6,6 +6,7 @@ import os
 import threading
 import time
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 from typing import Any, Callable
 
 from tradescanner.candles import CandleStore, normalize_price_history
@@ -114,6 +115,33 @@ def _evaluate_momentum_strategy(store: SnapshotStore, batch: list[str], strategy
     store.set_state("strategy_scan_status:" + str(strategy.get("id")), state)
     return state
 
+def _news_session_for_result(article: dict[str, Any]) -> dict[str, str] | None:
+    """Keep timestamped headlines published after-hours, overnight, or premarket."""
+    published = article.get("published_at")
+    headline = article.get("headline")
+    if not isinstance(published, str) or not isinstance(headline, str) or not headline.strip():
+        return None
+    try:
+        stamp = datetime.fromisoformat(published.replace("Z", "+00:00"))
+        if stamp.tzinfo is None:
+            stamp = stamp.replace(tzinfo=timezone.utc)
+        local = stamp.astimezone(ZoneInfo("America/New_York"))
+    except (ValueError, TypeError):
+        return None
+    age_hours = (datetime.now(timezone.utc) - stamp.astimezone(timezone.utc)).total_seconds() / 3600
+    if age_hours < 0 or age_hours > 24:
+        return None
+    minute = local.hour * 60 + local.minute
+    if 16 * 60 <= minute < 20 * 60:
+        session = "POSTMARKET"
+    elif minute >= 20 * 60 or minute < 4 * 60:
+        session = "OVERNIGHT"
+    elif 4 * 60 <= minute <= 9 * 60 + 30:
+        session = "PREMARKET"
+    else:
+        return None
+    return {"published_at": published, "headline": headline.strip(), "session": session}
+
 def _evaluate_original_scan_strategy(store: SnapshotStore, batch: list[str], strategy: dict[str, Any]) -> dict[str, Any]:
     """Run the stored scan(df, ctx) Momentum contract through the safe OHLCV adapter."""
     from tradescanner.momentum import scan as evaluate_momentum_scan
@@ -147,6 +175,12 @@ def _evaluate_original_scan_strategy(store: SnapshotStore, batch: list[str], str
             "news": news.get("news", []),
         }
         result = evaluate_momentum_scan(candles, context, cfg)
+        news_headlines = [
+            item for item in (_news_session_for_result(article) for article in news.get("news", []))
+            if item is not None
+        ]
+        news_headlines.sort(key=lambda item: item["published_at"], reverse=True)
+        timeframe = result.get("metrics", {}).get("timeframe") or cfg.get("timeframe") or cfg.get("interval")
         evaluations.append({
             "symbol": symbol,
             "passed": bool(result.get("passed")),
@@ -155,6 +189,8 @@ def _evaluate_original_scan_strategy(store: SnapshotStore, batch: list[str], str
             "strategy_id": strategy.get("id"),
             "metrics": result.get("metrics", {}),
             "reasons": result.get("reasons", []),
+            "news_headlines": news_headlines[:3],
+            "timeframe": timeframe,
             "data_source": "schwab_quotes_and_historical_candles",
             "quote_price": row.get("price"),
             "candles_available": len(candles),
