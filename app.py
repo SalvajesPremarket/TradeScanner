@@ -16,7 +16,7 @@ from tradescanner.db import DB_ERRORS, is_postgres
 from tradescanner.core import apply_filters, normalize_schwab_quotes
 import urllib.error
 
-from tradescanner.float_provider import apply_cached_float, _fetch_page, _fetch_symbol_float
+from tradescanner.float_provider import apply_cached_float, refresh_float_cache, _fetch_page, _fetch_symbol_float
 from tradescanner.infisical_vault import is_configured as infisical_is_configured
 from tradescanner.engine import get_engine_status, record_engine_status, run_scan_cycle
 from tradescanner.snapshots import SnapshotStore, collect_snapshots
@@ -93,6 +93,34 @@ async def lifespan(application: FastAPI):
 
 app = FastAPI(title="TradeScanner", version="0.3.1", lifespan=lifespan)
 app.include_router(oauth_router)
+
+
+def _scanner_indicators(candles: list[dict]) -> dict[str, float | None]:
+    """Return EMA20 and MACD line from stored chronological candle closes."""
+    closes: list[float] = []
+    for candle in candles:
+        try:
+            value = float(candle.get("close"))
+            if value > 0 and value == value and value != float("inf"):
+                closes.append(value)
+        except (TypeError, ValueError):
+            continue
+    if len(closes) < 26:
+        return {"ema20": None, "macd": None}
+    def ema_series(values: list[float], period: int) -> list[float]:
+        alpha = 2.0 / (period + 1.0)
+        result = [values[0]]
+        for value in values[1:]:
+            result.append(alpha * value + (1.0 - alpha) * result[-1])
+        return result
+    ema20_series = ema_series(closes, 20)
+    ema12 = ema_series(closes, 12)
+    ema26 = ema_series(closes, 26)
+    return {
+        "ema20": round(ema20_series[-1], 4),
+        "macd": round(ema12[-1] - ema26[-1], 6),
+    }
+
 
 
 @app.get("/", include_in_schema=False)
@@ -316,6 +344,28 @@ def resolve_legacy_fmp_float_cooldown(request: Request):
     }
 
 
+@app.post("/api/diagnostics/float/fmp/refresh-cache")
+def refresh_fmp_float_cache(request: Request):
+    """Authenticated explicit action to fetch and persist public FLOAT values."""
+    _authorize_strategy_access(request)
+    store = SnapshotStore()
+    result = refresh_float_cache(store, force=True)
+    if result.get("status") != "updated":
+        status_code = 503 if result.get("status") in {"not_configured", "unavailable", "cooldown"} else 502
+        raise HTTPException(
+            status_code=status_code,
+            detail="No se pudo actualizar la caché FLOAT: " + str(result.get("error") or result.get("status") or "resultado desconocido"),
+        )
+    logger.info("Manual FLOAT cache refresh completed; rows_saved=%s", result.get("rows_saved", 0))
+    return {
+        "status": "updated",
+        "rows_saved": int(result.get("rows_saved", 0)),
+        "updated_at": result.get("updated_at"),
+        "pages_fetched": result.get("pages_fetched", 0),
+        "message": "Caché FLOAT actualizada desde FMP.",
+    }
+
+
 @app.get("/api/engine/status")
 def engine_status():
     state = get_engine_status()
@@ -394,6 +444,14 @@ def snapshots_latest(limit: int = Query(10000, ge=1, le=10000)):
                 row["rvol"] = None
                 row["rvol_sessions_used"] = 0
                 row["rvol_as_of"] = None
+            try:
+                indicator_candles = candle_store.latest(row["symbol"], limit=100)
+                indicators = _scanner_indicators(indicator_candles)
+                row["ema20"] = indicators["ema20"]
+                row["macd"] = indicators["macd"]
+            except (OSError, RuntimeError, ValueError) + DB_ERRORS:
+                row["ema20"] = None
+                row["macd"] = None
             row.setdefault("float_shares", None)
             row.setdefault("float_as_of", None)
             row.setdefault("float_source", None)
