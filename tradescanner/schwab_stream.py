@@ -16,6 +16,7 @@ from tradescanner.float_provider import apply_cached_float
 from tradescanner.momentum_runtime import feed_quote_rows
 from tradescanner.schwab import _access_token, get_streamer_info, SchwabAPIError
 from tradescanner.snapshots import SnapshotStore
+from tradescanner.strategies import active_strategies, is_momentum_trader_program
 from tradescanner.universe import load_symbol_universe
 
 logger = logging.getLogger(__name__)
@@ -134,11 +135,17 @@ def _run_stream() -> None:
                     store = SnapshotStore()
                     apply_cached_float(rows, store)
                     store.save(rows)
-                    runtime = feed_quote_rows(store, rows)
+                    enabled = [
+                        item for item in active_strategies(store)
+                        if ("momentum" in str(item.get("name", "")).casefold() and item.get("language") == "python")
+                        or is_momentum_trader_program(item)
+                    ]
+                    runtime = feed_quote_rows(store, rows) if enabled else {"status": "no_active_momentum_strategy"}
                     store.set_state("schwab_stream_status", {
                         "status": "connected", "provider": "Schwab Level One websocket",
                         "subscribed_symbols": len(symbols), "last_message_at": time.time(),
                         "received_quotes": len(rows), "runtime_status": runtime.get("status"),
+                        "active_momentum_strategies": len(enabled),
                         "note": "Solo ticks emitidos por Schwab; no se interpolan ni fabrican precios.",
                     })
                     store.set_state("engine_status", {
