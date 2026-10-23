@@ -134,8 +134,11 @@ def _evaluate_original_scan_strategy(store: SnapshotStore, batch: list[str], str
             skipped[symbol] = "quote_not_fresh"
             continue
         candles = candle_store.latest(symbol, limit=6000)
-        daily = average_daily_volume_30d(store, symbol)
-        news = recent_stock_news(store, symbol)
+        # Most universe symbols have no cached OHLCV yet. Reject those locally
+        # before making auxiliary daily-volume/news requests for every ticker.
+        enough_candles = len(candles) >= int(cfg.get("min_bars", 35))
+        daily = average_daily_volume_30d(store, symbol) if enough_candles else {"status": "not_requested", "average": None}
+        news = recent_stock_news(store, symbol) if enough_candles else {"status": "not_requested", "news": []}
         context = {
             "symbol": symbol,
             "prev_close": row.get("previous_close"),
