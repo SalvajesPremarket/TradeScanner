@@ -256,8 +256,8 @@ def is_momentum_scan_program(strategy: dict[str, Any]) -> bool:
     return (
         isinstance(source, str)
         and "STRATEGY_NAME" in source
-        and re.search(r"(?m)^\\s*def\\s+scan\\s*\\(", source) is not None
-        and re.search(r"(?m)^\\s*CONFIG(?:\\s*:[^=]+)?\\s*=", source) is not None
+        and re.search(r"(?m)^\s*def\s+scan\s*\(", source) is not None
+        and re.search(r"(?m)^\s*CONFIG(?:\s*:[^=]+)?\s*=", source) is not None
     )
 
 
@@ -265,7 +265,7 @@ def strategy_matches(strategy: dict[str, Any], row: dict[str, Any]) -> bool:
     language = strategy.get("language")
     source = strategy.get("source", "")
     try:
-        if ("momentum" in strategy.get("name", "").casefold() and language == "python") or is_momentum_trader_program(strategy):
+        if ("momentum" in strategy.get("name", "").casefold() and language == "python") or is_momentum_trader_program(strategy) or is_momentum_scan_program(strategy):
             return False  # Dedicated OHLCV/context pipeline evaluates this strategy.
         if language == "formula":
             expression = source
