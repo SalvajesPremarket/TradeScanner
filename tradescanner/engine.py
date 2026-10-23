@@ -16,7 +16,6 @@ from tradescanner.snapshots import BATCH_SIZE, SnapshotStore, collect_snapshots
 from tradescanner.schwab import SchwabAPIError, SchwabConfigurationError, get_daily_history, get_price_history, get_quotes
 from tradescanner.universe import load_symbol_universe
 from tradescanner.strategies import active_strategies, strategy_matches
-from tradescanner.momentum import scan as scan_momentum
 from tradescanner.momentum_data import average_daily_volume_30d, recent_stock_news
 
 logger = logging.getLogger(__name__)
@@ -72,62 +71,44 @@ def get_engine_status(store: SnapshotStore | None = None) -> dict[str, Any]:
 
 
 def _evaluate_momentum_strategy(store: SnapshotStore, batch: list[str], strategy: dict[str, Any]) -> dict[str, Any]:
-    """Evaluate the supported Momentum strategy against actual OHLCV and market context."""
+    """Feed the original per-symbol MomentumTrader from real Schwab quote observations."""
+    from tradescanner.momentum_runtime import feed_quote_rows
+
     rows = store.latest_for_symbols(batch)
     apply_cached_float(rows, store)
-    candidates = [
-        row for row in rows
-        if row.get("quote_is_fresh") is True
-        and isinstance(row.get("price"), (int, float)) and 1 <= row["price"] <= 20
-        and isinstance(row.get("gap_pct"), (int, float)) and row["gap_pct"] >= 3
-    ]
-    candidates.sort(key=lambda row: (row.get("volume") or 0, row.get("gap_pct") or 0), reverse=True)
-    evaluations: list[dict[str, Any]] = []
-    candle_store = CandleStore(store.path)
-    for row in candidates[:3]:
-        symbol = row["symbol"]
-        try:
-            payload = get_price_history(symbol, period=5, frequency=1)
-            candle_store.save(normalize_price_history(symbol, payload))
-        except Exception as exc:
-            evaluations.append({
-                "symbol": symbol, "passed": False, "strategy": strategy.get("name", "Momentum"), "metrics": {},
-                "reasons": ["velas: historial de un minuto no disponible (" + type(exc).__name__ + ")"],
-            })
-            continue
-        candles = candle_store.latest(symbol, limit=6000)
-        daily = average_daily_volume_30d(store, symbol)
-        headlines = recent_stock_news(store, symbol)
-        result = scan_momentum(candles, {
-            "symbol": symbol,
-            "prev_close": row.get("previous_close"),
-            "avg_volume_30d": daily.get("average"),
-            "float_shares": row.get("float_shares"),
-            "news": headlines.get("news", []),
-        })
-        result["strategy_id"] = strategy.get("id")
-        result["strategy"] = strategy.get("name", "Momentum")
-        result["data_status"] = {
-            "daily_volume": daily.get("status"),
-            "daily_volume_sessions": daily.get("sessions"),
-            "news": headlines.get("status"),
-            "news_error": headlines.get("error"),
-            "float_source": row.get("float_source"),
+    runtime = feed_quote_rows(store, rows)
+    actions = runtime.get("actions", [])
+    evaluations = [
+        {
+            "symbol": action.get("symbol"),
+            "passed": action.get("action") == "ENTER",
+            "action": action.get("action"),
+            "strategy": strategy.get("name", "Momentum"),
+            "strategy_id": strategy.get("id"),
+            "metrics": action.get("metrics", {}),
+            "reasons": [action.get("reason")] if action.get("reason") else [],
+            "stop": action.get("stop"),
+            "quote_time_ms": action.get("quote_time_ms"),
+            "data_source": action.get("data_source"),
         }
-        evaluations.append(result)
+        for action in actions
+    ]
     state = {
-        "status": "evaluated" if evaluations else "no_candidates",
+        "status": runtime.get("status", "waiting_for_new_quotes"),
         "strategy_id": strategy.get("id"),
-        "strategy": strategy.get("name"),
-        "evaluated_at": _now(),
-        "candidate_count": len(candidates),
+        "strategy": strategy.get("name", "Momentum"),
+        "evaluated_at": runtime.get("evaluated_at", _now()),
+        "candidate_count": runtime.get("processed_quotes", 0),
+        "processed_quotes": runtime.get("processed_quotes", 0),
         "evaluations": evaluations,
-        "matches": [item["symbol"] for item in evaluations if item.get("passed")],
-        "note": "Evaluación con datos reales; los datos obligatorios ausentes descartan la acción y nunca se inventan.",
+        "matches": list(dict.fromkeys(
+            item["symbol"] for item in evaluations if item.get("action") == "ENTER"
+        )),
+        "skipped": runtime.get("skipped", {}),
+        "note": runtime.get("note"),
     }
     store.set_state("strategy_scan_status:" + str(strategy.get("id")), state)
     return state
-
 
 def _evaluate_active_strategies(store: SnapshotStore, batch: list[str]) -> dict[str, Any]:
     """Evaluate every enabled strategy once per scanner cycle, without placing orders."""
