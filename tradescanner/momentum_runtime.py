@@ -78,7 +78,9 @@ def _strategy_config(strategy: dict[str, Any] | None) -> dict[str, Any]:
             if isinstance(value, bool):
                 parsed[key] = value
         elif isinstance(default, int) and not isinstance(default, bool):
-            if isinstance(value, int) and not isinstance(value, bool) and 1 <= value <= 1000:
+            if isinstance(value, int) and not isinstance(value, bool) and 0 <= value <= 1_000_000_000_000:
+                if key in {"ema_fast", "macd_fast", "macd_slow", "bb_period", "t1_end", "t2_end"} and not 1 <= value <= 1000:
+                    continue
                 parsed[key] = value
         elif isinstance(default, float):
             if isinstance(value, (int, float)) and not isinstance(value, bool):
