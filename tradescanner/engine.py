@@ -15,7 +15,7 @@ from tradescanner.infisical_vault import is_configured as infisical_is_configure
 from tradescanner.snapshots import BATCH_SIZE, SnapshotStore, collect_snapshots
 from tradescanner.schwab import SchwabAPIError, SchwabConfigurationError, get_daily_history, get_price_history, get_quotes
 from tradescanner.universe import load_symbol_universe
-from tradescanner.strategies import active_strategies, strategy_matches
+from tradescanner.strategies import active_strategies, is_momentum_trader_program, strategy_matches
 from tradescanner.momentum_data import average_daily_volume_30d, recent_stock_news
 
 logger = logging.getLogger(__name__)
@@ -128,7 +128,7 @@ def _evaluate_active_strategies(store: SnapshotStore, batch: list[str]) -> dict[
     apply_cached_float(rows, store)
     states: list[dict[str, Any]] = []
     for strategy in strategies:
-        if "momentum" in str(strategy.get("name", "")).casefold() and strategy.get("language") == "python":
+        if ("momentum" in str(strategy.get("name", "")).casefold() and strategy.get("language") == "python") or is_momentum_trader_program(strategy):
             state = _evaluate_momentum_strategy(store, batch, strategy)
             store.set_state("momentum_scan_status", state)
         else:
