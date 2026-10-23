@@ -9,6 +9,7 @@ from tradescanner.strategies import (
     formula_matches,
     strategy_matches,
     list_strategies,
+    is_momentum_scan_program,
     save_strategy,
     set_strategy_enabled,
 )
@@ -103,6 +104,21 @@ class StrategyTests(unittest.TestCase):
         self.assertEqual(edited["name"], "Renamed")
         delete_strategy(saved["id"], store=self.store)
         self.assertEqual(list_strategies(self.store), [])
+
+    def test_original_scan_based_momentum_program_can_be_activated(self):
+        source = '''
+from datetime import time as dtime
+STRATEGY_NAME = "Momentum"
+CONFIG: dict = {"session_start": dtime(4, 0), "price_min": 1.0}
+def scan(df, ctx, cfg=None):
+    return {"passed": False, "metrics": {}, "reasons": []}
+'''
+        strategy = save_strategy("JeanLong", "python", source, store=self.store)
+        self.assertTrue(is_momentum_scan_program(strategy))
+        self.assertTrue(strategy["execution_ready"], strategy["execution_error"])
+        activated = set_strategy_enabled(strategy["id"], True, store=self.store)
+        self.assertTrue(activated["enabled"])
+        self.assertFalse(strategy_matches(activated, {"price": 10}))
 
     def test_original_momentum_trader_program_can_be_activated_without_execing_upload(self):
         source = '''
