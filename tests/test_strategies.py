@@ -104,6 +104,23 @@ class StrategyTests(unittest.TestCase):
         delete_strategy(saved["id"], store=self.store)
         self.assertEqual(list_strategies(self.store), [])
 
+    def test_original_momentum_trader_program_can_be_activated_without_execing_upload(self):
+        source = '''
+class MomentumTrader:
+    def on_tick(self, price, ts, day_volume=None):
+        return []
+    def _entry_filters(self, price, ts):
+        return []
+    def _manage_position(self, price, sec, dev):
+        return []
+'''
+        strategy = save_strategy("JeanLong", "python", source, store=self.store)
+        self.assertTrue(strategy["execution_ready"])
+        self.assertTrue(strategy["enabled"] is False)
+        activated = set_strategy_enabled(strategy["id"], True, store=self.store)
+        self.assertTrue(activated["enabled"])
+        self.assertFalse(strategy_matches(activated, {"price": 10}))
+
 
 if __name__ == "__main__":
     unittest.main()
