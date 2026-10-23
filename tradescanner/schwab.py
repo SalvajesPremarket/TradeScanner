@@ -18,6 +18,7 @@ from .infisical_vault import read_secret, write_secret
 TOKEN_URL = "https://api.schwabapi.com/v1/oauth/token"
 QUOTES_URL = "https://api.schwabapi.com/marketdata/v1/quotes"
 PRICE_HISTORY_URL = "https://api.schwabapi.com/marketdata/v1/pricehistory"
+USER_PREFERENCE_URL = "https://api.schwabapi.com/trader/v1/userPreference"
 _SYMBOL_RE = re.compile(r"^[A-Z][A-Z0-9.-]{0,14}$")
 
 _TOKEN_LOCK = threading.Lock()
@@ -223,6 +224,23 @@ def get_price_history(
     if candles is not None and not isinstance(candles, list):
         raise SchwabAPIError("Schwab price-history candles were malformed.")
     return payload
+
+
+
+def get_streamer_info() -> dict[str, Any]:
+    """Fetch the authenticated Schwab streaming session metadata."""
+    request = urllib.request.Request(
+        USER_PREFERENCE_URL,
+        headers={"Authorization": f"Bearer {_access_token()}", "Accept": "application/json"},
+        method="GET",
+    )
+    payload = _request_json(request)
+    if not isinstance(payload, dict):
+        raise SchwabAPIError("Schwab user preference response was malformed.")
+    info = payload.get("streamerInfo")
+    if not isinstance(info, list) or not info or not isinstance(info[0], dict):
+        raise SchwabAPIError("Schwab did not provide streamer session metadata.")
+    return info[0]
 
 
 def get_daily_history(symbol: str) -> dict[str, Any]:
