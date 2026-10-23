@@ -12,7 +12,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from tradescanner.candles import CandleStore
-from tradescanner.momentum_trader import MomentumTrader
+from tradescanner.momentum_trader import CONFIG as DEFAULT_CONFIG, MomentumTrader
 from tradescanner.momentum_data import average_daily_volume_30d, recent_stock_news
 
 ET = ZoneInfo("America/New_York")
@@ -20,6 +20,7 @@ _LOCK = threading.RLock()
 _TRADERS: dict[tuple[str, str], MomentumTrader] = {}
 _LAST_QUOTE: dict[tuple[str, str], tuple[int, float]] = {}
 _SEEDED: set[tuple[str, str]] = set()
+_TRADER_CONFIGS: dict[tuple[str, str], tuple[str, tuple[tuple[str, Any], ...]]] = {}
 
 
 def _strategy_side(strategy: dict[str, Any] | None) -> str:
@@ -38,6 +39,55 @@ def _strategy_side(strategy: dict[str, Any] | None) -> str:
     except (SyntaxError, ValueError, TypeError):
         pass
     return "LONG"
+
+
+def _strategy_config(strategy: dict[str, Any] | None) -> dict[str, Any]:
+    """Read literal CONFIG values from the uploaded original; never execute its source."""
+    source = strategy.get("source", "") if isinstance(strategy, dict) else ""
+    try:
+        tree = ast.parse(source, mode="exec")
+    except (SyntaxError, ValueError):
+        return {}
+    config_node = None
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and any(
+            isinstance(target, ast.Name) and target.id == "CONFIG" for target in node.targets
+        ):
+            config_node = node.value
+            break
+        if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) and node.target.id == "CONFIG":
+            config_node = node.value
+            break
+    if not isinstance(config_node, ast.Dict):
+        return {}
+    parsed: dict[str, Any] = {}
+    for key_node, value_node in zip(config_node.keys, config_node.values):
+        try:
+            key = ast.literal_eval(key_node)
+            value = ast.literal_eval(value_node)
+        except (ValueError, TypeError, SyntaxError):
+            continue
+        if not isinstance(key, str) or key not in DEFAULT_CONFIG:
+            continue
+        default = DEFAULT_CONFIG[key]
+        # Accept literal primitive values only; never execute uploaded expressions.
+        if default is None:
+            if value is None:
+                parsed[key] = value
+        elif isinstance(default, bool):
+            if isinstance(value, bool):
+                parsed[key] = value
+        elif isinstance(default, int) and not isinstance(default, bool):
+            if isinstance(value, int) and not isinstance(value, bool) and 1 <= value <= 1000:
+                parsed[key] = value
+        elif isinstance(default, float):
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                number = float(value)
+                if number == number and abs(number) != float("inf") and abs(number) <= 1_000_000:
+                    parsed[key] = number
+        elif isinstance(default, str) and isinstance(value, str) and len(value) <= 256:
+            parsed[key] = value
+    return parsed
 
 
 def _parse_news(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -94,8 +144,10 @@ def feed_quote_rows(
                 continue
             trader = _TRADERS.get(runtime_key)
             if trader is None:
-                trader = MomentumTrader(symbol, side=side)
+                cfg = _strategy_config(strategy)
+                trader = MomentumTrader(symbol, side=side, cfg=cfg)
                 _TRADERS[runtime_key] = trader
+                _TRADER_CONFIGS[runtime_key] = (side, tuple(sorted(cfg.items())))
             if runtime_key not in _SEEDED:
                 candles = candle_store.latest(symbol, limit=6000)
                 # Seed only closed candles strictly older than this quote's minute.
