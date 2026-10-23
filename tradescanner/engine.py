@@ -78,21 +78,24 @@ def _evaluate_momentum_strategy(store: SnapshotStore, batch: list[str], strategy
     apply_cached_float(rows, store)
     runtime = feed_quote_rows(store, rows)
     actions = runtime.get("actions", [])
-    evaluations = [
-        {
-            "symbol": action.get("symbol"),
-            "passed": action.get("action") == "ENTER",
-            "action": action.get("action"),
+    actions_by_symbol: dict[str, list[dict[str, Any]]] = {}
+    for action in actions:
+        actions_by_symbol.setdefault(str(action.get("symbol")), []).append(action)
+    evaluations = []
+    for item in runtime.get("evaluations", []):
+        symbol = str(item.get("symbol", ""))
+        symbol_actions = actions_by_symbol.get(symbol, [])
+        entry = next((action for action in symbol_actions if action.get("action") == "ENTER"), None)
+        evaluations.append({
+            **item,
+            "passed": entry is not None,
+            "action": entry.get("action") if entry else None,
             "strategy": strategy.get("name", "Momentum"),
             "strategy_id": strategy.get("id"),
-            "metrics": action.get("metrics", {}),
-            "reasons": [action.get("reason")] if action.get("reason") else [],
-            "stop": action.get("stop"),
-            "quote_time_ms": action.get("quote_time_ms"),
-            "data_source": action.get("data_source"),
-        }
-        for action in actions
-    ]
+            "reasons": item.get("reasons", []),
+            "stop": entry.get("stop") if entry else None,
+            "data_source": "schwab_observed_quote",
+        })
     state = {
         "status": runtime.get("status", "waiting_for_new_quotes"),
         "strategy_id": strategy.get("id"),
@@ -101,8 +104,9 @@ def _evaluate_momentum_strategy(store: SnapshotStore, batch: list[str], strategy
         "candidate_count": runtime.get("processed_quotes", 0),
         "processed_quotes": runtime.get("processed_quotes", 0),
         "evaluations": evaluations,
+        "actions": actions,
         "matches": list(dict.fromkeys(
-            item["symbol"] for item in evaluations if item.get("action") == "ENTER"
+            str(action.get("symbol")) for action in actions if action.get("action") == "ENTER"
         )),
         "skipped": runtime.get("skipped", {}),
         "note": runtime.get("note"),
