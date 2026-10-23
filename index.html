@@ -46,6 +46,8 @@
     .results-table td:nth-child(11){white-space:nowrap}
     .results-table tr.trend-bearish td{background:#fff0f0}
     .results-table tr.trend-bullish td{background:#effaf1}
+    .results-table tr.quote-stale td{opacity:.82}
+    .results-table tr.quote-stale td:first-child{color:#8a5200;font-weight:700}
     .results-table td.ticker-bearish{color:#b42318;font-weight:800}
     .results-table td.ticker-bullish{color:#16703c;font-weight:800}
     thead th{padding:11px 10px;background:var(--head);border-top:1px solid var(--line);border-bottom:1px solid var(--line);color:#4a5e72;text-align:left;white-space:nowrap;font-size:10px}
@@ -203,7 +205,7 @@
       const minRvol = numericInput("rvol-min"), minVolume = numericInput("volume-min");
       const minChange = numericInput("change-min"), maxChange = numericInput("change-max");
       return allResults.filter(item => {
-        if (activeStrategySymbols && !activeStrategySymbols.has(item.symbol)) return false;
+        if (activeStrategyId && activeStrategySymbols && !activeStrategySymbols.has(item.symbol)) return false;
         const checks = [
           [minPrice, item.price, "min"], [maxPrice, item.price, "max"],
           [minGap, item.gap_pct, "min"], [maxGap, item.gap_pct, "max"],
@@ -211,8 +213,6 @@
           [minChange, item.change_pct, "min"], [maxChange, item.change_pct, "max"]
         ];
         if (floatOn && (item.float_shares === null || item.float_shares === undefined)) return false;
-        // Do not present explicitly stale provider quotes as current radar results.
-        if (item.quote_is_fresh !== true) return false;
         for (const [threshold, actual, mode] of checks) {
           if (threshold === null) continue;
           if (actual === null || actual === undefined || !Number.isFinite(Number(actual))) return false;
@@ -271,8 +271,11 @@
         const tr = document.createElement("tr");
         const details = strategyDetailsForSymbol(item.symbol);
         const tickerCellIndex = tr.children.length;
-        cell(tr, item.symbol);
+        const quoteFresh = item.quote_is_fresh === true;
+        if (!quoteFresh) tr.classList.add("quote-stale");
+        cell(tr, quoteFresh ? item.symbol : item.symbol + " · ÚLTIMO DATO");
         const tickerCell = tr.children[tickerCellIndex];
+        if (!quoteFresh) tickerCell.title = "Cotización guardada no confirmada como actual. Se muestra como referencia, no como precio en tiempo real.";
         if (details.zone === "bearish") {
           tr.classList.add("trend-bearish");
           tickerCell.classList.add("ticker-bearish");
@@ -311,7 +314,8 @@
         return volumeB - volumeA;
       });
       const topTen = filtered.slice(0, 10);
-      countNode.textContent = "Mostrando " + topTen.length + " mejores de " + filtered.length + " que cumplen · " + allResults.length + " analizadas";
+      const staleCount = allResults.filter(item => item.quote_is_fresh !== true).length;
+      countNode.textContent = "Mostrando " + topTen.length + " mejores de " + filtered.length + " que cumplen · " + allResults.length + " recibidas" + (staleCount ? " · " + staleCount + " con cotización no actual (referencia)" : "");
       renderRows(topTen);
     }
     function setToggle(id, enabled) {
@@ -424,7 +428,7 @@
         if (!snapshotsResponse.ok) throw new Error("snapshots_unavailable");
         const snapshotPayload = await snapshotsResponse.json();
         allResults = (Array.isArray(snapshotPayload.results) ? snapshotPayload.results : [])
-          .filter(item => item && item.symbol !== "ERROR" && item.symbol !== "ERRORS" && item.quote_is_fresh === true);
+          .filter(item => item && item.symbol !== "ERROR" && item.symbol !== "ERRORS");
         applyFilters();
         if (activeStrategyId) loadStrategies();
       } catch (_) {
