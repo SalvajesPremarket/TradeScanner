@@ -553,11 +553,16 @@ def run_scan_cycle(
         return {"status": "completed", **state}
     except (SchwabConfigurationError, SchwabAPIError, ValueError, OSError) + DB_ERRORS as exc:
         target_store = store or SnapshotStore()
+        # SchwabAPIError messages are sanitized by tradescanner.schwab:
+        # they contain stage/status details but never credentials or provider bodies.
+        # Preserve the safe detail so read-only diagnostics can identify the cause.
+        error_detail = str(exc) if isinstance(exc, SchwabAPIError) else type(exc).__name__
+        logger.error("Scan cycle failed; error_type=%s error_detail=%s", type(exc).__name__, error_detail)
         state = record_engine_status(
             target_store,
             status="error",
             provider="Schwab",
-            last_error=type(exc).__name__,
+            last_error=error_detail,
         )
         raise
     finally:
