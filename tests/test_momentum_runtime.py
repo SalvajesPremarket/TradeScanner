@@ -1,6 +1,6 @@
 import unittest
 
-from tradescanner.momentum_runtime import _strategy_config, _strategy_side
+from tradescanner.momentum_runtime import _scan_strategy_config, _strategy_config, _strategy_side
 
 
 class MomentumRuntimeTests(unittest.TestCase):
@@ -29,6 +29,28 @@ class MomentumTrader:
         self.assertEqual(config["rvol_min"], 7.5)
         self.assertFalse(config["news_required"])
         self.assertEqual(config["float_max"], 10_000_000)
+
+    def test_reads_literal_config_from_original_scan_program(self):
+        source = '''
+from datetime import time as dtime
+STRATEGY_NAME = "Momentum"
+CONFIG: dict = {
+    "session_start": dtime(4, 0),
+    "price_min": 1.5,
+    "gap_min_pct": 6.0,
+    "float_max": 25_000_000,
+    "news_required": False,
+}
+def scan(df, ctx, cfg=None):
+    return {"passed": False}
+'''
+        config = _scan_strategy_config({"source": source})
+        self.assertEqual(config["session_start"].hour, 4)
+        self.assertEqual(config["session_start"].minute, 0)
+        self.assertEqual(config["price_min"], 1.5)
+        self.assertEqual(config["gap_min_pct"], 6.0)
+        self.assertEqual(config["float_max"], 25_000_000)
+        self.assertFalse(config["news_required"])
 
     def test_ignores_executable_config_expressions(self):
         source = '''
