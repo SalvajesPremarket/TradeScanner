@@ -7,6 +7,7 @@ import os
 import threading
 import time
 from typing import Any
+from datetime import datetime, timezone
 
 import websocket
 
@@ -83,7 +84,7 @@ def _run_stream() -> None:
                 request_id += 1
                 ws.send(json.dumps({"requests": [{
                     "service": "ADMIN", "command": "LOGIN", "requestid": str(request_id),
-                    " SchwabClientCustomerId": info["schwabClientCustomerId"],
+                    "SchwabClientCustomerId": info["schwabClientCustomerId"],
                     "SchwabClientCorrelId": info["schwabClientCorrelId"],
                     "SchwabClientChannel": info["schwabClientChannel"],
                     "SchwabClientFunctionId": info["schwabClientFunctionId"],
@@ -142,7 +143,7 @@ def _run_stream() -> None:
                     })
                     store.set_state("engine_status", {
                         **(store.get_state("engine_status", {}) if isinstance(store.get_state("engine_status", {}), dict) else {}),
-                        "status": "streaming", "last_quote_received_at": __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat(),
+                        "status": "streaming", "last_quote_received_at": datetime.now(timezone.utc).isoformat(),
                         "received_count": len(rows), "provider": "schwab_stream",
                     })
 
