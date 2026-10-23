@@ -86,7 +86,7 @@
       <div class="filters" aria-label="Filtros funcionales">
         <label class="filter"><b>PRECIO</b><input id="price-min" type="number" min="0" step="0.01" placeholder="MIN" aria-label="Precio mínimo"><span>–</span><input id="price-max" type="number" min="0" step="0.01" placeholder="MAX" aria-label="Precio máximo"></label>
         <div class="filter"><b>GAP</b><button class="toggle" id="gap-toggle" type="button" aria-pressed="false">OFF</button><input id="gap-min" type="number" step="0.1" placeholder="MIN %" aria-label="GAP mínimo" disabled><input id="gap-max" type="number" step="0.1" placeholder="MAX %" aria-label="GAP máximo" disabled></div>
-        <div class="filter"><b>FLOAT</b><button class="toggle" id="float-toggle" type="button" aria-pressed="false">OFF</button><span class="muted">solo datos conocidos</span></div>
+        <div class="filter"><b>FLOAT</b><button class="toggle" id="float-toggle" type="button" aria-pressed="false">OFF</button><input id="float-min" type="number" min="0" step="1000000" placeholder="MIN" aria-label="FLOAT mínimo en acciones" disabled><span>–</span><input id="float-max" type="number" min="0" step="1000000" placeholder="MAX" aria-label="FLOAT máximo en acciones" disabled></div>
         <label class="filter"><b>RVOL ≥</b><input id="rvol-min" type="number" min="0" step="0.1" placeholder="MIN" aria-label="RVOL mínimo"></label>
         <label class="filter"><b>VOLUMEN ≥</b><input id="volume-min" type="number" min="0" step="1000" placeholder="MIN" aria-label="Volumen mínimo"></label>
         <label class="filter"><b>CAMBIO %</b><input id="change-min" type="number" step="0.1" placeholder="MIN" aria-label="Cambio porcentual mínimo"><span>–</span><input id="change-max" type="number" step="0.1" placeholder="MAX" aria-label="Cambio porcentual máximo"></label>
@@ -171,7 +171,7 @@
     const countNode = document.getElementById("result-count");
     const rowsNode = document.getElementById("result-rows");
     let allResults = [];
-    const filterIds = ["price-min","price-max","gap-min","gap-max","rvol-min","volume-min","change-min","change-max"];
+    const filterIds = ["price-min","price-max","gap-min","gap-max","float-min","float-max","rvol-min","volume-min","change-min","change-max"];
 
     function numericInput(id) {
       const raw = document.getElementById(id).value.trim();
@@ -202,6 +202,7 @@
       const floatOn = document.getElementById("float-toggle").getAttribute("aria-pressed") === "true";
       const minGap = gapOn ? numericInput("gap-min") : null;
       const maxGap = gapOn ? numericInput("gap-max") : null;
+      const minFloat = floatOn ? numericInput("float-min") : null, maxFloat = floatOn ? numericInput("float-max") : null;
       const minRvol = numericInput("rvol-min"), minVolume = numericInput("volume-min");
       const minChange = numericInput("change-min"), maxChange = numericInput("change-max");
       return allResults.filter(item => {
@@ -212,7 +213,11 @@
           [minRvol, item.rvol, "min"], [minVolume, item.volume, "min"],
           [minChange, item.change_pct, "min"], [maxChange, item.change_pct, "max"]
         ];
-        if (floatOn && (item.float_shares === null || item.float_shares === undefined)) return false;
+        if (floatOn) {
+          if (item.float_shares === null || item.float_shares === undefined || !Number.isFinite(Number(item.float_shares))) return false;
+          if (minFloat !== null && Number(item.float_shares) < minFloat) return false;
+          if (maxFloat !== null && Number(item.float_shares) > maxFloat) return false;
+        }
         for (const [threshold, actual, mode] of checks) {
           if (threshold === null) continue;
           if (actual === null || actual === undefined || !Number.isFinite(Number(actual))) return false;
@@ -325,6 +330,10 @@
       if (id === "gap-toggle") {
         document.getElementById("gap-min").disabled = !enabled;
         document.getElementById("gap-max").disabled = !enabled;
+      }
+      if (id === "float-toggle") {
+        document.getElementById("float-min").disabled = !enabled;
+        document.getElementById("float-max").disabled = !enabled;
       }
       applyFilters();
     }
