@@ -28,6 +28,7 @@ from tradescanner.schwab import (
     SchwabAPIError,
     SchwabConfigurationError,
     get_quotes,
+    get_chart_history,
 )
 
 ROOT = Path(__file__).resolve().parent
@@ -597,21 +598,57 @@ def strategies_active_matches(request: Request):
     }
 
 @app.get("/api/candles/{symbol}")
-def candles_status(symbol: str, limit: int = Query(500, ge=1, le=5000)):
+def candles_status(
+    symbol: str,
+    limit: int = Query(500, ge=1, le=5000),
+    timeframe: str | None = Query(None, pattern="^(1m|5m|15m|1h|day|week)$"),
+):
     normalized = symbol.strip().upper()
     if not normalized or len(normalized) > 15:
         raise HTTPException(status_code=400, detail="Invalid ticker symbol.")
     try:
         store = SnapshotStore()
         candle_store = CandleStore(store.path)
+        if timeframe is None:
+            return {
+                "symbol": normalized,
+                "provider": "Schwab",
+                "timeframe_label": "Velas guardadas",
+                "source": "stored",
+                "candles": candle_store.latest(normalized, limit),
+                "rvol": candle_store.rvol(normalized),
+            }
+        from tradescanner.candles import normalize_price_history
+        payload = get_chart_history(normalized, timeframe)
+        candles = normalize_price_history(normalized, payload)
+        if timeframe == "1h":
+            hourly = {}
+            for candle in candles:
+                bucket = (candle["candle_time_ms"] // 3_600_000) * 3_600_000
+                current = hourly.get(bucket)
+                if current is None:
+                    hourly[bucket] = {**candle, "candle_time_ms": bucket}
+                else:
+                    current["high"] = max(current["high"], candle["high"])
+                    current["low"] = min(current["low"], candle["low"])
+                    current["close"] = candle["close"]
+                    current["volume"] += candle["volume"]
+            candles = list(hourly.values())
+        candles = candles[-limit:]
+        labels = {"1m":"1 minuto","5m":"5 minutos","15m":"15 minutos","1h":"1 hora","day":"Diaria","week":"Semanal"}
         return {
             "symbol": normalized,
             "provider": "Schwab",
-            "candles": candle_store.latest(normalized, limit),
+            "timeframe": timeframe,
+            "timeframe_label": labels[timeframe],
+            "source": "schwab_live_history",
+            "candles": candles,
             "rvol": candle_store.rvol(normalized),
         }
+    except (SchwabAPIError, SchwabConfigurationError) as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from None
     except (OSError, RuntimeError, ValueError) + DB_ERRORS:
-        raise HTTPException(status_code=503, detail="Candle storage is unavailable.") from None
+        raise HTTPException(status_code=503, detail="Candle storage or price history is unavailable.") from None
 
 
 @app.post("/api/scan")
