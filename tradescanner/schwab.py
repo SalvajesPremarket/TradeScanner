@@ -227,6 +227,42 @@ def get_price_history(
 
 
 
+def get_chart_history(symbol: str, timeframe: str) -> dict[str, Any]:
+    """Fetch real Schwab OHLCV history for a chart timeframe."""
+    normalized = symbol.strip().upper()
+    if not _SYMBOL_RE.fullmatch(normalized):
+        raise ValueError("Invalid ticker symbol.")
+    settings = {
+        "1m": ("day", 5, "minute", 1, "true", "false"),
+        "5m": ("day", 10, "minute", 5, "true", "false"),
+        "15m": ("day", 10, "minute", 15, "true", "false"),
+        "1h": ("day", 10, "minute", 30, "true", "false"),
+        "day": ("month", 6, "daily", 1, "false", "true"),
+        "week": ("year", 5, "weekly", 1, "false", "true"),
+    }
+    if timeframe not in settings:
+        raise ValueError("Unsupported chart timeframe.")
+    period_type, period, frequency_type, frequency, extended, previous = settings[timeframe]
+    query = urllib.parse.urlencode({
+        "symbol": normalized,
+        "periodType": period_type,
+        "period": period,
+        "frequencyType": frequency_type,
+        "frequency": frequency,
+        "needExtendedHoursData": extended,
+        "needPreviousClose": previous,
+    })
+    request = urllib.request.Request(
+        f"{PRICE_HISTORY_URL}?{query}",
+        headers={"Authorization": f"Bearer {_access_token()}", "Accept": "application/json"},
+        method="GET",
+    )
+    payload = _request_json(request)
+    if not isinstance(payload, dict) or not isinstance(payload.get("candles", []), list):
+        raise SchwabAPIError("Schwab chart-history response was malformed.")
+    return payload
+
+
 def get_streamer_info() -> dict[str, Any]:
     """Fetch the authenticated Schwab streaming session metadata."""
     request = urllib.request.Request(
