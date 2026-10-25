@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#172b4d">
+  <meta name="theme-color" content="#07111e">
   <title>TradeScanner</title>
   <style>
     :root{color-scheme:light;--navy:#172b4d;--blue:#2f6f9f;--line:#d8e0e8;--paper:#fff;--page:#f3f6f9;--ink:#243447;--muted:#718096;--head:#eaf0f5}
@@ -56,6 +56,108 @@
     footer{padding:12px 15px;border-top:1px solid var(--line);color:var(--muted);font-size:10px}
     [hidden]{display:none!important}.tab-panel{margin-top:16px}.tab-body{padding:16px}.field{display:flex;flex-direction:column;gap:6px;margin-bottom:12px}.field input,.field select,.field textarea{width:100%;padding:9px;border:1px solid #cbd5df;border-radius:3px;font:12px Arial,sans-serif;color:var(--ink);background:#fff}.field textarea{min-height:220px;font:12px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace;tab-size:2}.action{padding:8px 11px;border:1px solid #245879;border-radius:3px;background:var(--blue);color:#fff;font-size:11px;font-weight:700;cursor:pointer}.action.secondary{background:#fff;color:var(--navy);border-color:#b7c4d0}.action.danger{background:#fff;color:#a22;border-color:#d9b4b4}.strategy-item,.data-card{padding:12px;border:1px solid var(--line);border-radius:4px;margin-bottom:8px;background:#fff}.strategy-actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}.grid-two{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:14px}.code-hint{font-size:11px;color:var(--muted);line-height:1.5}.tab-message{margin:8px 0;color:var(--muted);font-size:11px;white-space:pre-wrap}.simple-table{width:100%;min-width:500px;border-collapse:collapse}.simple-table td,.simple-table th{padding:8px;border-bottom:1px solid var(--line);text-align:left;font-size:11px}@media(max-width:800px){.grid-two{grid-template-columns:1fr}}
     @media(max-width:800px){main{padding:12px}header{padding:15px}h1{font-size:23px}.filter input{width:54px}}
+
+    /* FUTURISTIC TRADING TERMINAL — visual layer only; no scanner logic changed */
+    :root{
+      color-scheme:dark;
+      --navy:#08111f;--blue:#18c8e8;--line:#20384b;--paper:#0b1725;
+      --page:#050b13;--ink:#dceaf5;--muted:#7793a8;--head:#102235;
+      --neon:#24e0c0;--red:#ff647c;--green:#24e0a4;
+    }
+    html{background:var(--page);scroll-behavior:smooth}
+    body{background:radial-gradient(ellipse at 50% -20%,#12344a 0%,#07111d 42%,#050b13 78%);color:var(--ink);font:13px/1.45 Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",Arial,sans-serif;min-height:100vh}
+    header{position:relative;isolation:isolate;background:linear-gradient(105deg,#07111e 0%,#0b1c2b 54%,#092534 100%);color:#e8f7ff;padding:17px 24px;border-bottom:1px solid #1bc8e8;box-shadow:0 8px 34px #0008}
+    header:after{content:"";position:absolute;inset:auto 0 -1px;height:1px;background:linear-gradient(90deg,transparent,#22d3ee 25%,#28e0b0 75%,transparent);opacity:.9;z-index:-1}
+    .brand{font-size:25px;font-weight:900;letter-spacing:1.2px;text-transform:uppercase;text-shadow:0 0 22px #22d3ee30}
+    .brand span{color:#25e0c0}
+    nav{gap:6px;color:#9ab7ca;font-size:10px;letter-spacing:.7px}
+    nav button{border:1px solid #254356;border-radius:7px;background:#091724;color:#a8c4d5;padding:9px 12px;font-size:10px;letter-spacing:.55px;transition:all .18s ease}
+    nav button:hover{border-color:#20c9e8;color:#e7fbff;background:#10283a}
+    nav button[aria-current="page"]{background:linear-gradient(135deg,#14394a,#0e2d3a);color:#45f1d2;border-color:#25d9d0;box-shadow:inset 0 0 0 1px #22d3ee18,0 0 18px #0dcde51c}
+    main{max-width:1720px;margin:0 auto;padding:24px}
+    .heading{margin-bottom:20px;align-items:flex-end}
+    h1{color:#eaf7ff;font-size:clamp(25px,3vw,34px);font-weight:850;letter-spacing:-.8px}
+    .heading .subtitle{color:#82a6bc;font-size:12px;letter-spacing:.25px}
+    .status{padding:8px 11px;border:1px solid #254457;background:#0a1826;color:#9bb8c9;border-radius:8px;font-size:10px;letter-spacing:.3px;box-shadow:inset 0 1px #ffffff05}
+    .connection-good{color:#42edb9;border-color:#1d8d77;background:#09251f}
+    .connection-warn{color:#ffd479;border-color:#9c7431;background:#251d0e}
+    .connection-bad{color:#ff8392;border-color:#963f50;background:#29121a}
+    .oauth-button{padding:10px 14px;border-radius:8px;background:linear-gradient(135deg,#0b94b5,#116a8b);color:#effcff;border:1px solid #27d9e8;box-shadow:0 0 20px #00cde51c;transition:transform .18s ease,box-shadow .18s ease}
+    .oauth-button:hover{background:linear-gradient(135deg,#12b8d3,#08728e);box-shadow:0 0 24px #00cde538;transform:translateY(-1px)}
+    .panel{background:linear-gradient(155deg,#0c1a29 0%,#091521 100%);border:1px solid #203b4f;border-radius:13px;box-shadow:0 14px 36px #0003,inset 0 1px #ffffff04;overflow:hidden}
+    .panel-head{padding:15px 17px;border-bottom:1px solid #1b3548;background:linear-gradient(90deg,#102437b8,#0a1724b8)}
+    h2{color:#dff4ff;font-size:13px;font-weight:800;letter-spacing:1.05px}
+    .filters-title{padding:14px 17px 9px;color:#5fd9de;font-size:10px;letter-spacing:1.2px}
+    .filters{gap:8px;padding:0 17px 16px;border-bottom:1px solid #1b3548}
+    .filter{min-height:38px;padding:6px 9px;background:#07131f;border:1px solid #254357;border-radius:8px;color:#a9c2d2;font-size:10px;transition:border-color .18s ease,box-shadow .18s ease}
+    .filter:focus-within{border-color:#20cde4;box-shadow:0 0 0 2px #20cde414}
+    .filter b{color:#bde5f1;font-size:9px;letter-spacing:.65px}
+    .filter input,.filter select{background:#0b1c2a;color:#e1f4fc;border:1px solid #29485c;border-radius:5px;outline:none}
+    .filter input{width:66px;padding:6px 5px;font-variant-numeric:tabular-nums}
+    .filter input::placeholder{color:#56768a}
+    .filter input:focus,.filter select:focus{border-color:#25d3e7;box-shadow:0 0 0 2px #25d3e71b}
+    .filter input:disabled,.filter select:disabled{background:#101c27;color:#4d6576;border-color:#203140}
+    .toggle{padding:6px 9px;border:1px solid #294558;border-radius:6px;background:#10202d;color:#819caf;font-size:9px;letter-spacing:.6px;transition:all .18s ease}
+    .toggle[aria-pressed="true"]{background:#0d3738;border-color:#22d6bf;color:#51f2d5;box-shadow:0 0 13px #22d6bf12}
+    .tools{gap:10px;padding:13px 17px}
+    .muted,.code-hint{color:#7897ab}
+    .table-wrap{background:#08131f}
+    table{color:#cfe1ed}
+    .results-table{min-width:1250px}
+    .results-table th,.results-table td{border-right:1px solid #172d3d;border-bottom:1px solid #172d3d}
+    thead th{padding:12px 11px;background:#102334;border-top:1px solid #1c3b50;border-bottom:1px solid #1c3b50;color:#83b1c7;font-size:9px;letter-spacing:.8px}
+    tbody td{height:45px;padding:11px 10px;color:#c2d6e3;font-variant-numeric:tabular-nums}
+    .results-table tbody tr{background:#091622;transition:background .15s ease}
+    .results-table tbody tr:nth-child(even){background:#0b1926}
+    .results-table tbody tr:hover{background:#102a39}
+    .results-table tr.trend-bearish td{background:#28151e;color:#ffd5db}
+    .results-table tr.trend-bullish td{background:#0c2827;color:#c9fff0}
+    .results-table tr.quote-stale td{opacity:.68}
+    .results-table tr.quote-stale td:first-child{color:#ffd479}
+    .results-table td.ticker-bearish{color:#ff7188;font-weight:850}
+    .results-table td.ticker-bullish{color:#36edb1;font-weight:850}
+    .empty{padding:30px 15px;text-align:center;color:#7795a8;font-size:12px}
+    footer{padding:13px 17px;border-top:1px solid #1a3447;color:#6e8ca1;background:#08131f;font-size:10px}
+    .tab-panel{margin-top:17px}
+    .tab-body{padding:18px}
+    .field{gap:7px;color:#a8c4d4}
+    .field input,.field select,.field textarea{padding:10px;border:1px solid #28465a;border-radius:7px;font:12px inherit;color:#e0f2fc;background:#071522;outline:none}
+    .field input:focus,.field select:focus,.field textarea:focus{border-color:#20cde4;box-shadow:0 0 0 2px #20cde418}
+    .field textarea{font:12px/1.6 ui-monospace,SFMono-Regular,Consolas,monospace;color:#b7f5e9}
+    .action{padding:9px 13px;border:1px solid #18bfd6;border-radius:7px;background:linear-gradient(135deg,#087f9e,#0c536e);color:#f0fcff;font-size:10px;letter-spacing:.3px;box-shadow:0 4px 14px #00b9d512;transition:all .18s ease}
+    .action:hover{filter:brightness(1.18);transform:translateY(-1px);box-shadow:0 5px 18px #00b9d526}
+    .action.secondary{background:#0b1a28;color:#a9c8d8;border-color:#2b485b;box-shadow:none}
+    .action.danger{background:#27131b;color:#ff9aa7;border-color:#773746}
+    .strategy-item,.data-card{padding:14px;border:1px solid #244256;border-radius:9px;margin-bottom:9px;background:linear-gradient(140deg,#0d1d2c,#091521);box-shadow:inset 0 1px #ffffff04}
+    .strategy-actions{gap:7px}
+    .grid-two{gap:16px}
+    .simple-table{color:#c9deea}
+    .simple-table td,.simple-table th{padding:10px;border-bottom:1px solid #1b3447;font-size:11px}
+    .simple-table th{color:#83b1c7;background:#102334;letter-spacing:.6px}
+    #chart-svg{border:1px solid #24465b!important;border-radius:9px;background:linear-gradient(180deg,#081724,#06101a)!important}
+    #auth-form input{background:#071522!important;color:#e0f2fc!important;border-color:#28465a!important}
+    #auth-form label{color:#a8c4d4}
+    #auth-message,#float-refresh-result,#strategy-message,#chart-message,#watchlist-message{color:#86a4b7}
+    button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px solid #27d7e8;outline-offset:2px}
+    @media(max-width:800px){
+      main{padding:12px}
+      header{padding:14px 13px;gap:12px}
+      .brand{font-size:22px}
+      nav{width:100%;overflow-x:auto;flex-wrap:nowrap;padding-bottom:3px}
+      nav button{flex:0 0 auto;padding:9px 10px}
+      .heading{align-items:flex-start}
+      h1{font-size:25px}
+      .heading-actions{width:100%}
+      .status{max-width:100%;overflow-wrap:anywhere}
+      .panel{border-radius:10px}
+      .filters{padding-left:12px;padding-right:12px}
+      .filter{max-width:100%}
+      .grid-two{grid-template-columns:minmax(0,1fr)}
+      .tab-body{padding:13px}
+      .results-table{min-width:1150px}
+    }
+    @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}*,*:before,*:after{transition:none!important;animation:none!important}}
+
   </style>
 </head>
 <body>
