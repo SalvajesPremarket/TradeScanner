@@ -234,7 +234,7 @@
     <section id="tab-charts" class="panel tab-panel" hidden aria-label="Gráficos">
       <div class="panel-head"><h2>GRÁFICOS · VELAS REALES DE SCHWAB</h2></div>
       <div class="tab-body">
-        <form id="chart-form" class="tools"><label class="field" style="min-width:180px;flex:1">Ticker<input id="chart-symbol" maxlength="15" value="AAPL" required></label><label class="field" style="width:140px">Velas<input id="chart-limit" type="number" min="10" max="500" value="100"></label><button class="action" type="submit">Cargar velas</button></form>
+        <form id="chart-form" class="tools"><label class="field" style="min-width:150px;flex:1">Ticker<input id="chart-symbol" maxlength="15" value="AAPL" required></label><label class="field" style="width:150px">Timeframe<select id="chart-timeframe"><option value="1m">1 minuto</option><option value="5m">5 minutos</option><option value="15m">15 minutos</option><option value="1h">1 hora</option><option value="day">Día</option><option value="week">Semana</option></select></label><label class="field" style="width:130px">N.º de velas<input id="chart-limit" type="number" min="10" max="500" value="100"></label><button class="action" type="submit">Cargar velas</button></form>
         <div id="chart-message" class="tab-message">El gráfico mostrará únicamente velas que estén guardadas. No se inventarán precios.</div>
         <svg id="chart-svg" viewBox="0 0 1000 320" width="100%" role="img" aria-label="Gráfico de velas de Schwab" style="display:block;min-height:160px;border:1px solid var(--line);background:#fff;margin-bottom:14px"><text x="500" y="160" text-anchor="middle" fill="#718096" font-size="14">Carga velas guardadas para mostrar el gráfico</text></svg>
         <div class="table-wrap"><table class="simple-table"><thead><tr><th>FECHA</th><th>OPEN</th><th>HIGH</th><th>LOW</th><th>CLOSE</th><th>VOLUMEN</th></tr></thead><tbody id="chart-rows"><tr><td colspan="6">Introduce un ticker y carga sus velas.</td></tr></tbody></table></div>
@@ -783,10 +783,11 @@
       event.preventDefault();
       const symbol = document.getElementById("chart-symbol").value.trim().toUpperCase();
       const limit = Math.min(500,Math.max(10,Number(document.getElementById("chart-limit").value)||100));
+      const timeframe = document.getElementById("chart-timeframe").value;
       const body = document.getElementById("chart-rows"); body.replaceChildren();
       document.getElementById("chart-message").textContent = "Cargando velas reales…";
       try {
-        const payload = await readJson(await fetch("/api/candles/" + encodeURIComponent(symbol) + "?limit=" + limit,{cache:"no-store"}));
+        const payload = await readJson(await fetch("/api/candles/" + encodeURIComponent(symbol) + "?limit=" + limit + "&timeframe=" + encodeURIComponent(timeframe),{cache:"no-store"}));
         chartRows = payload.candles || [];
         drawCandles(chartRows);
         if (!chartRows.length) {
@@ -798,7 +799,7 @@
           }
           body.appendChild(tr);
         }
-        document.getElementById("chart-message").textContent = symbol + ": " + chartRows.length + " velas guardadas. RVOL: " + (payload.rvol && payload.rvol.rvol != null ? payload.rvol.rvol : "sin datos suficientes");
+        document.getElementById("chart-message").textContent = symbol + " · " + (payload.timeframe_label || timeframe) + ": " + chartRows.length + " velas recibidas de Schwab. " + (payload.source === "stored" ? "Datos guardados." : "Histórico solicitado al proveedor en vivo.") + " RVOL: " + (payload.rvol && payload.rvol.rvol != null ? payload.rvol.rvol : "sin datos suficientes");
       } catch(error) { document.getElementById("chart-message").textContent = apiMessage(error); }
     });
 
