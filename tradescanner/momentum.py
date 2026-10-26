@@ -74,7 +74,7 @@ def scan(candles: list[dict[str, Any]] | None, ctx: dict[str, Any], cfg: dict[st
         macd_signal = _ema(macd_line, int(config["macd_signal"]))
         local_time = last_ts.timetz().replace(tzinfo=None)
         checks: dict[str, tuple[bool, Any, str]] = {}
-        checks["hora"] = (config["session_start"] <= local_time < config["session_end"], local_time.strftime("%H:%M"), "fuera de 04:00-09:30 ET")
+        checks["hora"] = (config["session_start"] <= local_time < config["session_end"], local_time.strftime("%H:%M"), f"fuera de {config['session_start'].strftime('%H:%M')}-{config['session_end'].strftime('%H:%M')} ET")
         checks["precio"] = (config["price_min"] <= price <= config["price_max"], round(price, 4), f"precio fuera de ${config['price_min']}-${config['price_max']}")
         prev_close = ctx.get("prev_close")
         gap = ((price - float(prev_close)) / float(prev_close) * 100) if isinstance(prev_close, (int, float)) and not isinstance(prev_close, bool) and prev_close > 0 else None
