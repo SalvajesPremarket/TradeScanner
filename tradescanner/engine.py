@@ -18,6 +18,7 @@ from tradescanner.schwab import SchwabAPIError, SchwabConfigurationError, get_da
 from tradescanner.universe import load_symbol_universe
 from tradescanner.strategies import active_strategies, is_momentum_trader_program, is_momentum_scan_program, strategy_matches
 from tradescanner.momentum_data import average_daily_volume_30d, recent_stock_news
+from tradescanner.opengap_franco import evaluate as evaluate_open_gap_franco
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -252,7 +253,32 @@ def _evaluate_active_strategies(store: SnapshotStore, batch: list[str]) -> dict[
     apply_cached_float(rows, store)
     states: list[dict[str, Any]] = []
     for strategy in strategies:
-        if is_momentum_scan_program(strategy):
+        if str(strategy.get("name", "")).casefold() == "opengapfranco":
+            evaluations: list[dict[str, Any]] = []
+            for row in rows:
+                if row.get("quote_is_fresh") is not True:
+                    continue
+                result = evaluate_open_gap_franco(row)
+                evaluations.append({
+                    **result,
+                    "action": "ENTER" if result.get("passed") else None,
+                    "strategy": strategy.get("name"),
+                    "strategy_id": strategy.get("id"),
+                    "quote_price": row.get("price"),
+                })
+            state = {
+                "status": "evaluated" if evaluations else "no_fresh_quotes",
+                "strategy_id": strategy.get("id"),
+                "strategy": strategy.get("name"),
+                "evaluated_at": _now(),
+                "candidate_count": len(rows),
+                "processed_quotes": len(evaluations),
+                "evaluations": evaluations,
+                "matches": [item["symbol"] for item in evaluations if item.get("passed")],
+                "note": "OpenGapFranco usa Bollinger y MACD en velas diarias; volumen, precio, float y hora proceden de datos observados. No coloca órdenes.",
+            }
+            store.set_state("strategy_scan_status:" + str(strategy.get("id")), state)
+        elif is_momentum_scan_program(strategy):
             state = _evaluate_original_scan_strategy(store, batch, strategy)
             store.set_state("momentum_scan_status", state)
         elif ("momentum" in str(strategy.get("name", "")).casefold() and strategy.get("language") == "python") or is_momentum_trader_program(strategy):
