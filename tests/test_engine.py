@@ -159,7 +159,6 @@ class AutomaticEngineTests(unittest.TestCase):
                 return int(datetime(2026, 10, day, 9, 30, tzinfo=ny).timestamp() * 1000)
 
             def fetch_history(symbol):
-                self.assertEqual(symbol, "AAPL")
                 return {"candles": [
                     {"datetime": timestamp(14), "open": 10, "high": 11, "low": 9, "close": 10, "volume": 100},
                     {"datetime": timestamp(15), "open": 10, "high": 11, "low": 9, "close": 10, "volume": 200},
@@ -172,7 +171,9 @@ class AutomaticEngineTests(unittest.TestCase):
                 candle_fetcher=fetch_history,
             )
             self.assertEqual(result["candle_symbol"], "AAPL")
-            self.assertEqual(result["candles_saved"], 2)
+            self.assertEqual(result["candles_saved"], 4)
+            self.assertEqual(result["history_requests"], 2)
+            self.assertEqual(result["candle_symbols"], ["AAPL", "MSFT"])
             self.assertIsNone(result["rvol"])
             self.assertEqual(result["rvol_sessions_used"], 0)
 
