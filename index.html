@@ -197,6 +197,7 @@
         <button class="toggle" id="reset-filters" type="button">LIMPIAR</button>
       </div>
       <div class="tools"><span class="muted" id="result-count">Resultados: 0</span><span class="muted" id="engine-message">Esperando estado del motor.</span></div>
+      <p class="code-hint" id="radar-source-note">RADAR · Estas filas son cotizaciones/snapshots del escáner; no son señales de entrada de JeanLong. La estrategia activa se evalúa por separado y solo sus evaluaciones con resultado aprobado cuentan como señales.</p>
       <div class="table-wrap">
         <table class="results-table" aria-label="Resultados del radar">
           <thead><tr><th>TICKER</th><th>EMPRESA</th><th>PRECIO</th><th>CAMBIO %</th><th>GAP %</th><th>FLOAT</th><th>RVOL</th><th>VOLUMEN</th><th>SECTOR</th><th>NOTICIA POST/PRE</th><th>TEMPORALIDAD</th><th>GRÁFICO</th></tr></thead>
@@ -212,7 +213,7 @@
         <p class="code-hint" id="strategy-access-message">Acceso al editor mediante tu sesión de Neon Auth. Inicia sesión arriba para consultar y gestionar estrategias.</p>
         <div class="grid-two"><div>
           <h2>Mis estrategias</h2>
-          <p class="code-hint">Cada estrategia se guarda por separado. Solo la estrategia activada se aplica a los resultados, después de los filtros fijos.</p>
+          <p class="code-hint">Cada estrategia se guarda por separado. La activación ejecuta su evaluación por separado; el radar general sigue mostrando snapshots del escáner y no debe interpretarse como una lista de señales de la estrategia.</p>
           <div id="strategy-list" aria-live="polite"><div class="empty">Cargando estrategias guardadas…</div></div>
         </div>
         <div>
