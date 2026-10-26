@@ -458,13 +458,9 @@ def snapshots_latest(limit: int = Query(10000, ge=1, le=10000)):
             row.setdefault("float_source", None)
         # Fill missing FLOAT from the local FMP cache; never call FMP from UI requests.
         apply_cached_float(rows, store)
+        # The main radar must show available snapshots independently of strategy matches.
+        # Strategy evaluation remains available through the dedicated strategy endpoints.
         selected_strategy = active_strategy()
-        if selected_strategy:
-            rows = [
-                row for row in rows
-                if row.get("quote_is_fresh") is True
-                and strategy_matches(selected_strategy, row)
-            ]
         return {
             "results": rows,
             "limit": limit,
