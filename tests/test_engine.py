@@ -212,7 +212,7 @@ class AutomaticEngineTests(unittest.TestCase):
                     candle_fetcher=fetch_history,
                 )
 
-            self.assertEqual(requested_history, ["LIQUID"])
+            self.assertEqual(requested_history, ["LIQUID", "THIN"])
 
 
     def test_infisical_can_supply_refresh_token_without_render_refresh_variable(self):
@@ -307,6 +307,41 @@ class AutomaticEngineTests(unittest.TestCase):
             self.assertEqual(result["float_symbol"], "AAPL")
             self.assertEqual(result["float_shares"], 123456.0)
             self.assertEqual(result["candle_symbol"], "MSFT")
+
+    def test_history_backfill_is_bounded_and_fetches_multiple_missing_symbols(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = SnapshotStore(Path(directory) / "engine.sqlite3")
+            symbols = [f"SYM{i:02d}" for i in range(8)]
+
+            def fetch(batch):
+                return {
+                    symbol: {
+                        "quote": {"lastPrice": 11.0, "closePrice": 10.0, "totalVolume": 1000 - i},
+                        "reference": {"description": symbol},
+                    }
+                    for i, symbol in enumerate(batch)
+                }
+
+            requested_history = []
+            def fetch_history(symbol):
+                requested_history.append(symbol)
+                return {"candles": []}
+
+            with patch.dict(os.environ, {
+                "SCHWAB_CLIENT_ID": "test-id",
+                "SCHWAB_CLIENT_SECRET": "test-secret",
+                "SCHWAB_REFRESH_TOKEN": "test-refresh",
+            }):
+                result = run_scan_cycle(
+                    store,
+                    universe_loader=lambda: {"symbols": symbols},
+                    quote_fetcher=fetch,
+                    candle_fetcher=fetch_history,
+                )
+
+            self.assertEqual(len(requested_history), 5)
+            self.assertEqual(result["history_requests"], 5)
+            self.assertEqual(result["candle_symbols"], requested_history)
 
 
 
