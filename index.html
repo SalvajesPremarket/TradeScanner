@@ -317,7 +317,6 @@
       const macdFilter = document.getElementById("macd-filter").value;
       const emaFilter = document.getElementById("ema-filter").value;
       return allResults.filter(item => {
-        if (activeStrategyId && activeStrategySymbols && !activeStrategySymbols.has(item.symbol)) return false;
         if (macdFilter !== "any") {
           if (item.macd === null || item.macd === undefined || !Number.isFinite(Number(item.macd))) return false;
           if (macdFilter === "positive" && Number(item.macd) <= 0) return false;
@@ -556,10 +555,10 @@
         return;
       }
 
-      // Keep this bounded: /api/snapshots/latest enriches each fresh row with
-      // RVOL data, so requesting 10,000 rows can stall the UI and exhaust memory.
+      // Keep the radar request small: the endpoint enriches each row with candle-derived indicators.
+      // A compact batch avoids leaving the UI stuck while PostgreSQL serves per-symbol history.
       try {
-        const snapshotsResponse = await fetch("/api/snapshots/latest?limit=250", {cache:"no-store"});
+        const snapshotsResponse = await fetch("/api/snapshots/latest?limit=50", {cache:"no-store"});
         if (!snapshotsResponse.ok) throw new Error("snapshots_unavailable");
         const snapshotPayload = await snapshotsResponse.json();
         allResults = (Array.isArray(snapshotPayload.results) ? snapshotPayload.results : [])
