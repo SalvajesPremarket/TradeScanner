@@ -493,17 +493,37 @@ def run_scan_cycle(
                         candle_state["history_symbols_skipped_with_cache"] += 1
                     else:
                         missing_history.append(row)
-                # Limit provider calls to avoid turning a scan cycle into a burst.
-                # Existing histories are skipped, so each successful cycle expands
-                # coverage instead of repeatedly fetching the same well-covered ticker.
-                candidates = sorted(
-                    missing_history,
-                    key=lambda row: (
-                        row.get("volume") if isinstance(row.get("volume"), (int, float)) else -1,
-                        abs(row.get("gap_pct") or 0.0),
-                    ),
-                    reverse=True,
-                )[:5]
+                # Prioritize history needed by the active original scan strategy.
+                # Keep the existing provider-call budget (5 symbols/cycle) and never
+                # loosen entry rules; this only changes which missing histories are fetched.
+                scan_configs = []
+                try:
+                    for active in active_strategies(target_store):
+                        if is_momentum_scan_program(active):
+                            from tradescanner.momentum_runtime import _scan_strategy_config
+                            scan_configs.append(_scan_strategy_config(active))
+                except (OSError, RuntimeError, ValueError) + DB_ERRORS:
+                    scan_configs = []
+
+                def history_priority(row: dict[str, Any]) -> tuple[Any, ...]:
+                    price = row.get("price")
+                    gap = row.get("gap_pct")
+                    fresh = row.get("quote_is_fresh") is True
+                    strategy_fit = False
+                    if scan_configs and isinstance(price, (int, float)) and isinstance(gap, (int, float)):
+                        strategy_fit = any(
+                            cfg.get("price_min", 1.0) <= price <= cfg.get("price_max", float("inf"))
+                            and gap >= cfg.get("gap_min_pct", 0.0)
+                            for cfg in scan_configs
+                        )
+                    volume = row.get("volume") if isinstance(row.get("volume"), (int, float)) else -1
+                    abs_gap = abs(gap) if isinstance(gap, (int, float)) else -1
+                    return (fresh, strategy_fit, volume, abs_gap)
+
+                # Existing histories are skipped; the per-cycle cap is unchanged.
+                # Fresh symbols most likely to pass pre-candle strategy gates are
+                # serviced first, then remaining candidates by liquidity/gap.
+                candidates = sorted(missing_history, key=history_priority, reverse=True)[:5]
                 for candidate in candidates:
                     symbol = candidate["symbol"]
                     candle_state["history_requests"] += 1
