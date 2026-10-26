@@ -318,6 +318,8 @@
       const macdFilter = document.getElementById("macd-filter").value;
       const emaFilter = document.getElementById("ema-filter").value;
       return allResults.filter(item => {
+        // Con estrategias activas, el radar principal muestra solo símbolos aprobados por sus filtros.
+        if (activeStrategySymbols instanceof Set && !activeStrategySymbols.has(String(item.symbol || "").toUpperCase())) return false;
         if (macdFilter !== "any") {
           if (item.macd === null || item.macd === undefined || !Number.isFinite(Number(item.macd))) return false;
           if (macdFilter === "positive" && Number(item.macd) <= 0) return false;
