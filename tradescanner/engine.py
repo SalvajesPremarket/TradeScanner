@@ -464,43 +464,78 @@ def run_scan_cycle(
             except (OSError, RuntimeError, ValueError) + DB_ERRORS:
                 pass
 
-        # One bounded historical request per successful quote cycle. Prefer the
-        # strongest observed GAP from this batch; never block quote persistence
-        # or cursor progress if the separate candle endpoint is unavailable.
+        # Strategy evaluation covers the whole quote batch, so sampling history for
+        # only one ticker leaves almost every candidate unable to calculate EMA/MACD.
+        # Backfill a small bounded set of symbols per cycle, prioritizing missing
+        # histories and liquid/gapping names. This does not relax strategy filters.
         history_fetch = candle_fetcher or (get_price_history if quote_fetcher is None else None)
+        candle_state["candle_symbols"] = []
+        candle_state["history_requests"] = 0
+        candle_state["history_symbols_skipped_with_cache"] = 0
         if history_fetch is not None:
             logger.warning("Scan cycle stage=price_history_started")
             try:
                 rows = target_store.latest_for_symbols(batch)
                 eligible = [
                     row for row in rows
-                    if isinstance(row.get("price"), (int, float)) and row["price"] > 0
+                    if isinstance(row.get("symbol"), str)
+                    and isinstance(row.get("price"), (int, float))
+                    and row["price"] > 0
                 ]
-                if eligible:
-                    # Prefer the most actively traded symbol so the bounded
-                    # history request is more likely to return enough candles for RVOL.
-                    # Use absolute GAP only as a tie-breaker; thin/illiquid names often
-                    # have sparse histories and cannot establish a reliable baseline.
-                    candidate = max(
-                        eligible,
-                        key=lambda row: (
-                            row.get("volume") if isinstance(row.get("volume"), (int, float)) else -1,
-                            abs(row.get("gap_pct") or 0.0),
-                        ),
-                    )
-                    candle_payload = history_fetch(candidate["symbol"])
-                    candles = normalize_price_history(candidate["symbol"], candle_payload)
-                    candle_store = CandleStore(target_store.path)
-                    candle_state["candle_symbol"] = candidate["symbol"]
-                    candle_state["candles_saved"] = candle_store.save(candles)
-                    rvol = candle_store.rvol(candidate["symbol"])
-                    candle_state["rvol"] = rvol.get("rvol")
-                    candle_state["rvol_sessions_used"] = rvol.get("sessions_used", 0)
-                    # Keep FLOAT diagnostics tied to the independently queried FLOAT symbol.
-                    # Candle sampling can select a different ticker and must not overwrite it.
+                candle_store = CandleStore(target_store.path)
+                missing_history = []
+                for row in eligible:
+                    try:
+                        existing = candle_store.latest(row["symbol"], limit=35)
+                    except (OSError, RuntimeError, ValueError) + DB_ERRORS:
+                        existing = []
+                    if len(existing) >= 35:
+                        candle_state["history_symbols_skipped_with_cache"] += 1
+                    else:
+                        missing_history.append(row)
+                # Limit provider calls to avoid turning a scan cycle into a burst.
+                # Existing histories are skipped, so each successful cycle expands
+                # coverage instead of repeatedly fetching the same well-covered ticker.
+                candidates = sorted(
+                    missing_history,
+                    key=lambda row: (
+                        row.get("volume") if isinstance(row.get("volume"), (int, float)) else -1,
+                        abs(row.get("gap_pct") or 0.0),
+                    ),
+                    reverse=True,
+                )[:5]
+                for candidate in candidates:
+                    symbol = candidate["symbol"]
+                    candle_state["history_requests"] += 1
+                    try:
+                        candle_payload = history_fetch(symbol)
+                        candles = normalize_price_history(symbol, candle_payload)
+                        saved = candle_store.save(candles)
+                        candle_state["candles_saved"] += saved
+                        candle_state["candle_symbols"].append(symbol)
+                        if candle_state["candle_symbol"] is None:
+                            candle_state["candle_symbol"] = symbol
+                            rvol = candle_store.rvol(symbol)
+                            candle_state["rvol"] = rvol.get("rvol")
+                            candle_state["rvol_sessions_used"] = rvol.get("sessions_used", 0)
+                        logger.warning(
+                            "Scan cycle history_symbol=%s returned=%s saved=%s",
+                            symbol, len(candles), saved,
+                        )
+                    except (SchwabAPIError, SchwabConfigurationError, ValueError, OSError, RuntimeError) + DB_ERRORS as exc:
+                        candle_state["candle_error"] = type(exc).__name__
+                        logger.warning(
+                            "Scan cycle history_fetch_failed symbol=%s error_type=%s",
+                            symbol, type(exc).__name__,
+                        )
             except (SchwabAPIError, SchwabConfigurationError, ValueError, OSError, RuntimeError) + DB_ERRORS as exc:
                 candle_state["candle_error"] = type(exc).__name__
-        logger.warning("Scan cycle stage=price_history_finished candles_saved=%s", candle_state.get("candles_saved", 0))
+        logger.warning(
+            "Scan cycle stage=price_history_finished requests=%s symbols=%s candles_saved=%s",
+            candle_state.get("history_requests", 0),
+            ",".join(candle_state.get("candle_symbols", [])),
+            candle_state.get("candles_saved", 0),
+        )
         next_cursor = (cursor + len(batch)) % len(symbols)
         logger.warning("Scan cycle stage=cursor_persist_started cursor=%s", next_cursor)
         target_store.set_state("universe_cursor", next_cursor)
