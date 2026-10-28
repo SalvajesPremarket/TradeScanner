@@ -82,7 +82,26 @@ def refresh_float_cache(
 
     if not force and cached_rows > 0 and current - last_success < CACHE_TTL_SECONDS:
         return {"status": "cached", "provider": "FMP", "rows_saved": 0}
-    if not force and current - last_attempt < FAILURE_COOLDOWN_SECONDS:
+
+    # Respect provider-wide cooldowns even for a manual force-refresh. A force
+    # refresh must not hammer an endpoint that has already returned 402/429.
+    try:
+        global_until = float(store.get_state("fmp_float_global_cooldown_until", 0) or 0)
+        global_status = store.get_state("fmp_float_global_cooldown_http_status")
+        global_reason = store.get_state("fmp_float_global_cooldown_reason", "provider_cooldown")
+    except Exception:
+        global_until, global_status, global_reason = 0.0, None, "provider_cooldown"
+    if current < global_until:
+        return {
+            "status": "cooldown", "provider": "FMP", "rows_saved": 0,
+            "error": f"HTTP {global_status}" if isinstance(global_status, int) else None,
+            "cooldown_reason": global_reason,
+            "provider_http_status": global_status if isinstance(global_status, int) else None,
+            "cooldown_remaining_seconds": max(0, int(global_until - current)),
+        }
+
+    failure_cooldown = 15 * 60 if global_status == 429 else FAILURE_COOLDOWN_SECONDS
+    if not force and current - last_attempt < failure_cooldown:
         return {"status": "cooldown", "provider": "FMP", "rows_saved": 0}
 
     # Persist the attempt before networking, preventing rapid retry loops after a crash.
@@ -139,6 +158,17 @@ def refresh_float_cache(
             "updated_at": datetime.fromtimestamp(current, timezone.utc).isoformat(),
         }
     except urllib.error.HTTPError as exc:
+        # Persist provider-wide backoff so manual and automatic refreshes do not
+        # keep retrying a rate-limited or plan-restricted endpoint every cycle.
+        if exc.code in {402, 429}:
+            cooldown = 15 * 60 if exc.code == 429 else FAILURE_COOLDOWN_SECONDS
+            reason = "rate_limited" if exc.code == 429 else "billing_or_plan_restriction"
+            try:
+                store.set_state("fmp_float_global_cooldown_until", current + cooldown)
+                store.set_state("fmp_float_global_cooldown_reason", reason)
+                store.set_state("fmp_float_global_cooldown_http_status", exc.code)
+            except Exception:
+                pass
         # HTTP status is actionable and safe; never expose provider bodies or keys.
         return {
             "status": "unavailable",
