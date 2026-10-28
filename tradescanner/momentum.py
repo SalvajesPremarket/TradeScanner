@@ -72,7 +72,14 @@ def scan(candles: list[dict[str, Any]] | None, ctx: dict[str, Any], cfg: dict[st
         ema20 = _ema(closes, int(config["ema_period"]))
         macd_line = [a - b for a, b in zip(_ema(closes, int(config["macd_fast"])), _ema(closes, int(config["macd_slow"])))]
         macd_signal = _ema(macd_line, int(config["macd_signal"]))
-        local_time = last_ts.timetz().replace(tzinfo=None)
+        # Session eligibility must use the timestamp of the current observed quote,
+        # not the timestamp of the newest historical candle (which may be stale).
+        quote_time_ms = ctx.get("quote_time_ms")
+        if isinstance(quote_time_ms, (int, float)) and not isinstance(quote_time_ms, bool) and quote_time_ms > 0:
+            quote_time = datetime.fromtimestamp(float(quote_time_ms) / 1000, ET)
+            local_time = quote_time.timetz().replace(tzinfo=None)
+        else:
+            local_time = last_ts.timetz().replace(tzinfo=None)
         checks: dict[str, tuple[bool, Any, str]] = {}
         checks["hora"] = (config["session_start"] <= local_time < config["session_end"], local_time.strftime("%H:%M"), f"fuera de {config['session_start'].strftime('%H:%M')}-{config['session_end'].strftime('%H:%M')} ET")
         checks["precio"] = (config["price_min"] <= price <= config["price_max"], round(price, 4), f"precio fuera de ${config['price_min']}-${config['price_max']}")
