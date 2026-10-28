@@ -189,6 +189,8 @@ def _evaluate_original_scan_strategy(store: SnapshotStore, batch: list[str], str
         context = {
             "symbol": symbol,
             "quote_time_ms": row.get("quote_time_ms"),
+            "quote_price": row.get("price"),
+            "current_volume": row.get("volume"),
             "prev_close": row.get("previous_close"),
             "avg_volume_30d": daily.get("average"),
             "float_shares": row.get("float_shares"),
