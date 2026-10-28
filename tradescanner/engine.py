@@ -412,6 +412,7 @@ def run_scan_cycle(
             "targeted_float_provider_http_status": None,
             "targeted_float_cooldown_remaining_seconds": None,
         }
+        candle_state["float_error"] = float_provider_state.get("error")
         try:
             latest_rows_for_float = target_store.latest_for_symbols(batch)
             apply_cached_float(latest_rows_for_float, target_store)
@@ -570,6 +571,7 @@ def run_scan_cycle(
             **candle_state,
             float_provider_status=float_provider_state.get("status"),
             float_provider_rows_saved=float_provider_state.get("rows_saved", 0),
+            float_provider_configured=bool(os.getenv("MASSIVE_API_KEY", "").strip()),
             targeted_float_status=targeted_float_state.get("status"),
             targeted_float_symbol=targeted_float_state.get("symbol"),
             cycles_completed=int(target_store.get_state("cycles_completed", 0)) + 1,
