@@ -523,8 +523,8 @@ def run_scan_cycle(
                     else:
                         missing_history.append(row)
                 # Prioritize history needed by the active original scan strategy.
-                # Keep the existing provider-call budget (5 symbols/cycle) and never
-                # loosen entry rules; this only changes which missing histories are fetched.
+                # Bound history requests per cycle to protect Schwab, while increasing
+                # OHLCV coverage so more fresh candidates can be evaluated each cycle.
                 scan_configs = []
                 try:
                     for active in active_strategies(target_store):
@@ -552,7 +552,7 @@ def run_scan_cycle(
                 # Existing histories are skipped; the per-cycle cap is unchanged.
                 # Fresh symbols most likely to pass pre-candle strategy gates are
                 # serviced first, then remaining candidates by liquidity/gap.
-                candidates = sorted(missing_history, key=history_priority, reverse=True)[:5]
+                candidates = sorted(missing_history, key=history_priority, reverse=True)[:10]
                 for candidate in candidates:
                     symbol = candidate["symbol"]
                     candle_state["history_requests"] += 1
