@@ -16,7 +16,7 @@ from tradescanner.db import DB_ERRORS, is_postgres
 from tradescanner.core import apply_filters, normalize_schwab_quotes
 import urllib.error
 
-from tradescanner.float_provider import apply_cached_float, refresh_float_cache, _fetch_page, _fetch_symbol_float
+from tradescanner.float_provider import apply_cached_float
 from tradescanner.infisical_vault import is_configured as infisical_is_configured
 from tradescanner.engine import get_engine_status, record_engine_status, run_scan_cycle
 from tradescanner.snapshots import SnapshotStore, collect_snapshots
@@ -182,7 +182,7 @@ def status():
         "provider": "Schwab",
         "provider_configured": configured,
         "infisical_configured": infisical_is_configured(),
-        "float_provider_configured": bool(os.getenv("FMP_API_KEY", "").strip()),
+        "float_provider_configured": False,
         "market_data_connected": connected,
         "quote_age_seconds": round(quote_age_seconds, 1) if quote_age_seconds is not None else None,
         "last_quote_received_at": last_quote_at if isinstance(last_quote_at, str) else None,
@@ -202,186 +202,12 @@ def status():
 
 
 @app.post("/api/diagnostics/float/fmp")
-def diagnose_fmp_float(request: Request):
-    """One-shot, read-only check of FMP bulk and per-symbol FLOAT endpoints."""
-    _authorize_strategy_access(request)
-    api_key = os.getenv("FMP_API_KEY", "").strip()
-    if not api_key:
-        return {
-            "provider": "FMP",
-            "status": "not_configured",
-            "key_configured": False,
-            "provider_http_status": None,
-            "usable_records": 0,
-            "cache_modified": False,
-        }
-
-    result = {
-        "provider": "FMP",
-        "key_configured": True,
-        "cache_modified": False,
-        "bulk_status": "not_tested",
-        "bulk_http_status": None,
-        "records_received": 0,
-        "usable_records": 0,
-        "targeted_symbol": "NVDA",
-        "targeted_status": "not_tested",
-        "targeted_http_status": None,
-        "targeted_records_received": 0,
-        "targeted_usable_records": 0,
-    }
-    try:
-        records = _fetch_page(0, api_key)
-        usable = sum(
-            1 for item in records
-            if isinstance(item.get("symbol"), str)
-            and item.get("symbol", "").strip()
-            and isinstance(item.get("floatShares"), (int, float))
-            and not isinstance(item.get("floatShares"), bool)
-            and item.get("floatShares", 0) > 0
-        )
-        result.update({
-            "bulk_status": "ok" if usable else "no_usable_data",
-            "bulk_http_status": 200,
-            "records_received": len(records),
-            "usable_records": usable,
-        })
-    except urllib.error.HTTPError as exc:
-        result.update({"bulk_status": "unavailable", "bulk_http_status": exc.code})
-    except Exception as exc:
-        logger.warning("FMP bulk FLOAT diagnostic failed; error_type=%s", type(exc).__name__)
-        result.update({"bulk_status": "unavailable", "bulk_error_type": type(exc).__name__})
-
-    try:
-        targeted = _fetch_symbol_float("NVDA", api_key)
-        usable_targeted = any(
-            isinstance(item, dict)
-            and str(item.get("symbol", "")).strip().upper() == "NVDA"
-            and isinstance(item.get("floatShares"), (int, float))
-            and not isinstance(item.get("floatShares"), bool)
-            and item.get("floatShares", 0) > 0
-            for item in targeted
-        )
-        result.update({
-            "targeted_status": "ok" if usable_targeted else "no_usable_data",
-            "targeted_http_status": 200,
-            "targeted_records_received": len(targeted),
-            "targeted_usable_records": int(usable_targeted),
-        })
-    except urllib.error.HTTPError as exc:
-        result.update({"targeted_status": "unavailable", "targeted_http_status": exc.code})
-    except Exception as exc:
-        logger.warning("FMP targeted FLOAT diagnostic failed; error_type=%s", type(exc).__name__)
-        result.update({"targeted_status": "unavailable", "targeted_error_type": type(exc).__name__})
-
-    result["status"] = (
-        "ok" if result["bulk_status"] == "ok" and result["targeted_status"] == "ok"
-        else "partial" if result["bulk_status"] == "ok" or result["targeted_status"] == "ok"
-        else "unavailable"
-    )
-    # Legacy fields remain available for older UI clients.
-    result["provider_http_status"] = result["bulk_http_status"]
-    return result
-
-
 @app.post("/api/diagnostics/float/fmp/resolve-legacy-cooldown")
-def resolve_legacy_fmp_float_cooldown(request: Request):
-    """Clear only an unclassified legacy cooldown after live FMP checks pass."""
-    _authorize_strategy_access(request)
-    api_key = os.getenv("FMP_API_KEY", "").strip()
-    if not api_key:
-        raise HTTPException(status_code=503, detail="FMP_API_KEY no está configurada.")
-
-    store = SnapshotStore()
-    now = time.time()
-    try:
-        until = float(store.get_state("fmp_float_global_cooldown_until", 0) or 0)
-        reason = store.get_state("fmp_float_global_cooldown_reason", "provider_cooldown")
-        http_status = store.get_state("fmp_float_global_cooldown_http_status")
-    except Exception as exc:
-        logger.warning("Unable to read FMP cooldown state; error_type=%s", type(exc).__name__)
-        raise HTTPException(status_code=503, detail="No se pudo leer el estado del cooldown.") from None
-
-    if until <= now:
-        return {"status": "already_expired", "cooldown_cleared": False}
-    if reason != "provider_cooldown" or http_status is not None:
-        raise HTTPException(
-            status_code=409,
-            detail="Cooldown conservado: tiene una causa explícita. No se eliminará automáticamente.",
-        )
-
-    # Verify both FMP routes now; never clear a known billing/rate-limit cooldown.
-    try:
-        bulk = _fetch_page(0, api_key)
-        bulk_usable = any(
-            isinstance(item.get("symbol"), str) and item.get("symbol", "").strip()
-            and isinstance(item.get("floatShares"), (int, float))
-            and not isinstance(item.get("floatShares"), bool)
-            and item.get("floatShares", 0) > 0
-            for item in bulk
-        )
-        targeted = _fetch_symbol_float("NVDA", api_key)
-        targeted_usable = any(
-            isinstance(item, dict)
-            and str(item.get("symbol", "")).strip().upper() == "NVDA"
-            and isinstance(item.get("floatShares"), (int, float))
-            and not isinstance(item.get("floatShares"), bool)
-            and item.get("floatShares", 0) > 0
-            for item in targeted
-        )
-    except urllib.error.HTTPError as exc:
-        logger.warning("FMP cooldown recovery check failed; provider_http_status=%s", exc.code)
-        raise HTTPException(
-            status_code=502,
-            detail=f"FMP no superó la verificación actual (HTTP {exc.code}); cooldown conservado.",
-        ) from None
-    except Exception as exc:
-        logger.warning("FMP cooldown recovery check failed; error_type=%s", type(exc).__name__)
-        raise HTTPException(
-            status_code=502,
-            detail="FMP no superó la verificación actual; cooldown conservado.",
-        ) from None
-
-    if not bulk_usable or not targeted_usable:
-        raise HTTPException(
-            status_code=502,
-            detail="FMP respondió, pero faltan datos FLOAT utilizables; cooldown conservado.",
-        )
-
-    # Expire the old global guard only after successful current checks.
-    store.set_state("fmp_float_global_cooldown_until", 0)
-    store.set_state("fmp_float_global_cooldown_reason", "cleared_after_verified_endpoints")
-    store.set_state("fmp_float_global_cooldown_http_status", 0)
-    logger.info("Cleared legacy FMP FLOAT cooldown after successful bulk and targeted checks.")
-    return {
-        "status": "ok",
-        "cooldown_cleared": True,
-        "verified_bulk_records": len(bulk),
-        "verified_targeted_records": len(targeted),
-        "cache_modified": False,
-    }
-
-
 @app.post("/api/diagnostics/float/fmp/refresh-cache")
-def refresh_fmp_float_cache(request: Request):
-    """Authenticated explicit action to fetch and persist public FLOAT values."""
+def disabled_fmp_float_routes(request: Request):
+    """Legacy FMP endpoints are intentionally disabled; no outbound FMP calls are made."""
     _authorize_strategy_access(request)
-    store = SnapshotStore()
-    result = refresh_float_cache(store, force=True)
-    if result.get("status") != "updated":
-        status_code = 503 if result.get("status") in {"not_configured", "unavailable", "cooldown"} else 502
-        raise HTTPException(
-            status_code=status_code,
-            detail="No se pudo actualizar la caché FLOAT: " + str(result.get("error") or result.get("status") or "resultado desconocido"),
-        )
-    logger.info("Manual FLOAT cache refresh completed; rows_saved=%s", result.get("rows_saved", 0))
-    return {
-        "status": "updated",
-        "rows_saved": int(result.get("rows_saved", 0)),
-        "updated_at": result.get("updated_at"),
-        "pages_fetched": result.get("pages_fetched", 0),
-        "message": "Caché FLOAT actualizada desde FMP.",
-    }
+    raise HTTPException(status_code=410, detail="FMP está deshabilitado en TradeScanner. FLOAT solo utiliza la caché local disponible.")
 
 
 @app.get("/api/engine/status")
@@ -404,7 +230,7 @@ def engine_status():
         "cycle_interval_seconds": interval,
         "batch_size": 100,
         "provider": "Schwab",
-        "float_provider": "Schwab first; FMP cache for FLOAT only when FMP_API_KEY is configured",
+        "float_provider": "External provider disabled; local FLOAT cache only",
         "state": state or {"status": "starting"},
     }
 
@@ -473,7 +299,7 @@ def snapshots_latest(limit: int = Query(10000, ge=1, le=10000)):
             row.setdefault("float_shares", None)
             row.setdefault("float_as_of", None)
             row.setdefault("float_source", None)
-        # Fill missing FLOAT from the local FMP cache; never call FMP from UI requests.
+        # Fill missing FLOAT from the existing local cache only; no provider calls.
         apply_cached_float(rows, store)
         # The main radar must show available snapshots independently of strategy matches.
         # Strategy evaluation remains available through the dedicated strategy endpoints.
