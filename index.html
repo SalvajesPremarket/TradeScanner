@@ -1019,8 +1019,22 @@
             showMessage("No hay una sesión iniciada.");
             return;
           }
-          await window.tradeScannerGetAccessToken();
-          showMessage("Sesión Neon activa. Editor de estrategias habilitado.");
+          const accessToken = await window.tradeScannerGetAccessToken();
+          let deviceId = localStorage.getItem("tradescanner_device_id");
+          if (!deviceId) {
+            deviceId = (window.crypto && typeof window.crypto.randomUUID === "function")
+              ? window.crypto.randomUUID()
+              : "ts-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
+            localStorage.setItem("tradescanner_device_id", deviceId);
+          }
+          const claimResponse = await fetch("/api/device-session/claim", {
+            method: "POST", cache: "no-store",
+            headers: {"Authorization":"Bearer " + accessToken, "Content-Type":"application/json"},
+            body: JSON.stringify({device_id: deviceId})
+          });
+          const claimData = await claimResponse.json().catch(() => ({}));
+          if (!claimResponse.ok) throw new Error(claimData.detail || "No se pudo activar este dispositivo.");
+          showMessage("Dispositivo activo. TradeScanner solo funcionará en un dispositivo a la vez.");
           await loadStrategies();
         } catch (error) {
           setSession(null);
@@ -1055,6 +1069,7 @@
       });
       document.getElementById("sign-out").addEventListener("click", async () => {
         try {
+          await fetch("/api/device-session/release", {method:"POST", cache:"no-store"});
           await authRequest("/sign-out", {});
           setSession(null);
           password.value = "";
