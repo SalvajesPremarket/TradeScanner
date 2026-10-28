@@ -65,21 +65,28 @@ def scan(candles: list[dict[str, Any]] | None, ctx: dict[str, Any], cfg: dict[st
         if len(valid) < int(config["min_bars"]):
             out["reasons"].append("velas: historial válido insuficiente")
             return out
-        last_ts, price, _ = valid[-1]
-        local_today = last_ts.date()
-        today_volume = sum(volume for ts, _, volume in valid if ts.date() == local_today)
+        last_ts, candle_price, _ = valid[-1]
+        # Current quote fields are authoritative for live price/session checks.
+        # Historical candles can be days old and must never override a fresh quote.
+        quote_time_ms = ctx.get("quote_time_ms")
+        quote_time = last_ts
+        if isinstance(quote_time_ms, (int, float)) and not isinstance(quote_time_ms, bool) and quote_time_ms > 0:
+            quote_time = datetime.fromtimestamp(float(quote_time_ms) / 1000, ET)
+        quote_price = ctx.get("quote_price")
+        price = float(quote_price) if isinstance(quote_price, (int, float)) and not isinstance(quote_price, bool) and isfinite(float(quote_price)) and float(quote_price) > 0 else candle_price
+        local_today = quote_time.date()
+        current_volume = ctx.get("current_volume")
+        if isinstance(current_volume, (int, float)) and not isinstance(current_volume, bool) and isfinite(float(current_volume)) and float(current_volume) >= 0:
+            today_volume = float(current_volume)
+        else:
+            today_volume = sum(volume for ts, _, volume in valid if ts.date() == local_today)
         closes = [close for _, close, _ in valid]
         ema20 = _ema(closes, int(config["ema_period"]))
         macd_line = [a - b for a, b in zip(_ema(closes, int(config["macd_fast"])), _ema(closes, int(config["macd_slow"])))]
         macd_signal = _ema(macd_line, int(config["macd_signal"]))
         # Session eligibility must use the timestamp of the current observed quote,
         # not the timestamp of the newest historical candle (which may be stale).
-        quote_time_ms = ctx.get("quote_time_ms")
-        if isinstance(quote_time_ms, (int, float)) and not isinstance(quote_time_ms, bool) and quote_time_ms > 0:
-            quote_time = datetime.fromtimestamp(float(quote_time_ms) / 1000, ET)
-            local_time = quote_time.timetz().replace(tzinfo=None)
-        else:
-            local_time = last_ts.timetz().replace(tzinfo=None)
+        local_time = quote_time.timetz().replace(tzinfo=None)
         checks: dict[str, tuple[bool, Any, str]] = {}
         checks["hora"] = (config["session_start"] <= local_time < config["session_end"], local_time.strftime("%H:%M"), f"fuera de {config['session_start'].strftime('%H:%M')}-{config['session_end'].strftime('%H:%M')} ET")
         checks["precio"] = (config["price_min"] <= price <= config["price_max"], round(price, 4), f"precio fuera de ${config['price_min']}-${config['price_max']}")
@@ -102,7 +109,7 @@ def scan(candles: list[dict[str, Any]] | None, ctx: dict[str, Any], cfg: dict[st
         macd_ok = macd > 0 and (not config["macd_require_above_signal"] or macd > macd_signal[-1])
         checks["macd"] = (macd_ok, round(macd, 5), "MACD no positivo")
         news = ctx.get("news")
-        now = last_ts
+        now = quote_time
         fresh_news = []
         if isinstance(news, list):
             for item in news:
