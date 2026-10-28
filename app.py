@@ -16,7 +16,7 @@ from tradescanner.db import DB_ERRORS, is_postgres
 from tradescanner.core import apply_filters, normalize_schwab_quotes
 import urllib.error
 
-from tradescanner.float_provider import apply_cached_float
+from tradescanner.float_provider import apply_cached_float, refresh_symbol_float
 from tradescanner.infisical_vault import is_configured as infisical_is_configured
 from tradescanner.engine import get_engine_status, record_engine_status, run_scan_cycle
 from tradescanner.snapshots import SnapshotStore, collect_snapshots
@@ -182,7 +182,7 @@ def status():
         "provider": "Schwab",
         "provider_configured": configured,
         "infisical_configured": infisical_is_configured(),
-        "float_provider_configured": False,
+        "float_provider_configured": bool(os.getenv("MASSIVE_API_KEY", "").strip()),
         "market_data_connected": connected,
         "quote_age_seconds": round(quote_age_seconds, 1) if quote_age_seconds is not None else None,
         "last_quote_received_at": last_quote_at if isinstance(last_quote_at, str) else None,
@@ -207,7 +207,34 @@ def status():
 def disabled_fmp_float_routes(request: Request):
     """Legacy FMP endpoints are intentionally disabled; no outbound FMP calls are made."""
     _authorize_strategy_access(request)
-    raise HTTPException(status_code=410, detail="FMP está deshabilitado en TradeScanner. FLOAT solo utiliza la caché local disponible.")
+    raise HTTPException(status_code=410, detail="FMP está deshabilitado en TradeScanner. FLOAT utiliza Massive y su caché local.")
+
+
+@app.post("/api/diagnostics/float/massive")
+def test_massive_float(request: Request, symbol: str = Query("AAPL", min_length=1, max_length=12)):
+    """Make one authenticated, bounded FLOAT request to Massive for verification."""
+    _authorize_strategy_access(request)
+    normalized = symbol.strip().upper()
+    if not normalized.replace(".", "").replace("-", "").isalnum():
+        raise HTTPException(status_code=400, detail="Invalid ticker symbol.")
+    result = refresh_symbol_float(SnapshotStore(), normalized, force=True)
+    if result.get("status") == "not_configured":
+        raise HTTPException(status_code=503, detail="MASSIVE_API_KEY is not configured in the service environment.")
+    if result.get("status") == "unavailable":
+        raise HTTPException(status_code=502, detail={
+            "provider": "Massive", "status": result.get("status"),
+            "error": result.get("error", "provider_error"),
+        })
+    return {
+        "provider": "Massive",
+        "quote_provider": "Schwab",
+        "status": result.get("status"),
+        "symbol": result.get("symbol"),
+        "float_shares": result.get("float_shares"),
+        "effective_date": result.get("effective_date"),
+        "rows_saved": result.get("rows_saved", 0),
+        "note": "No FMP fallback is used; this test requests FLOAT only.",
+    }
 
 
 @app.get("/api/engine/status")
@@ -230,7 +257,7 @@ def engine_status():
         "cycle_interval_seconds": interval,
         "batch_size": 100,
         "provider": "Schwab",
-        "float_provider": "External provider disabled; local FLOAT cache only",
+        "float_provider": "Massive FLOAT + local cache" if os.getenv("MASSIVE_API_KEY", "").strip() else "Massive FLOAT not configured; local cache only",
         "state": state or {"status": "starting"},
     }
 
