@@ -188,6 +188,7 @@ def _evaluate_original_scan_strategy(store: SnapshotStore, batch: list[str], str
         news = recent_stock_news(store, symbol) if enough_candles else {"status": "not_requested", "news": []}
         context = {
             "symbol": symbol,
+            "quote_time_ms": row.get("quote_time_ms"),
             "prev_close": row.get("previous_close"),
             "avg_volume_30d": daily.get("average"),
             "float_shares": row.get("float_shares"),
