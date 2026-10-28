@@ -113,7 +113,7 @@ def refresh_float_cache(
     records: dict[str, tuple[float, str | None]] = {}
     try:
         next_url: str | None = MASSIVE_FLOAT_URL + "?" + urlencode(
-            {"limit": PAGE_SIZE, "sort": "ticker.asc"}
+            {"limit": PAGE_SIZE, "sort": "ticker"}
         )
         pages_fetched = 0
         while next_url and pages_fetched < MAX_PAGES:
