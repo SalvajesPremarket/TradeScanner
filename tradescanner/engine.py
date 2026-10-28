@@ -11,7 +11,7 @@ from typing import Any, Callable
 
 from tradescanner.candles import CandleStore, normalize_price_history
 from tradescanner.db import DB_ERRORS
-from tradescanner.float_provider import apply_cached_float
+from tradescanner.float_provider import apply_cached_float, refresh_float_cache
 from tradescanner.infisical_vault import is_configured as infisical_is_configured
 from tradescanner.snapshots import BATCH_SIZE, SnapshotStore, collect_snapshots
 from tradescanner.schwab import SchwabAPIError, SchwabConfigurationError, get_daily_history, get_price_history, get_quotes
@@ -402,8 +402,8 @@ def run_scan_cycle(
             raise SchwabAPIError(
                 "Schwab returned no persistable quotes; the universe cursor was not advanced."
             )
-        # External FLOAT providers are disabled; never call FMP from the scan loop.
-        float_provider_state = {"status": "disabled", "provider": "none", "rows_saved": 0}
+        # Massive is the sole external FLOAT provider; Schwab remains the quote provider.
+        float_provider_state = refresh_float_cache(target_store)
         candle_state: dict[str, Any] = {
             "candle_symbol": None, "candles_saved": 0, "rvol": None,
             "rvol_sessions_used": 0, "candle_error": None, "float_symbol": None,
@@ -419,24 +419,33 @@ def run_scan_cycle(
                            if isinstance(row.get("symbol"), str) and row.get("float_shares") is not None]
             if known_float:
                 candidate = max(known_float, key=lambda row: row.get("volume") if isinstance(row.get("volume"), (int, float)) else -1)
-                targeted_float_state = {"status": "cached_only", "provider": "local_cache",
-                                        "symbol": str(candidate["symbol"]).strip().upper(),
-                                        "float_shares": candidate.get("float_shares")}
-                float_status_row = {"symbol": targeted_float_state["symbol"], "float_shares": None,
-                                    "float_source": None, "float_as_of": None}
-                apply_cached_float([float_status_row], target_store)
-                if float_status_row.get("float_shares") is None:
-                    float_status_row["float_shares"] = targeted_float_state.get("float_shares")
-                candle_state["float_symbol"] = targeted_float_state["symbol"] if float_status_row.get("float_shares") is not None else None
-                candle_state["float_shares"] = float_status_row.get("float_shares")
-                candle_state["float_as_of"] = float_status_row.get("float_as_of")
-                candle_state["float_source"] = float_status_row.get("float_source")
+                targeted_float_state = {
+                    "status": "cached", "provider": "Massive",
+                    "symbol": str(candidate["symbol"]).strip().upper(),
+                    "float_shares": candidate.get("float_shares"),
+                    "float_source": candidate.get("float_source"),
+                    "float_as_of": candidate.get("float_as_of"),
+                }
+                candle_state["float_symbol"] = targeted_float_state["symbol"]
+                candle_state["float_shares"] = candidate.get("float_shares")
+                candle_state["float_as_of"] = candidate.get("float_as_of")
+                candle_state["float_source"] = candidate.get("float_source")
             else:
-                targeted_float_state = {"status": "disabled", "provider": "none"}
+                targeted_float_state = {
+                    "status": "not_available", "provider": "Massive",
+                    "detail": float_provider_state.get("error") or float_provider_state.get("status"),
+                }
         except Exception as exc:
-            targeted_float_state = {"status": "cache_unavailable", "provider": "local_cache", "error": type(exc).__name__}
+            targeted_float_state = {
+                "status": "cache_unavailable", "provider": "local_cache",
+                "error": type(exc).__name__,
+            }
             logger.warning("Local FLOAT cache unavailable; error_type=%s", type(exc).__name__)
-        logger.warning("Scan cycle FLOAT provider=disabled cached_symbol=%s", targeted_float_state.get("symbol"))
+        logger.warning(
+            "Scan cycle FLOAT provider=Massive refresh_status=%s rows_saved=%s cached_symbol=%s error=%s",
+            float_provider_state.get("status"), float_provider_state.get("rows_saved", 0),
+            targeted_float_state.get("symbol"), float_provider_state.get("error"),
+        )
 
         # Strategy evaluation covers the whole quote batch, so sampling history for
         # only one ticker leaves almost every candidate unable to calculate EMA/MACD.
