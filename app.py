@@ -9,7 +9,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Query, Body, Request
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 
 from tradescanner.candles import CandleStore
 from tradescanner.db import DB_ERRORS, is_postgres
@@ -94,6 +94,23 @@ async def lifespan(application: FastAPI):
 
 app = FastAPI(title="TradeScanner", version="0.3.1", lifespan=lifespan)
 app.include_router(oauth_router)
+
+_DEVICE_SESSION_KEY = "tradescanner_single_active_device_v1"
+_DEVICE_COOKIE = "tradescanner_device_id"
+
+@app.middleware("http")
+async def enforce_single_active_device(request: Request, call_next):
+    path = request.url.path
+    if not path.startswith("/api/") or path in {"/api/device-session/claim", "/api/device-session/release"}:
+        return await call_next(request)
+    try:
+        active = SnapshotStore().get_state(_DEVICE_SESSION_KEY, None)
+    except (OSError, RuntimeError, ValueError) + DB_ERRORS:
+        return JSONResponse(status_code=503, content={"detail": "No se pudo verificar el dispositivo activo."})
+    device_id = request.cookies.get(_DEVICE_COOKIE, "")
+    if not isinstance(active, dict) or not active.get("device_id") or not device_id or not hmac.compare_digest(str(active["device_id"]), device_id):
+        return JSONResponse(status_code=423, content={"detail": "TradeScanner fue activado en otro dispositivo. Inicia sesión aquí para activar este dispositivo."})
+    return await call_next(request)
 
 
 def _scanner_indicators(candles: list[dict]) -> dict[str, float | None]:
@@ -473,7 +490,7 @@ def snapshots_latest(limit: int = Query(10000, ge=1, le=10000)):
         raise HTTPException(status_code=503, detail="Snapshot storage is unavailable.") from None
 
 
-def _authorize_strategy_access(request: Request) -> None:
+def _authorize_strategy_access(request: Request) -> dict:
     """Require a valid Neon Auth JWT for strategy editor operations."""
     jwks_url = os.getenv("NEON_AUTH_JWKS_URL", "").strip()
     issuer = os.getenv("NEON_AUTH_ISSUER", "").strip()
@@ -511,6 +528,39 @@ def _authorize_strategy_access(request: Request) -> None:
     except jwt.InvalidTokenError as exc:
         logger.warning("Neon Auth JWT rejected: %s", type(exc).__name__)
         raise HTTPException(status_code=401, detail="La sesión Neon no es válida o ha expirado. Inicia sesión de nuevo.") from None
+    return claims
+
+
+@app.post("/api/device-session/claim")
+def claim_device_session(request: Request, payload: dict = Body(...)):
+    claims = _authorize_strategy_access(request)
+    device_id = payload.get("device_id")
+    if not isinstance(device_id, str) or len(device_id) < 16 or len(device_id) > 128 or not all(ch.isalnum() or ch in "-_" for ch in device_id):
+        raise HTTPException(status_code=400, detail="Identificador de dispositivo inválido.")
+    store = SnapshotStore()
+    store.set_state(_DEVICE_SESSION_KEY, {
+        "device_id": device_id,
+        "user_id": claims["sub"],
+        "claimed_at": datetime.now(timezone.utc).isoformat(),
+    })
+    response = JSONResponse({"active": True, "message": "TradeScanner está activo en este dispositivo."})
+    response.set_cookie(
+        key=_DEVICE_COOKIE, value=device_id, httponly=True, secure=request.url.scheme == "https",
+        samesite="lax", max_age=60 * 60 * 24 * 60, path="/",
+    )
+    return response
+
+
+@app.post("/api/device-session/release")
+def release_device_session(request: Request):
+    device_id = request.cookies.get(_DEVICE_COOKIE, "")
+    store = SnapshotStore()
+    active = store.get_state(_DEVICE_SESSION_KEY, None)
+    if isinstance(active, dict) and device_id and hmac.compare_digest(str(active.get("device_id", "")), device_id):
+        store.set_state(_DEVICE_SESSION_KEY, {})
+    response = JSONResponse({"released": True})
+    response.delete_cookie(key=_DEVICE_COOKIE, path="/", httponly=True, secure=request.url.scheme == "https", samesite="lax")
+    return response
 
 
 @app.get("/api/strategies")
