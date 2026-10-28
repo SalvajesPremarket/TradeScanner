@@ -257,21 +257,7 @@
       <div class="tab-body">
         <p class="code-hint">Panel de solo lectura. Las credenciales, variables de Render y el escaneo automático no se modifican desde aquí.</p>
         <div id="settings-cards" class="grid-two"><div class="empty">Consultando estado del servicio…</div></div>
-        <div class="tools" style="margin-top:16px">
-          <button class="action" id="refresh-float-cache" type="button">Actualizar datos FLOAT</button>
-          <span class="code-hint">Consulta FMP y guarda los valores públicos recibidos en la caché del radar. Requiere sesión Neon.</span>
-        </div>
-        <div id="float-refresh-result" class="tab-message" role="status" aria-live="polite">Caché FLOAT sin actualizar manualmente.</div>
-        <div class="tools" style="margin-top:10px">
-          <button class="action secondary" id="diagnose-fmp-float" type="button">Diagnosticar FMP · FLOAT</button>
-          <span class="code-hint">Prueba de lectura de FMP sin modificar la caché.</span>
-        </div>
-        <div class="tools" style="margin-top:10px">
-          <button class="action secondary" id="resolve-fmp-cooldown" type="button">Resolver cooldown heredado</button>
-          <span class="code-hint">Solo libera un cooldown sin causa ni HTTP registrados, tras verificar FMP en vivo. No elimina bloqueos 402/429 identificados.</span>
-        </div>
-        <div id="fmp-cooldown-result" class="tab-message" role="status" aria-live="polite">Cooldown sin cambios.</div>
-        <div id="fmp-diagnostic-result" class="tab-message" role="status" aria-live="polite">Diagnóstico aún no ejecutado.</div>
+        <div class="tab-message" role="status" aria-live="polite">Proveedor externo FLOAT deshabilitado. TradeScanner no consulta FMP ni intenta actualizar su caché; solo conserva los valores que ya estén guardados localmente.</div>
       </div>
     </section>
   </main>
@@ -418,7 +404,7 @@
         cell(tr, item.price == null ? "—" : "$" + displayNumber(item.price));
         cell(tr, item.change_pct == null ? "—" : displayNumber(item.change_pct) + "%");
         cell(tr, item.gap_pct == null ? "—" : displayNumber(item.gap_pct) + "%");
-        cell(tr, item.float_shares == null ? null : displayNumber(item.float_shares, 0), "FLOAT no disponible: usa Configuración → Actualizar datos FLOAT para intentar guardar datos públicos de FMP.");
+        cell(tr, item.float_shares == null ? null : displayNumber(item.float_shares, 0), "FLOAT no disponible: no hay un valor guardado en la caché local.");
         cell(tr, item.rvol == null ? null : displayNumber(item.rvol) + "x", "RVOL no disponible: hacen falta velas actuales y al menos dos sesiones históricas comparables.");
         cell(tr, item.volume == null ? null : displayNumber(item.volume, 0));
         cell(tr, item.sector, "Sector no proporcionado en los datos actuales del proveedor.");
@@ -545,9 +531,6 @@
         if (state.last_error) details.push("Error motor: " + state.last_error);
         if (state.candle_error) details.push("Error velas: " + state.candle_error);
         if (state.float_error) details.push("Error FLOAT: " + state.float_error);
-        if (state.targeted_float_provider_http_status != null) details.push("FMP HTTP: " + state.targeted_float_provider_http_status);
-        if (state.targeted_float_cooldown_reason) details.push("Motivo cooldown FLOAT: " + state.targeted_float_cooldown_reason);
-        if (state.targeted_float_cooldown_remaining_seconds != null) details.push("Cooldown FLOAT restante: " + Math.ceil(state.targeted_float_cooldown_remaining_seconds / 60) + " min");
         if (enginePayload.float_provider) details.push("FLOAT: " + enginePayload.float_provider);
         if (!details.length && state.status === "waiting_for_credentials") details.push("Configurar credenciales seguras de Schwab en el servicio.");
         if (!details.length) details.push("Esperando el primer lote real.");
@@ -857,103 +840,16 @@
           ["FLOAT · estado por símbolo",state.targeted_float_status||"Sin estado"],
           ["FLOAT · HTTP proveedor",state.targeted_float_provider_http_status==null?"Sin código HTTP":state.targeted_float_provider_http_status],
           ["FLOAT · motivo cooldown",state.targeted_float_cooldown_reason||"Sin cooldown global reportado"],
-          ["FLOAT · minutos de cooldown restantes",state.targeted_float_cooldown_remaining_seconds==null?"No aplica":Math.ceil(state.targeted_float_cooldown_remaining_seconds/60)],
           ["RVOL · ticker histórico actual",state.candle_symbol||"Ninguno"],
           ["RVOL · sesiones comparables",state.rvol_sessions_used==null?"0":state.rvol_sessions_used],
           ["RVOL · valor calculado",state.rvol==null?"Sin datos suficientes":Number(state.rvol).toFixed(4)+"x"],
+          ["FLOAT · proveedor externo","Deshabilitado; solo caché local"],
           ["FLOAT · error",state.float_error||"Ninguno reportado"]
         ];
         for(const [title,value] of cards){const card=document.createElement("div");card.className="data-card";const h=document.createElement("strong");h.textContent=title;const p=document.createElement("p");p.textContent=String(value);p.style.margin="8px 0 0";card.append(h,p);target.appendChild(card);}
       } catch(error) { target.textContent="No se pudo consultar la configuración: "+apiMessage(error); }
     }
     document.getElementById("refresh-settings").addEventListener("click",loadSettings);
-    document.getElementById("refresh-float-cache").addEventListener("click", async () => {
-      const button = document.getElementById("refresh-float-cache");
-      const result = document.getElementById("float-refresh-result");
-      button.disabled = true;
-      result.textContent = "Consultando FMP y guardando valores FLOAT…";
-      try {
-        if (typeof window.tradeScannerGetAccessToken !== "function") {
-          throw new Error("Inicia sesión con Neon antes de actualizar la caché FLOAT.");
-        }
-        const token = await window.tradeScannerGetAccessToken();
-        const response = await fetch("/api/diagnostics/float/fmp/refresh-cache", {
-          method: "POST", cache: "no-store",
-          headers: {"Authorization": "Bearer " + token}
-        });
-        const data = await response.json().catch(() => ({}));
-        if (!response.ok) throw new Error(data.detail || "No se pudo actualizar FLOAT (HTTP " + response.status + ").");
-        result.textContent = "Caché FLOAT guardada: " + Number(data.rows_saved || 0).toLocaleString("en-US") +
-          " símbolos · " + (data.updated_at || "fecha no informada") + ". Recargando radar…";
-        await refreshScanner();
-        await loadSettings();
-      } catch (error) {
-        result.textContent = "FLOAT sigue sin actualizarse: " + (error.message || "error desconocido");
-      } finally {
-        button.disabled = false;
-      }
-    });
-    document.getElementById("resolve-fmp-cooldown").addEventListener("click", async () => {
-      const button = document.getElementById("resolve-fmp-cooldown");
-      const result = document.getElementById("fmp-cooldown-result");
-      button.disabled = true;
-      result.textContent = "Verificando FMP y el cooldown heredado…";
-      try {
-        if (typeof window.tradeScannerGetAccessToken !== "function") {
-          throw new Error("La sesión Neon todavía se está comprobando. Espera unos segundos e inténtalo de nuevo.");
-        }
-        const token = await window.tradeScannerGetAccessToken();
-        const response = await fetch("/api/diagnostics/float/fmp/resolve-legacy-cooldown", {
-          method: "POST",
-          cache: "no-store",
-          headers: { "Authorization": "Bearer " + token }
-        });
-        const data = await response.json().catch(() => ({}));
-        if (!response.ok) throw new Error(data.detail || "No se pudo resolver el cooldown (HTTP " + response.status + ").");
-        result.textContent = data.cooldown_cleared
-          ? "Cooldown heredado liberado tras verificar FMP. Registros masivos: " + data.verified_bulk_records + " · registros NVDA: " + data.verified_targeted_records + " · caché modificada: no. El motor podrá reintentar FLOAT en los próximos ciclos."
-          : "No había un cooldown global activo que liberar.";
-        if (data.cooldown_cleared) loadSettings();
-      } catch (error) {
-        result.textContent = "Cooldown conservado: " + (error.message || "error desconocido");
-      } finally {
-        button.disabled = false;
-      }
-    });
-    document.getElementById("diagnose-fmp-float").addEventListener("click", async () => {
-      const button = document.getElementById("diagnose-fmp-float");
-      const result = document.getElementById("fmp-diagnostic-result");
-      button.disabled = true;
-      result.textContent = "Consultando FMP una sola vez…";
-      try {
-        if (typeof window.tradeScannerGetAccessToken !== "function") {
-          throw new Error("La sesión Neon todavía se está comprobando. Espera unos segundos e inténtalo de nuevo.");
-        }
-        const token = await window.tradeScannerGetAccessToken();
-        const response = await fetch("/api/diagnostics/float/fmp", {
-          method: "POST",
-          cache: "no-store",
-          headers: { "Authorization": "Bearer " + token }
-        });
-        const data = await response.json().catch(() => ({}));
-        if (!response.ok) throw new Error(data.detail || "Diagnóstico no disponible (HTTP " + response.status + ").");
-        const parts = ["FMP: " + (data.status || "desconocido")];
-        if (data.key_configured === false) parts.push("API key no detectada por el servidor");
-        if (data.bulk_status) parts.push("endpoint masivo: " + data.bulk_status + (data.bulk_http_status != null ? " HTTP " + data.bulk_http_status : ""));
-        if (data.records_received != null) parts.push("registros masivos: " + data.records_received);
-        if (data.usable_records != null) parts.push("FLOAT masivos utilizables: " + data.usable_records);
-        if (data.targeted_status) parts.push("endpoint por símbolo (NVDA): " + data.targeted_status + (data.targeted_http_status != null ? " HTTP " + data.targeted_http_status : ""));
-        if (data.targeted_records_received != null) parts.push("registros NVDA: " + data.targeted_records_received);
-        if (data.targeted_error_type || data.bulk_error_type) parts.push("tipo de error: " + (data.targeted_error_type || data.bulk_error_type));
-        parts.push("caché modificada: no");
-        result.textContent = parts.join(" · ");
-      } catch (error) {
-        result.textContent = "No se pudo completar el diagnóstico: " + (error.message || "error desconocido");
-      } finally {
-        button.disabled = false;
-      }
-    });
-
     refreshScanner();
     window.setInterval(refreshScanner, 15000);
     updateLanguageHelp();
