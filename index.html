@@ -257,7 +257,7 @@
       <div class="tab-body">
         <p class="code-hint">Panel de solo lectura. Las credenciales, variables de Render y el escaneo automático no se modifican desde aquí.</p>
         <div id="settings-cards" class="grid-two"><div class="empty">Consultando estado del servicio…</div></div>
-        <div class="tab-message" role="status" aria-live="polite">Proveedor externo FLOAT deshabilitado. TradeScanner no consulta FMP ni intenta actualizar su caché; solo conserva los valores que ya estén guardados localmente.</div>
+        <div class="tab-message" role="status" aria-live="polite">Massive es el proveedor de FLOAT; Schwab continúa suministrando las cotizaciones. Los valores se guardan en caché con su fecha efectiva. FMP permanece deshabilitado.</div>
       </div>
     </section>
   </main>
@@ -843,7 +843,7 @@
           ["RVOL · ticker histórico actual",state.candle_symbol||"Ninguno"],
           ["RVOL · sesiones comparables",state.rvol_sessions_used==null?"0":state.rvol_sessions_used],
           ["RVOL · valor calculado",state.rvol==null?"Sin datos suficientes":Number(state.rvol).toFixed(4)+"x"],
-          ["FLOAT · proveedor externo","Deshabilitado; solo caché local"],
+          ["FLOAT · proveedor externo",state.float_provider_configured ? ("Massive · " + (state.float_provider_status || "configurada")) : "Massive · clave no detectada"],
           ["FLOAT · error",state.float_error||"Ninguno reportado"]
         ];
         for(const [title,value] of cards){const card=document.createElement("div");card.className="data-card";const h=document.createElement("strong");h.textContent=title;const p=document.createElement("p");p.textContent=String(value);p.style.margin="8px 0 0";card.append(h,p);target.appendChild(card);}
