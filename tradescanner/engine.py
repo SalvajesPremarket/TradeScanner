@@ -601,30 +601,30 @@ def run_scan_cycle(
                             pending_count, len(_history_inflight_symbols),
                         )
                 else:
-                for candidate in candidates:
-                    symbol = candidate["symbol"]
-                    candle_state["history_requests"] += 1
-                    try:
-                        candle_payload = history_fetch(symbol)
-                        candles = normalize_price_history(symbol, candle_payload)
-                        saved = candle_store.save(candles)
-                        candle_state["candles_saved"] += saved
-                        candle_state["candle_symbols"].append(symbol)
-                        if candle_state["candle_symbol"] is None:
-                            candle_state["candle_symbol"] = symbol
-                            rvol = candle_store.rvol(symbol)
-                            candle_state["rvol"] = rvol.get("rvol")
-                            candle_state["rvol_sessions_used"] = rvol.get("sessions_used", 0)
-                        logger.warning(
-                            "Scan cycle history_symbol=%s returned=%s saved=%s",
-                            symbol, len(candles), saved,
-                        )
-                    except (SchwabAPIError, SchwabConfigurationError, ValueError, OSError, RuntimeError) + DB_ERRORS as exc:
-                        candle_state["candle_error"] = type(exc).__name__
-                        logger.warning(
-                            "Scan cycle history_fetch_failed symbol=%s error_type=%s",
-                            symbol, type(exc).__name__,
-                        )
+                    for candidate in candidates:
+                        symbol = candidate["symbol"]
+                        candle_state["history_requests"] += 1
+                        try:
+                            candle_payload = history_fetch(symbol)
+                            candles = normalize_price_history(symbol, candle_payload)
+                            saved = candle_store.save(candles)
+                            candle_state["candles_saved"] += saved
+                            candle_state["candle_symbols"].append(symbol)
+                            if candle_state["candle_symbol"] is None:
+                                candle_state["candle_symbol"] = symbol
+                                rvol = candle_store.rvol(symbol)
+                                candle_state["rvol"] = rvol.get("rvol")
+                                candle_state["rvol_sessions_used"] = rvol.get("sessions_used", 0)
+                            logger.warning(
+                                "Scan cycle history_symbol=%s returned=%s saved=%s",
+                                symbol, len(candles), saved,
+                            )
+                        except (SchwabAPIError, SchwabConfigurationError, ValueError, OSError, RuntimeError) + DB_ERRORS as exc:
+                            candle_state["candle_error"] = type(exc).__name__
+                            logger.warning(
+                                "Scan cycle history_fetch_failed symbol=%s error_type=%s",
+                                symbol, type(exc).__name__,
+                            )
             except (SchwabAPIError, SchwabConfigurationError, ValueError, OSError, RuntimeError) + DB_ERRORS as exc:
                 candle_state["candle_error"] = type(exc).__name__
         logger.warning(
