@@ -730,7 +730,7 @@
         if (changeA !== changeB) return changeB - changeA;
         const rvolA = Number.isFinite(Number(a.rvol)) ? Number(a.rvol) : -Infinity;
         const rvolB = Number.isFinite(Number(b.rvol)) ? Number(b.rvol) : -Infinity;
-        if (rvolA !== changeB) return rvolB - rvolA;
+        if (rvolA !== rvolB) return rvolB - rvolA;
         const volumeA = Number.isFinite(Number(a.volume)) ? Number(a.volume) : -Infinity;
         const volumeB = Number.isFinite(Number(b.volume)) ? Number(b.volume) : -Infinity;
         return volumeB - volumeA;
