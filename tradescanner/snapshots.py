@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import json
+import math
 import os
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
@@ -13,6 +15,21 @@ from tradescanner.schwab import get_quotes
 
 DEFAULT_DB_PATH = Path(os.getenv("TRADESCANNER_DB_PATH", "data/tradescanner.sqlite3"))
 BATCH_SIZE = 100
+QUOTE_FRESHNESS_SECONDS = 300
+QUOTE_FUTURE_TOLERANCE_SECONDS = 30
+
+
+def _refresh_quote_freshness(row: dict[str, Any]) -> dict[str, Any]:
+    """Recompute quote freshness at read time; stored flags age out after capture."""
+    stamp = row.get("quote_time_ms")
+    if isinstance(stamp, bool) or not isinstance(stamp, (int, float)) or not math.isfinite(float(stamp)) or stamp <= 0:
+        row["quote_age_seconds"] = None
+        row["quote_is_fresh"] = False
+        return row
+    age = time.time() - float(stamp) / 1000.0
+    row["quote_age_seconds"] = round(age, 3)
+    row["quote_is_fresh"] = -QUOTE_FUTURE_TOLERANCE_SECONDS <= age <= QUOTE_FRESHNESS_SECONDS
+    return row
 
 
 class SnapshotStore:
@@ -123,7 +140,7 @@ class SnapshotStore:
                 """,
                 normalized,
             ).fetchall()
-        return [json.loads(row[0]) for row in rows]
+        return [_refresh_quote_freshness(json.loads(row[0])) for row in rows]
 
     def latest(self, limit: int = 100) -> list[dict[str, Any]]:
         bounded_limit = max(1, min(int(limit), 10000))
@@ -140,7 +157,7 @@ class SnapshotStore:
                 """,
                 (bounded_limit,),
             ).fetchall()
-        return [json.loads(row[0]) for row in rows]
+        return [_refresh_quote_freshness(json.loads(row[0])) for row in rows]
 
 
 def collect_snapshots(
