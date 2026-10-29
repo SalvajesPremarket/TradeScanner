@@ -157,6 +157,15 @@ def _scan_strategy_config(strategy: dict[str, Any] | None) -> dict[str, Any]:
             valid = False
         if valid:
             parsed[key] = value
+    # Enforce the explicitly requested PreMarketJeanLong settings even when its
+    # saved strategy source still contains the older CONFIG literals.
+    if isinstance(strategy, dict) and str(strategy.get("name", "")).casefold() == "premarketjeanlong":
+        parsed.update({
+            "session_start": dtime(4, 0),
+            "session_end": dtime(16, 0),
+            "gap_min_pct": 2.0,
+            "rvol_min": 2.0,
+        })
     return parsed
 
 
