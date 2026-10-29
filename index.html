@@ -390,7 +390,8 @@
         if (numericInput(id)!==null) active.push(id);
       }
       if (gapActive && (numericInput("gap-min")!==null || numericInput("gap-max")!==null)) active.push("gap-toggle");
-      if (floatActive && (numericInput("float-min")!==null || numericInput("float-max")!==null)) active.push("float-toggle");
+      // FLOAT ON without numeric bounds still requires a known FLOAT value in the current radar.
+      if (floatActive) active.push("float-toggle");
       if (document.getElementById("macd-filter").value!=="any") active.push("macd-filter");
       if (document.getElementById("ema-filter").value!=="any") active.push("ema-filter");
 
