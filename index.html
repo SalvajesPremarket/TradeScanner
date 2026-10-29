@@ -308,7 +308,7 @@
       row.appendChild(td);
     }
 
-    function filteredResults(ignoreFilter = null) {
+    function filteredResults(ignoreFilter = null, sourceRows = allResults) {
       const ignored = id => Array.isArray(ignoreFilter) ? ignoreFilter.includes(id) : ignoreFilter === id;
       const minPrice = ignored("price-min") ? null : numericInput("price-min");
       const maxPrice = ignored("price-max") ? null : numericInput("price-max");
@@ -324,7 +324,7 @@
       const maxChange = ignored("change-max") ? null : numericInput("change-max");
       const macdFilter = ignored("macd-filter") ? "any" : document.getElementById("macd-filter").value;
       const emaFilter = ignored("ema-filter") ? "any" : document.getElementById("ema-filter").value;
-      return allResults.filter(item => {
+      return sourceRows.filter(item => {
         // El radar muestra snapshots disponibles independientemente de que una estrategia los apruebe.
         if (macdFilter !== "any") {
           if (item.macd === null || item.macd === undefined || !Number.isFinite(Number(item.macd))) return false;
@@ -380,7 +380,10 @@
         }
       }
 
-      const current = filteredResults();
+      const freshRows = allResults.filter(item => item.quote_is_fresh === true);
+      const freshCount = freshRows.length;
+      const diagnosticRows = freshCount > 0 ? freshRows : allResults;
+      const current = filteredResults(null, diagnosticRows);
       const active = [];
       const gapActive = document.getElementById("gap-toggle").getAttribute("aria-pressed")==="true";
       const floatActive = document.getElementById("float-toggle").getAttribute("aria-pressed")==="true";
@@ -395,19 +398,28 @@
       if (document.getElementById("macd-filter").value!=="any") active.push("macd-filter");
       if (document.getElementById("ema-filter").value!=="any") active.push("ema-filter");
 
+      const directConflict = pairs.some(pair => pair.enabled && numericInput(pair.min)!==null && numericInput(pair.max)!==null && numericInput(pair.min)>numericInput(pair.max));
       if (!allResults.length) {
         alerts.push({severity:"warn",title:"Sin datos para evaluar",
           detail:"No hay snapshots disponibles en la muestra actual. Comprueba el estado de Schwab y la hora de la última cotización; no es posible recomendar valores de filtros sin datos."});
-      } else if (!current.length && !pairs.some(pair => pair.enabled && numericInput(pair.min)!==null && numericInput(pair.max)!==null && numericInput(pair.min)>numericInput(pair.max))) {
+      } else if (freshCount === 0) {
+        alerts.push({severity:"warn",title:"Sin cotizaciones recientes",
+          detail:"La muestra contiene snapshots guardados, pero ninguna cotización está fresca ahora. No atribuyo la ausencia de resultados a los filtros ni recomiendo umbrales basados en datos obsoletos. Los conflictos directos MIN > MAX sí se muestran arriba."});
+        if (current.length) {
+          const note=document.createElement("div"); note.className="alert-item";
+          note.textContent=current.length+" fila(s) pasan los filtros en caché, pero no se consideran cotizaciones actuales.";
+          host.appendChild(note);
+        }
+      } else if (!current.length && !directConflict) {
         let best = {ids:[],count:0,rows:[]};
         for (const id of [...new Set(active)]) {
-          const rows=filteredResults(id);
+          const rows=filteredResults(id, diagnosticRows);
           if(rows.length>best.count) best={ids:[id],count:rows.length,rows};
         }
         if(best.count===0) {
           const unique=[...new Set(active)];
           for(let i=0;i<unique.length;i++) for(let j=i+1;j<unique.length;j++) {
-            const rows=filteredResults([unique[i],unique[j]]);
+            const rows=filteredResults([unique[i],unique[j]], diagnosticRows);
             if(rows.length>best.count) best={ids:[unique[i],unique[j]],count:rows.length,rows};
           }
         }
