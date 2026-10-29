@@ -29,6 +29,7 @@ _universe_cached_at = 0.0
 _universe_lock = threading.Lock()
 _cycle_lock = threading.Lock()
 _HISTORY_MAX_INFLIGHT = 20
+_history_fetch_semaphore = threading.BoundedSemaphore(4)
 _history_inflight_symbols: set[str] = set()
 _history_inflight_lock = threading.Lock()
 
@@ -64,7 +65,8 @@ def _fetch_history_in_background(
     """Fetch and persist history without allowing a slow provider call to block scans."""
     started = time.monotonic()
     try:
-        payload = fetcher(symbol)
+        with _history_fetch_semaphore:
+            payload = fetcher(symbol)
         candles = normalize_price_history(symbol, payload)
         saved = CandleStore(store_path).save(candles)
         result.update({"candles_count": len(candles), "saved": saved})
