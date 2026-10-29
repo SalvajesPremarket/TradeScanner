@@ -14,7 +14,7 @@ STRATEGY_NAME = "Momentum"
 ET = ZoneInfo("America/New_York")
 CONFIG: dict[str, Any] = {
     "timezone": "America/New_York", "session_start": dtime(4, 0), "session_end": dtime(9, 30),
-    "price_min": 1.0, "price_max": 20.0, "gap_min_pct": 5.0, "gap_ideal_pct": 10.0,
+    "price_min": 1.0, "price_max": 20.0, "gap_min_pct": 2.0,
     "rvol_min": 2.0, "float_max": 20_000_000, "ema_period": 20, "max_first_candles": 1,
     "macd_fast": 12, "macd_slow": 26, "macd_signal": 9,
     "macd_require_above_signal": False, "news_required": True, "news_max_age_hours": 16,
@@ -131,7 +131,6 @@ def scan(candles: list[dict[str, Any]] | None, ctx: dict[str, Any], cfg: dict[st
         for name, (passed, value, reason) in checks.items():
             out["metrics"][name] = value
             if not passed: out["reasons"].append(f"{name}: {reason}")
-        out["metrics"]["gap_ideal"] = gap is not None and gap >= config["gap_ideal_pct"]
         out["metrics"]["ema20"] = round(ema20[-1], 4)
         out["metrics"]["volumen_hoy"] = int(today_volume)
         out["metrics"]["vela_ultimo_timestamp"] = last_ts.isoformat()
