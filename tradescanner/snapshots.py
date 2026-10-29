@@ -61,9 +61,34 @@ class SnapshotStore:
                 "CREATE TABLE IF NOT EXISTS scanner_state ("
                 "state_key TEXT PRIMARY KEY, state_json TEXT NOT NULL)"
             )
+            connection.execute(
+                "CREATE TABLE IF NOT EXISTS scanner_leases ("
+                "lease_key TEXT PRIMARY KEY, owner TEXT NOT NULL, expires_at REAL NOT NULL)"
+            )
 
     def _connect(self):
         return db_connect(self.path)
+
+    def acquire_lease(self, key: str, owner: str, ttl_seconds: float = 180.0) -> bool:
+        """Atomically acquire an expiring cross-instance lease."""
+        now = time.time()
+        expires_at = now + max(10.0, float(ttl_seconds))
+        with self._connect() as connection:
+            cursor = connection.execute(
+                "INSERT INTO scanner_leases(lease_key, owner, expires_at) VALUES (?, ?, ?) "
+                "ON CONFLICT(lease_key) DO UPDATE SET owner=excluded.owner, expires_at=excluded.expires_at "
+                "WHERE scanner_leases.expires_at <= ? OR scanner_leases.owner = ?",
+                (key, owner, expires_at, now, owner),
+            )
+            return cursor.rowcount == 1
+
+    def release_lease(self, key: str, owner: str) -> None:
+        """Release only a lease owned by this process."""
+        with self._connect() as connection:
+            connection.execute(
+                "DELETE FROM scanner_leases WHERE lease_key = ? AND owner = ?",
+                (key, owner),
+            )
 
     def get_state(self, key: str, default: Any = None) -> Any:
         with self._connect() as connection:
