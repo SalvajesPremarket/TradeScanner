@@ -35,6 +35,22 @@ class CandleTests(unittest.TestCase):
         ]}
         self.assertEqual(normalize_price_history("AAPL", payload), [])
 
+    def test_counts_by_symbols_uses_normalized_symbols(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = CandleStore(Path(directory) / "candles.sqlite3")
+            rows = []
+            for symbol, count in (("AAPL", 40), ("MSFT", 34)):
+                for index in range(count):
+                    rows.append({
+                        "symbol": symbol,
+                        "candle_time_ms": ms(14, 9, 30) + index * 60_000,
+                        "open": 10.0, "high": 10.5, "low": 9.5, "close": 10.2,
+                        "volume": 100 + index,
+                    })
+            store.save(rows)
+            counts = store.counts_by_symbols(["aapl", "MSFT", "UNKNOWN", "AAPL"])
+            self.assertEqual(counts, {"AAPL": 40, "MSFT": 34})
+
     def test_rvol_requires_two_comparable_historical_sessions(self):
         with tempfile.TemporaryDirectory() as directory:
             store = CandleStore(Path(directory) / "candles.sqlite3")
