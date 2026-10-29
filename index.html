@@ -158,7 +158,19 @@
     }
     @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}*,*:before,*:after{transition:none!important;animation:none!important}}
 
-  </style>
+  
+    .filter-alerts{margin:0 17px 14px;padding:12px 14px;border:1px solid #29485c;border-radius:9px;background:linear-gradient(120deg,#0b1a28,#0a1521);color:#cfe4ef}
+    .filter-alerts h3{margin:0 0 7px;font-size:11px;letter-spacing:.8px;color:#8de8e4}
+    .filter-alerts .alert-item{padding:9px 0;border-top:1px solid #20384b;line-height:1.5}
+    .filter-alerts .alert-item:first-of-type{border-top:0}
+    .filter-alerts .alert-title{font-weight:800;color:#ffd479}
+    .filter-alerts .alert-detail{margin-top:3px;color:#a9c2d2;font-size:11px}
+    .filter-alerts .alert-action{margin-top:7px;padding:6px 9px;border:1px solid #2e8290;border-radius:5px;background:#0d303a;color:#9df4e8;font-size:10px;font-weight:800;cursor:pointer}
+    .filter-alerts .alert-action:hover{background:#124653}
+    .filter-alerts .alert-ok{color:#4fe0b3}
+    .filter-alerts .alert-error{color:#ff9aab}
+
+</style>
 </head>
 <body>
   <header>
@@ -196,6 +208,10 @@
         <label class="filter"><b>CAMBIO %</b><input id="change-min" type="number" step="0.1" placeholder="MIN" aria-label="Cambio porcentual mínimo"><span>–</span><input id="change-max" type="number" step="0.1" placeholder="MAX" aria-label="Cambio porcentual máximo"></label>
         <button class="toggle" id="reset-filters" type="button">LIMPIAR</button>
       </div>
+      <section id="filter-alerts" class="filter-alerts" role="status" aria-live="polite" aria-label="Alertas inteligentes de filtros">
+        <h3>DIAGNÓSTICO INTELIGENTE DE FILTROS</h3>
+        <div id="filter-alert-content">Comprobando compatibilidad de filtros…</div>
+      </section>
       <div class="tools"><span class="muted" id="result-count">Resultados: 0</span><span class="muted" id="engine-message">Esperando estado del motor.</span></div>
       <p class="code-hint" id="radar-source-note">RADAR · Estas filas son cotizaciones/snapshots del escáner; no son señales de entrada de JeanLong. La estrategia activa se evalúa por separado y solo sus evaluaciones con resultado aprobado cuentan como señales.</p>
       <div class="table-wrap">
@@ -292,20 +308,24 @@
       row.appendChild(td);
     }
 
-    function filteredResults() {
-      const minPrice = numericInput("price-min"), maxPrice = numericInput("price-max");
-      const gapOn = document.getElementById("gap-toggle").getAttribute("aria-pressed") === "true";
-      const floatOn = document.getElementById("float-toggle").getAttribute("aria-pressed") === "true";
-      const minGap = gapOn ? numericInput("gap-min") : null;
-      const maxGap = gapOn ? numericInput("gap-max") : null;
-      const minFloat = floatOn ? numericInput("float-min") : null, maxFloat = floatOn ? numericInput("float-max") : null;
-      const minRvol = numericInput("rvol-min"), minVolume = numericInput("volume-min");
-      const minChange = numericInput("change-min"), maxChange = numericInput("change-max");
-      const macdFilter = document.getElementById("macd-filter").value;
-      const emaFilter = document.getElementById("ema-filter").value;
+    function filteredResults(ignoreFilter = null) {
+      const ignored = id => Array.isArray(ignoreFilter) ? ignoreFilter.includes(id) : ignoreFilter === id;
+      const minPrice = ignored("price-min") ? null : numericInput("price-min");
+      const maxPrice = ignored("price-max") ? null : numericInput("price-max");
+      const gapOn = !ignored("gap-toggle") && document.getElementById("gap-toggle").getAttribute("aria-pressed") === "true";
+      const floatOn = !ignored("float-toggle") && document.getElementById("float-toggle").getAttribute("aria-pressed") === "true";
+      const minGap = gapOn && !ignored("gap-min") ? numericInput("gap-min") : null;
+      const maxGap = gapOn && !ignored("gap-max") ? numericInput("gap-max") : null;
+      const minFloat = floatOn && !ignored("float-min") ? numericInput("float-min") : null;
+      const maxFloat = floatOn && !ignored("float-max") ? numericInput("float-max") : null;
+      const minRvol = ignored("rvol-min") ? null : numericInput("rvol-min");
+      const minVolume = ignored("volume-min") ? null : numericInput("volume-min");
+      const minChange = ignored("change-min") ? null : numericInput("change-min");
+      const maxChange = ignored("change-max") ? null : numericInput("change-max");
+      const macdFilter = ignored("macd-filter") ? "any" : document.getElementById("macd-filter").value;
+      const emaFilter = ignored("ema-filter") ? "any" : document.getElementById("ema-filter").value;
       return allResults.filter(item => {
-        // Con estrategias activas, el radar principal muestra solo símbolos aprobados por sus filtros.
-        if (activeStrategySymbols instanceof Set && !activeStrategySymbols.has(String(item.symbol || "").toUpperCase())) return false;
+        // El radar muestra snapshots disponibles independientemente de que una estrategia los apruebe.
         if (macdFilter !== "any") {
           if (item.macd === null || item.macd === undefined || !Number.isFinite(Number(item.macd))) return false;
           if (macdFilter === "positive" && Number(item.macd) <= 0) return false;
@@ -318,17 +338,18 @@
           if (emaFilter === "below" && Number(item.price) >= Number(item.ema20)) return false;
         }
         const checks = [
-          [minPrice, item.price, "min"], [maxPrice, item.price, "max"],
-          [minGap, item.gap_pct, "min"], [maxGap, item.gap_pct, "max"],
-          [minRvol, item.rvol, "min"], [minVolume, item.volume, "min"],
-          [minChange, item.change_pct, "min"], [maxChange, item.change_pct, "max"]
+          ["price-min", minPrice, item.price, "min"], ["price-max", maxPrice, item.price, "max"],
+          ["gap-min", minGap, item.gap_pct, "min"], ["gap-max", maxGap, item.gap_pct, "max"],
+          ["rvol-min", minRvol, item.rvol, "min"], ["volume-min", minVolume, item.volume, "min"],
+          ["change-min", minChange, item.change_pct, "min"], ["change-max", maxChange, item.change_pct, "max"]
         ];
         if (floatOn) {
-          if (item.float_shares === null || item.float_shares === undefined || !Number.isFinite(Number(item.float_shares))) return false;
+          if ((minFloat !== null || maxFloat !== null || (!ignored("float-min") && !ignored("float-max"))) &&
+              (item.float_shares === null || item.float_shares === undefined || !Number.isFinite(Number(item.float_shares)))) return false;
           if (minFloat !== null && Number(item.float_shares) < minFloat) return false;
           if (maxFloat !== null && Number(item.float_shares) > maxFloat) return false;
         }
-        for (const [threshold, actual, mode] of checks) {
+        for (const [id, threshold, actual, mode] of checks) {
           if (threshold === null) continue;
           if (actual === null || actual === undefined || !Number.isFinite(Number(actual))) return false;
           if (mode === "min" && Number(actual) < threshold) return false;
@@ -336,6 +357,124 @@
         }
         return true;
       });
+    }
+
+    function renderFilterAlerts() {
+      const host = document.getElementById("filter-alert-content");
+      if (!host) return;
+      host.replaceChildren();
+      const alerts = [];
+      const pairs = [
+        {label:"Precio",min:"price-min",max:"price-max",enabled:true},
+        {label:"GAP",min:"gap-min",max:"gap-max",enabled:document.getElementById("gap-toggle").getAttribute("aria-pressed")==="true"},
+        {label:"FLOAT",min:"float-min",max:"float-max",enabled:document.getElementById("float-toggle").getAttribute("aria-pressed")==="true"},
+        {label:"Cambio %",min:"change-min",max:"change-max",enabled:true}
+      ];
+      for (const pair of pairs) {
+        if (!pair.enabled) continue;
+        const min=numericInput(pair.min), max=numericInput(pair.max);
+        if (min!==null && max!==null && min>max) {
+          alerts.push({severity:"error",title:"Conflicto directo · "+pair.label,
+            detail:"El mínimo ("+displayNumber(min)+") supera el máximo ("+displayNumber(max)+"). Sugerencia: disminuir el mínimo hasta "+displayNumber(max)+".",
+            action:{filter:pair.min,value:String(max),label:"Aplicar mínimo sugerido"}});
+        }
+      }
+
+      const current = filteredResults();
+      const active = [];
+      for (const id of filterIds) if (numericInput(id)!==null) active.push(id);
+      if (document.getElementById("gap-toggle").getAttribute("aria-pressed")==="true") {
+        active.push("gap-toggle");
+        if (numericInput("gap-min")===null && numericInput("gap-max")===null) active.pop();
+        else { if(numericInput("gap-min")===null) active.splice(active.indexOf("gap-toggle"),1,"gap-min"); }
+      }
+      if (document.getElementById("float-toggle").getAttribute("aria-pressed")==="true") {
+        if (numericInput("float-min")!==null) active.push("float-min");
+        if (numericInput("float-max")!==null) active.push("float-max");
+        if (numericInput("float-min")!==null || numericInput("float-max")!==null) active.push("float-toggle");
+      }
+      if (document.getElementById("macd-filter").value!=="any") active.push("macd-filter");
+      if (document.getElementById("ema-filter").value!=="any") active.push("ema-filter");
+
+      if (!allResults.length) {
+        alerts.push({severity:"warn",title:"Sin datos para evaluar",
+          detail:"No hay snapshots disponibles en la muestra actual. Comprueba el estado de Schwab y la hora de la última cotización; no es posible recomendar valores de filtros sin datos."});
+      } else if (!current.length && !pairs.some(pair => pair.enabled && numericInput(pair.min)!==null && numericInput(pair.max)!==null && numericInput(pair.min)>numericInput(pair.max))) {
+        let best = {ids:[],count:0,rows:[]};
+        for (const id of [...new Set(active)]) {
+          const rows=filteredResults(id);
+          if(rows.length>best.count) best={ids:[id],count:rows.length,rows};
+        }
+        if(best.count===0) {
+          const unique=[...new Set(active)];
+          for(let i=0;i<unique.length;i++) for(let j=i+1;j<unique.length;j++) {
+            const rows=filteredResults([unique[i],unique[j]]);
+            if(rows.length>best.count) best={ids:[unique[i],unique[j]],count:rows.length,rows};
+          }
+        }
+        if(best.count>0) {
+          for(const id of best.ids) {
+            if(id==="gap-toggle"||id==="float-toggle") {
+              alerts.push({severity:"warn",title:"Posible bloqueo · "+(id==="gap-toggle"?"GAP":"FLOAT"),
+                detail:"Al desactivar este filtro se recuperan candidatos de la muestra. Desactivarlo no modifica la estrategia guardada.",
+                action:{filter:id,off:true,label:"Desactivar filtro"}});
+              continue;
+            }
+            if(id==="macd-filter"||id==="ema-filter") {
+              alerts.push({severity:"warn",title:"Posible bloqueo · "+(id==="macd-filter"?"MACD":"EMA20"),
+                detail:"La muestra contiene candidatos al no exigir esta condición. Valor sugerido: No exigir.",
+                action:{filter:id,value:"any",label:"Aplicar sugerencia"}});
+              continue;
+            }
+            const map={
+              "price-min":{field:"price",dir:"min",label:"PRECIO mínimo"},"price-max":{field:"price",dir:"max",label:"PRECIO máximo"},
+              "gap-min":{field:"gap_pct",dir:"min",label:"GAP mínimo"},"gap-max":{field:"gap_pct",dir:"max",label:"GAP máximo"},
+              "float-min":{field:"float_shares",dir:"min",label:"FLOAT mínimo"},"float-max":{field:"float_shares",dir:"max",label:"FLOAT máximo"},
+              "rvol-min":{field:"rvol",dir:"min",label:"RVOL mínimo"},"volume-min":{field:"volume",dir:"min",label:"VOLUMEN mínimo"},
+              "change-min":{field:"change_pct",dir:"min",label:"CAMBIO mínimo"},"change-max":{field:"change_pct",dir:"max",label:"CAMBIO máximo"}
+            };
+            const spec=map[id]; if(!spec) continue;
+            const values=best.rows.map(row=>row[spec.field]).filter(value=>typeof value==="number"&&Number.isFinite(value));
+            if(!values.length) {
+              alerts.push({severity:"warn",title:"Dato insuficiente · "+spec.label,
+                detail:"Los candidatos de la muestra no tienen valores válidos para este campo. No conviene inventar un umbral; revisa la disponibilidad de datos."});
+              continue;
+            }
+            const suggested=spec.dir==="min"?Math.min(...values):Math.max(...values);
+            const rounded=spec.field==="float_shares"||spec.field==="volume"?Math.floor(suggested):Number(suggested.toFixed(spec.field==="price"?2:1));
+            alerts.push({severity:"warn",title:"Posible conflicto combinado · "+spec.label,
+              detail:"Al relajar este filtro se recuperan "+best.count+" candidato(s) en la muestra. Sugerencia basada en esos datos: "+(spec.dir==="min"?"disminuir":"aumentar")+" a "+displayNumber(rounded)+"; no garantiza una señal ni una operación rentable.",
+              action:{filter:id,value:String(rounded),label:"Aplicar valor sugerido"}});
+          }
+        } else {
+          alerts.push({severity:"warn",title:"Sin resultados · conflicto no aislado",
+            detail:"Ningún filtro individual o pareja de filtros explica por sí solo el bloqueo. Comprueba la disponibilidad de datos, los campos desconocidos y las condiciones combinadas antes de relajar la estrategia."});
+        }
+      } else if (current.length) {
+        const note=document.createElement("div");
+        note.className="alert-item alert-ok";
+        note.textContent="Sin conflictos directos detectados · "+current.length+" fila(s) cumplen los filtros actuales de la muestra.";
+        host.appendChild(note);
+      }
+
+      for(const alert of alerts) {
+        const item=document.createElement("div"); item.className="alert-item";
+        const title=document.createElement("div"); title.className=alert.severity==="error"?"alert-title alert-error":"alert-title"; title.textContent=alert.title; item.appendChild(title);
+        const detail=document.createElement("div"); detail.className="alert-detail"; detail.textContent=alert.detail; item.appendChild(detail);
+        if(alert.action) {
+          const button=document.createElement("button"); button.type="button"; button.className="alert-action";
+          button.textContent=alert.action.label; button.dataset.filterAction="true"; button.dataset.filter=alert.action.filter;
+          if(alert.action.value!==undefined) button.dataset.value=alert.action.value;
+          if(alert.action.off) button.dataset.off="true";
+          item.appendChild(button);
+        }
+        host.appendChild(item);
+      }
+      if(!alerts.length && !host.children.length) {
+        const note=document.createElement("div"); note.className="alert-item alert-ok";
+        note.textContent="Sin conflictos detectados. Las sugerencias se basan solo en snapshots reales disponibles; no cambian los filtros automáticamente.";
+        host.appendChild(note);
+      }
     }
 
     function strategyDetailsForSymbol(symbol) {
@@ -432,6 +571,7 @@
       const staleCount = allResults.filter(item => item.quote_is_fresh !== true).length;
       countNode.textContent = "Mostrando " + topTen.length + " mejores de " + filtered.length + " que cumplen · " + allResults.length + " recibidas" + (staleCount ? " · " + staleCount + " con cotización no actual (referencia)" : "");
       renderRows(topTen);
+      renderFilterAlerts();
     }
     function setToggle(id, enabled) {
       const button = document.getElementById(id);
@@ -456,6 +596,19 @@
     });
     document.getElementById("float-toggle").addEventListener("click", () => {
       setToggle("float-toggle", document.getElementById("float-toggle").getAttribute("aria-pressed") !== "true");
+    });
+    document.getElementById("filter-alerts").addEventListener("click", event => {
+      const button = event.target.closest("button[data-filter-action='true']");
+      if (!button) return;
+      const id = button.dataset.filter;
+      if (button.dataset.off === "true" && (id === "gap-toggle" || id === "float-toggle")) {
+        setToggle(id, false);
+        return;
+      }
+      const target = document.getElementById(id);
+      if (!target) return;
+      if (button.dataset.value !== undefined) target.value = button.dataset.value;
+      applyFilters();
     });
     document.getElementById("reset-filters").addEventListener("click", () => {
       for (const id of filterIds) document.getElementById(id).value = "";
@@ -544,7 +697,7 @@
       // Keep the radar request small: the endpoint enriches each row with candle-derived indicators.
       // A compact batch avoids leaving the UI stuck while PostgreSQL serves per-symbol history.
       try {
-        const snapshotsResponse = await fetch("/api/snapshots/latest?limit=50", {cache:"no-store"});
+        const snapshotsResponse = await fetch("/api/snapshots/latest?limit=100", {cache:"no-store"});
         if (!snapshotsResponse.ok) throw new Error("snapshots_unavailable");
         const snapshotPayload = await snapshotsResponse.json();
         allResults = (Array.isArray(snapshotPayload.results) ? snapshotPayload.results : [])
