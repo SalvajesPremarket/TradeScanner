@@ -4,6 +4,7 @@ import jwt
 import logging
 import os
 import time
+import uuid
 from datetime import datetime, timezone
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -36,6 +37,10 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 
+SCAN_LEASE_KEY = "tradescanner_automatic_scan_worker_v1"
+SCAN_LEASE_TTL_SECONDS = 180.0
+
+
 async def _automatic_scan_loop(stop: asyncio.Event) -> None:
     enabled = os.getenv("TRADESCANNER_AUTO_SCAN_ENABLED", "false").strip().lower()
     if enabled not in {"1", "true", "yes", "on"}:
@@ -45,19 +50,29 @@ async def _automatic_scan_loop(stop: asyncio.Event) -> None:
         interval = max(10, int(os.getenv("TRADESCANNER_SCAN_INTERVAL_SECONDS", "30")))
     except ValueError:
         interval = 30
+    worker_id = uuid.uuid4().hex
     logger.warning("Automatic scan loop coroutine entered; interval_seconds=%s", interval)
 
     while not stop.is_set():
         started = time.monotonic()
+        lease_store = None
+        lease_acquired = False
         try:
-            result = await asyncio.to_thread(run_scan_cycle)
-            logger.info(
+            lease_store = SnapshotStore()
+            lease_acquired = await asyncio.to_thread(
+                lease_store.acquire_lease, SCAN_LEASE_KEY, worker_id, SCAN_LEASE_TTL_SECONDS
+            )
+            if not lease_acquired:
+                logger.info("Automatic scan skipped; another instance owns the scanner lease")
+            else:
+                result = await asyncio.to_thread(run_scan_cycle)
+                logger.info(
                 "Automatic scan cycle finished; status=%s cycles_completed=%s snapshots_saved=%s duration_seconds=%.3f",
                 result.get("status", "unknown"),
                 result.get("cycles_completed", "unknown"),
                 result.get("snapshots_saved", 0),
                 time.monotonic() - started,
-            )
+                )
         except Exception as exc:
             # Store and log only the exception class; never leak provider responses or secrets.
             logger.error("Automatic scan cycle failed; error_type=%s", type(exc).__name__)
@@ -65,6 +80,12 @@ async def _automatic_scan_loop(stop: asyncio.Event) -> None:
                 record_engine_status(SnapshotStore(), status="error", last_error=type(exc).__name__)
             except (OSError, RuntimeError) + DB_ERRORS:
                 pass
+        finally:
+            if lease_acquired and lease_store is not None:
+                try:
+                    await asyncio.to_thread(lease_store.release_lease, SCAN_LEASE_KEY, worker_id)
+                except Exception as lease_error:
+                    logger.warning("Automatic scan lease release failed; error_type=%s", type(lease_error).__name__)
         # Treat the configured interval as start-to-start cadence, not an
         # additional sleep after a slow scan. Otherwise history calls add the
         # full interval on top of every cycle and needlessly slow universe coverage.
