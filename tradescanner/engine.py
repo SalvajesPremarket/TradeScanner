@@ -28,6 +28,9 @@ _universe_cache: dict[str, Any] | None = None
 _universe_cached_at = 0.0
 _universe_lock = threading.Lock()
 _cycle_lock = threading.Lock()
+_HISTORY_MAX_INFLIGHT = 20
+_history_inflight_symbols: set[str] = set()
+_history_inflight_lock = threading.Lock()
 
 
 def _now() -> str:
@@ -51,6 +54,35 @@ def _ema20_from_candles(candles: list[dict[str, Any]]) -> float | None:
     for close in closes[1:]:
         ema = alpha * close + (1.0 - alpha) * ema
     return round(ema, 4)
+
+def _fetch_history_in_background(
+    symbol: str,
+    fetcher: Callable[[str], dict[str, Any]],
+    store_path: Any,
+    result: dict[str, Any],
+) -> None:
+    """Fetch and persist history without allowing a slow provider call to block scans."""
+    started = time.monotonic()
+    try:
+        payload = fetcher(symbol)
+        candles = normalize_price_history(symbol, payload)
+        saved = CandleStore(store_path).save(candles)
+        result.update({"candles_count": len(candles), "saved": saved})
+        logger.info(
+            "Scan cycle history_symbol=%s returned=%s saved=%s duration_seconds=%.3f",
+            symbol, len(candles), saved, time.monotonic() - started,
+        )
+    except Exception as exc:
+        result["error_type"] = type(exc).__name__
+        logger.warning(
+            "Scan cycle history_fetch_failed symbol=%s error_type=%s duration_seconds=%.3f",
+            symbol, type(exc).__name__, time.monotonic() - started,
+        )
+    finally:
+        with _history_inflight_lock:
+            _history_inflight_symbols.discard(symbol)
+        result["done"].set()
+
 
 def _credentials_configured() -> bool:
     has_schwab_client = all(os.getenv(key, "").strip() for key in (
@@ -517,6 +549,56 @@ def run_scan_cycle(
                 # Fresh symbols most likely to pass pre-candle strategy gates are
                 # serviced first, then remaining candidates by liquidity/gap.
                 candidates = sorted(missing_history, key=history_priority, reverse=True)[:10]
+                if history_fetch is get_price_history:
+                    # Schwab can occasionally take minutes to return a candle payload.
+                    # Run production history calls in bounded daemon threads and wait
+                    # at most 8 seconds for this cycle; quotes and strategy checks continue.
+                    jobs = []
+                    for candidate in candidates:
+                        symbol = candidate["symbol"]
+                        with _history_inflight_lock:
+                            if symbol in _history_inflight_symbols:
+                                continue
+                            if len(_history_inflight_symbols) >= _HISTORY_MAX_INFLIGHT:
+                                break
+                            _history_inflight_symbols.add(symbol)
+                        job = {"done": threading.Event()}
+                        thread = threading.Thread(
+                            target=_fetch_history_in_background,
+                            args=(symbol, history_fetch, target_store.path, job),
+                            name="history-" + symbol,
+                            daemon=True,
+                        )
+                        candle_state["history_requests"] += 1
+                        jobs.append((symbol, job))
+                        thread.start()
+
+                    deadline = time.monotonic() + 8.0
+                    pending_count = 0
+                    for symbol, job in jobs:
+                        remaining = max(0.0, deadline - time.monotonic())
+                        if remaining > 0:
+                            job["done"].wait(remaining)
+                        if not job["done"].is_set():
+                            pending_count += 1
+                            continue
+                        if job.get("error_type"):
+                            candle_state["candle_error"] = job["error_type"]
+                            continue
+                        candle_state["candle_symbols"].append(symbol)
+                        candle_state["candles_saved"] += int(job.get("saved", 0))
+                        if candle_state["candle_symbol"] is None:
+                            candle_state["candle_symbol"] = symbol
+                            rvol = candle_store.rvol(symbol)
+                            candle_state["rvol"] = rvol.get("rvol")
+                            candle_state["rvol_sessions_used"] = rvol.get("sessions_used", 0)
+                    candle_state["history_pending_count"] = pending_count
+                    if pending_count:
+                        logger.info(
+                            "Scan cycle history_pending=%s deadline_seconds=8 inflight=%s",
+                            pending_count, len(_history_inflight_symbols),
+                        )
+                else:
                 for candidate in candidates:
                     symbol = candidate["symbol"]
                     candle_state["history_requests"] += 1
