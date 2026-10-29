@@ -122,6 +122,24 @@ class CandleStore:
             )
         return len(records)
 
+    def counts_by_symbols(self, symbols: list[str]) -> dict[str, int]:
+        """Return stored candle counts for many symbols with one database query."""
+        normalized = list(dict.fromkeys(
+            symbol.strip().upper()
+            for symbol in symbols
+            if isinstance(symbol, str) and symbol.strip()
+        ))
+        if not normalized:
+            return {}
+        placeholders = ",".join("?" for _ in normalized)
+        with self._connect() as connection:
+            rows = connection.execute(
+                f"SELECT symbol, COUNT(*) FROM intraday_candles "
+                f"WHERE symbol IN ({placeholders}) GROUP BY symbol",
+                tuple(normalized),
+            ).fetchall()
+        return {str(row[0]).strip().upper(): int(row[1]) for row in rows}
+
     def latest(self, symbol: str, limit: int = 6000) -> list[dict[str, Any]]:
         bounded_limit = max(1, min(int(limit), 10000))
         with self._connect() as connection:
