@@ -41,7 +41,7 @@ SCAN_LEASE_KEY = "tradescanner_automatic_scan_worker_v1"
 SCAN_LEASE_TTL_SECONDS = 300.0
 
 
-async def _automatic_scan_loop(stop: asyncio.Event) -> None:
+async def _automatic_scan_loop(stop: asyncio.Event, worker_id: str | None = None) -> None:
     enabled = os.getenv("TRADESCANNER_AUTO_SCAN_ENABLED", "false").strip().lower()
     if enabled not in {"1", "true", "yes", "on"}:
         logger.warning("Automatic scan loop disabled: TRADESCANNER_AUTO_SCAN_ENABLED is false")
@@ -50,7 +50,7 @@ async def _automatic_scan_loop(stop: asyncio.Event) -> None:
         interval = max(10, int(os.getenv("TRADESCANNER_SCAN_INTERVAL_SECONDS", "30")))
     except ValueError:
         interval = 30
-    worker_id = uuid.uuid4().hex
+    worker_id = worker_id or uuid.uuid4().hex
     logger.warning("Automatic scan loop coroutine entered; interval_seconds=%s", interval)
 
     while not stop.is_set():
@@ -94,7 +94,9 @@ async def _automatic_scan_loop(stop: asyncio.Event) -> None:
 @asynccontextmanager
 async def lifespan(application: FastAPI):
     stop = asyncio.Event()
-    task = asyncio.create_task(_automatic_scan_loop(stop))
+    worker_id = uuid.uuid4().hex
+    application.state.scan_worker_id = worker_id
+    task = asyncio.create_task(_automatic_scan_loop(stop, worker_id))
     application.state.scan_task = task
     start_schwab_stream()
     await asyncio.sleep(0)  # Give the scan coroutine a scheduling turn before startup completes.
@@ -110,6 +112,12 @@ async def lifespan(application: FastAPI):
         stop_schwab_stream()
         task.cancel()
         await asyncio.gather(task, return_exceptions=True)
+        # Release our lease during orderly shutdown; a crashed instance is
+        # recovered automatically after the lease TTL.
+        try:
+            await asyncio.to_thread(SnapshotStore().release_lease, SCAN_LEASE_KEY, worker_id)
+        except Exception as lease_error:
+            logger.warning("Automatic scan shutdown lease release failed; error_type=%s", type(lease_error).__name__)
 
 
 app = FastAPI(title="TradeScanner", version="0.3.1", lifespan=lifespan)
