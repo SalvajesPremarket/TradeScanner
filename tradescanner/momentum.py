@@ -15,7 +15,7 @@ ET = ZoneInfo("America/New_York")
 CONFIG: dict[str, Any] = {
     "timezone": "America/New_York", "session_start": dtime(4, 0), "session_end": dtime(9, 30),
     "price_min": 1.0, "price_max": 20.0, "gap_min_pct": 5.0, "gap_ideal_pct": 10.0,
-    "rvol_min": 5.0, "float_max": 20_000_000, "ema_period": 20, "max_first_candles": 1,
+    "rvol_min": 2.0, "float_max": 20_000_000, "ema_period": 20, "max_first_candles": 1,
     "macd_fast": 12, "macd_slow": 26, "macd_signal": 9,
     "macd_require_above_signal": False, "news_required": True, "news_max_age_hours": 16,
     "news_require_keyword": False, "min_bars": 35,
