@@ -415,14 +415,22 @@
           for(const id of best.ids) {
             if(id==="gap-toggle"||id==="float-toggle") {
               alerts.push({severity:"warn",title:"Posible bloqueo · "+(id==="gap-toggle"?"GAP":"FLOAT"),
-                detail:"Al desactivar este filtro se recuperan candidatos de la muestra. Desactivarlo no modifica la estrategia guardada.",
+                detail:"Al desactivar este filtro se recuperan candidatos de la muestra. Los símbolos sin FLOAT seguirán mostrando el dato como desconocido; desactivarlo no modifica la estrategia guardada.",
                 action:{filter:id,off:true,label:"Desactivar filtro"}});
               continue;
             }
             if(id==="macd-filter"||id==="ema-filter") {
-              alerts.push({severity:"warn",title:"Posible bloqueo · "+(id==="macd-filter"?"MACD":"EMA20"),
-                detail:"La muestra contiene candidatos al no exigir esta condición. Valor sugerido: No exigir.",
-                action:{filter:id,value:"any",label:"Aplicar sugerencia"}});
+              const validIndicatorRows = best.rows.filter(row => id==="macd-filter"
+                ? typeof row.macd==="number" && Number.isFinite(row.macd)
+                : typeof row.ema20==="number" && Number.isFinite(row.ema20) && typeof row.price==="number" && Number.isFinite(row.price));
+              if (!validIndicatorRows.length) {
+                alerts.push({severity:"warn",title:"Datos insuficientes · "+(id==="macd-filter"?"MACD":"EMA20"),
+                  detail:"La muestra no contiene indicadores válidos para esta condición. Revisa primero el historial de velas; no se recomienda cambiar el filtro hasta tener datos."});
+              } else {
+                alerts.push({severity:"warn",title:"Posible bloqueo · "+(id==="macd-filter"?"MACD":"EMA20"),
+                  detail:"La muestra contiene candidatos al no exigir esta condición. Valor sugerido: No exigir; esto solo amplía el radar y no modifica la estrategia guardada.",
+                  action:{filter:id,value:"any",label:"Aplicar sugerencia"}});
+              }
               continue;
             }
             const map={
