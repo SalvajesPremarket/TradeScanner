@@ -1,4 +1,5 @@
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -37,6 +38,23 @@ class SnapshotStoreTests(unittest.TestCase):
         self.assertEqual(result["received_count"], 1)
         self.assertEqual(result["snapshots_saved"], 1)
         self.assertEqual(calls, [["AAPL", "MSFT"]])
+
+    def test_quote_freshness_is_recomputed_when_snapshots_are_read(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = SnapshotStore(Path(directory) / "snapshots.sqlite3")
+            now_ms = int(time.time() * 1000)
+            store.save([
+                {"symbol": "FRESH", "price": 10.0, "quote_time_ms": now_ms, "quote_is_fresh": True},
+                {"symbol": "STALE", "price": 11.0, "quote_time_ms": now_ms - 10 * 60 * 1000, "quote_is_fresh": True},
+                {"symbol": "UNKNOWN", "price": 12.0, "quote_is_fresh": True},
+            ])
+            rows = {row["symbol"]: row for row in store.latest()}
+
+        self.assertTrue(rows["FRESH"]["quote_is_fresh"])
+        self.assertFalse(rows["STALE"]["quote_is_fresh"])
+        self.assertGreater(rows["STALE"]["quote_age_seconds"], 300)
+        self.assertFalse(rows["UNKNOWN"]["quote_is_fresh"])
+        self.assertIsNone(rows["UNKNOWN"]["quote_age_seconds"])
 
     def test_collection_requires_symbols(self):
         with tempfile.TemporaryDirectory() as directory:
