@@ -511,12 +511,9 @@ def run_scan_cycle(
                 ]
                 candle_store = CandleStore(target_store.path)
                 missing_history = []
+                history_counts = candle_store.counts_by_symbols([row["symbol"] for row in eligible])
                 for row in eligible:
-                    try:
-                        existing = candle_store.latest(row["symbol"], limit=35)
-                    except (OSError, RuntimeError, ValueError) + DB_ERRORS:
-                        existing = []
-                    if len(existing) >= 35:
+                    if history_counts.get(row["symbol"], 0) >= 35:
                         candle_state["history_symbols_skipped_with_cache"] += 1
                     else:
                         missing_history.append(row)
