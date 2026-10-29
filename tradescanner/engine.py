@@ -442,11 +442,20 @@ def run_scan_cycle(
                 "error": type(exc).__name__,
             }
             logger.warning("Local FLOAT cache unavailable; error_type=%s", type(exc).__name__)
-        logger.warning(
-            "Scan cycle FLOAT provider=Massive refresh_status=%s rows_saved=%s cached_symbol=%s error=%s",
-            float_provider_state.get("status"), float_provider_state.get("rows_saved", 0),
-            targeted_float_state.get("symbol"), float_provider_state.get("error"),
-        )
+        if float_provider_state.get("error"):
+            logger.warning(
+                "Scan cycle FLOAT provider=Massive refresh_status=%s rows_saved=%s cached_symbol=%s error_type=%s",
+                float_provider_state.get("status"), float_provider_state.get("rows_saved", 0),
+                targeted_float_state.get("symbol"), type(float_provider_state.get("error")).__name__,
+            )
+        else:
+            # Successful cache reads are normal operation, not errors. Avoid an
+            # error-field in this message so log collectors do not misclassify it.
+            logger.info(
+                "Scan cycle FLOAT provider=Massive refresh_status=%s rows_saved=%s cached_symbol=%s",
+                float_provider_state.get("status"), float_provider_state.get("rows_saved", 0),
+                targeted_float_state.get("symbol"),
+            )
 
         # Strategy evaluation covers the whole quote batch, so sampling history for
         # only one ticker leaves almost every candidate unable to calculate EMA/MACD.
