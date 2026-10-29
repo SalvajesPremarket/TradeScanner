@@ -394,6 +394,28 @@
       const freshCount = freshRows.length;
       const diagnosticRows = freshCount > 0 ? freshRows : allResults;
       const current = filteredResults(null, diagnosticRows);
+      // Strategy evaluations are a separate evidence stream from radar snapshots.
+      // Keep them visible even when the radar sample is empty.
+      const strategyEvidence = Object.entries(activeStrategyStates || {}).map(([id, state]) => {
+        const evaluations = Array.isArray(state && state.evaluations) ? state.evaluations : [];
+        const definition = (savedStrategies || []).find(item => item.id === id);
+        const reasons = new Map();
+        for (const result of evaluations) {
+          if (result && result.passed) continue;
+          const list = Array.isArray(result && result.reasons) ? result.reasons : [];
+          for (const reason of list) {
+            const label = String(reason || "").trim();
+            if (label) reasons.set(label, (reasons.get(label) || 0) + 1);
+          }
+        }
+        return {id, name: definition ? definition.name : id, enabled: !!(definition && definition.enabled),
+          evaluations, passed: evaluations.filter(item => item && item.passed).length,
+          reasons: [...reasons.entries()].sort((a,b) => b[1]-a[1]).slice(0,4)};
+      }).filter(item => item.evaluations.length > 0);
+      const strategyPassedSymbols = new Set(strategyEvidence.filter(item => item.enabled || !savedStrategies.length)
+        .flatMap(item => item.evaluations.filter(row => row && row.passed).map(row => String(row.symbol || "").toUpperCase())));
+      const strategyPassedFreshRows = freshRows.filter(row => strategyPassedSymbols.has(String(row.symbol || "").toUpperCase()));
+      const strategyPassedAfterFilters = filteredResults(null, strategyPassedFreshRows);
       const active = [];
       const gapActive = document.getElementById("gap-toggle").getAttribute("aria-pressed")==="true";
       const floatActive = document.getElementById("float-toggle").getAttribute("aria-pressed")==="true";
@@ -485,6 +507,76 @@
         note.className="alert-item alert-ok";
         note.textContent="Sin conflictos directos detectados · "+current.length+" fila(s) cumplen los filtros actuales de la muestra.";
         host.appendChild(note);
+      }
+
+      if (strategyEvidence.length) {
+        const evaluated = strategyEvidence.reduce((sum, item) => sum + item.evaluations.length, 0);
+        const passed = strategyEvidence.reduce((sum, item) => sum + item.passed, 0);
+        const failed = evaluated - passed;
+        const commonReasons = new Map();
+        for (const item of strategyEvidence) for (const [reason, count] of item.reasons) {
+          commonReasons.set(reason, (commonReasons.get(reason) || 0) + count);
+        }
+        const topReasons = [...commonReasons.entries()].sort((a,b) => b[1]-a[1]).slice(0,3);
+        const note = document.createElement("div");
+        note.className = "alert-item";
+        note.textContent = "ESTRATEGIA ACTIVA · " + strategyEvidence.map(item =>
+          item.name + ": " + item.passed + "/" + item.evaluations.length + " aprobadas"
+        ).join(" · ") + (topReasons.length ? " · Descartes frecuentes: " + topReasons.map(([reason,count]) => reason + " (" + count + ")").join("; ") : "");
+        host.appendChild(note);
+
+        // Only call it a strategy/filter conflict when the strategy has passed
+        // symbols with fresh radar snapshots and manual filters remove every one.
+        if (freshCount > 0 && strategyPassedFreshRows.length > 0 && strategyPassedAfterFilters.length === 0 && active.length > 0) {
+          let best = null;
+          for (const id of [...new Set(active)]) {
+            const rows = filteredResults(id, strategyPassedFreshRows);
+            if (rows.length && (!best || rows.length > best.rows.length)) best = {id, rows};
+          }
+          let action = null;
+          let suggestion = "";
+          if (best) {
+            const id = best.id;
+            if (id === "gap-toggle" || id === "float-toggle") {
+              action = {filter:id, off:true, label:"Desactivar filtro de interfaz"};
+              suggestion = "Desactivar temporalmente " + (id === "gap-toggle" ? "GAP" : "FLOAT") + " del radar";
+            } else if (id === "macd-filter" || id === "ema-filter") {
+              action = {filter:id, value:"any", label:"Quitar condición del radar"};
+              suggestion = "Quitar la condición visual " + (id === "macd-filter" ? "MACD" : "EMA20");
+            } else {
+              const fieldMap = {"price-min":["price","min"],"price-max":["price","max"],"gap-min":["gap_pct","min"],"gap-max":["gap_pct","max"],
+                "float-min":["float_shares","min"],"float-max":["float_shares","max"],"rvol-min":["rvol","min"],"volume-min":["volume","min"],
+                "change-min":["change_pct","min"],"change-max":["change_pct","max"]};
+              const spec = fieldMap[id];
+              const values = spec ? best.rows.map(row => row[spec[0]]).filter(value => typeof value === "number" && Number.isFinite(value)) : [];
+              if (spec && values.length) {
+                const raw = spec[1] === "min" ? Math.min(...values) : Math.max(...values);
+                const value = String(spec[0] === "float_shares" || spec[0] === "volume" ? Math.floor(raw) : Number(raw.toFixed(spec[0] === "price" ? 2 : 1)));
+                action = {filter:id, value, label:(spec[1] === "min" ? "Bajar mínimo a " : "Subir máximo a ") + displayNumber(Number(value))};
+                suggestion = "Probar " + id + " = " + displayNumber(Number(value));
+              } else {
+                action = {filter:id, value:"", label:"Eliminar límite del radar"};
+                suggestion = "Eliminar el límite visual " + id;
+              }
+            }
+          }
+          alerts.push({severity:"error", title:"Conflicto entre estrategia aprobada y filtros manuales",
+            detail:"La estrategia aprobó " + strategyPassedFreshRows.length + " símbolo(s) con cotización reciente, pero los filtros de la interfaz dejan " + strategyPassedAfterFilters.length + ". " +
+              (suggestion ? "Cambio opcional sugerido: " + suggestion + ". " : "") +
+              "Esto afecta solo al radar; no cambia ni relaja los requisitos internos de la estrategia.",
+            action});
+        } else if (freshCount > 0 && strategyPassedFreshRows.length === 0 && passed === 0) {
+          const note = document.createElement("div");
+          note.className = "alert-item";
+          note.textContent = "No se atribuye el bloqueo a los filtros de interfaz: las evaluaciones disponibles no muestran símbolos aprobados por la estrategia. Revisa los motivos de descarte de la estrategia antes de cambiar límites.";
+          host.appendChild(note);
+        } else if (freshCount > 0 && strategyPassedFreshRows.length > 0) {
+          const note = document.createElement("div");
+          note.className = "alert-item";
+          note.textContent = "Cruce estrategia/radar: " + strategyPassedFreshRows.length + " símbolo(s) aprobados por estrategia con cotización reciente; " +
+            strategyPassedAfterFilters.length + " sobreviven a los filtros actuales del radar.";
+          host.appendChild(note);
+        }
       }
 
       const hasConflict = directConflict || alerts.some(alert => /conflicto|bloqueo|sin resultados/i.test(alert.title));
