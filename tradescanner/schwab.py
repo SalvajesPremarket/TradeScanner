@@ -217,7 +217,9 @@ def get_price_history(
         },
         method="GET",
     )
-    payload = _request_json(request)
+    # Intraday history is auxiliary to the quote sweep. Bound socket inactivity
+    # more tightly so one slow history response cannot stall the whole universe scan.
+    payload = _request_json(request, timeout=10)
     if not isinstance(payload, dict):
         raise SchwabAPIError("Schwab price-history response was not an object.")
     candles = payload.get("candles")
