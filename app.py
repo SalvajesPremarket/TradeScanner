@@ -38,7 +38,7 @@ logger.setLevel(logging.INFO)
 
 
 SCAN_LEASE_KEY = "tradescanner_automatic_scan_worker_v1"
-SCAN_LEASE_TTL_SECONDS = 180.0
+SCAN_LEASE_TTL_SECONDS = 300.0
 
 
 async def _automatic_scan_loop(stop: asyncio.Event) -> None:
@@ -67,11 +67,11 @@ async def _automatic_scan_loop(stop: asyncio.Event) -> None:
             else:
                 result = await asyncio.to_thread(run_scan_cycle)
                 logger.info(
-                "Automatic scan cycle finished; status=%s cycles_completed=%s snapshots_saved=%s duration_seconds=%.3f",
-                result.get("status", "unknown"),
-                result.get("cycles_completed", "unknown"),
-                result.get("snapshots_saved", 0),
-                time.monotonic() - started,
+                    "Automatic scan cycle finished; status=%s cycles_completed=%s snapshots_saved=%s duration_seconds=%.3f",
+                    result.get("status", "unknown"),
+                    result.get("cycles_completed", "unknown"),
+                    result.get("snapshots_saved", 0),
+                    time.monotonic() - started,
                 )
         except Exception as exc:
             # Store and log only the exception class; never leak provider responses or secrets.
@@ -80,12 +80,6 @@ async def _automatic_scan_loop(stop: asyncio.Event) -> None:
                 record_engine_status(SnapshotStore(), status="error", last_error=type(exc).__name__)
             except (OSError, RuntimeError) + DB_ERRORS:
                 pass
-        finally:
-            if lease_acquired and lease_store is not None:
-                try:
-                    await asyncio.to_thread(lease_store.release_lease, SCAN_LEASE_KEY, worker_id)
-                except Exception as lease_error:
-                    logger.warning("Automatic scan lease release failed; error_type=%s", type(lease_error).__name__)
         # Treat the configured interval as start-to-start cadence, not an
         # additional sleep after a slow scan. Otherwise history calls add the
         # full interval on top of every cycle and needlessly slow universe coverage.
