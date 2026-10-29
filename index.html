@@ -382,17 +382,15 @@
 
       const current = filteredResults();
       const active = [];
-      for (const id of filterIds) if (numericInput(id)!==null) active.push(id);
-      if (document.getElementById("gap-toggle").getAttribute("aria-pressed")==="true") {
-        active.push("gap-toggle");
-        if (numericInput("gap-min")===null && numericInput("gap-max")===null) active.pop();
-        else { if(numericInput("gap-min")===null) active.splice(active.indexOf("gap-toggle"),1,"gap-min"); }
+      const gapActive = document.getElementById("gap-toggle").getAttribute("aria-pressed")==="true";
+      const floatActive = document.getElementById("float-toggle").getAttribute("aria-pressed")==="true";
+      for (const id of filterIds) {
+        if ((id==="gap-min" || id==="gap-max") && !gapActive) continue;
+        if ((id==="float-min" || id==="float-max") && !floatActive) continue;
+        if (numericInput(id)!==null) active.push(id);
       }
-      if (document.getElementById("float-toggle").getAttribute("aria-pressed")==="true") {
-        if (numericInput("float-min")!==null) active.push("float-min");
-        if (numericInput("float-max")!==null) active.push("float-max");
-        if (numericInput("float-min")!==null || numericInput("float-max")!==null) active.push("float-toggle");
-      }
+      if (gapActive && (numericInput("gap-min")!==null || numericInput("gap-max")!==null)) active.push("gap-toggle");
+      if (floatActive && (numericInput("float-min")!==null || numericInput("float-max")!==null)) active.push("float-toggle");
       if (document.getElementById("macd-filter").value!=="any") active.push("macd-filter");
       if (document.getElementById("ema-filter").value!=="any") active.push("ema-filter");
 
