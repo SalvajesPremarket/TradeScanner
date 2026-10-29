@@ -39,6 +39,15 @@ class SnapshotStoreTests(unittest.TestCase):
         self.assertEqual(result["snapshots_saved"], 1)
         self.assertEqual(calls, [["AAPL", "MSFT"]])
 
+    def test_scanner_lease_allows_only_one_owner_until_release(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = SnapshotStore(Path(directory) / "snapshots.sqlite3")
+            self.assertTrue(store.acquire_lease("worker", "owner-a", ttl_seconds=30))
+            self.assertFalse(store.acquire_lease("worker", "owner-b", ttl_seconds=30))
+            store.release_lease("worker", "owner-a")
+            self.assertTrue(store.acquire_lease("worker", "owner-b", ttl_seconds=30))
+            store.release_lease("worker", "owner-b")
+
     def test_quote_freshness_is_recomputed_when_snapshots_are_read(self):
         with tempfile.TemporaryDirectory() as directory:
             store = SnapshotStore(Path(directory) / "snapshots.sqlite3")
