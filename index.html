@@ -686,22 +686,60 @@
       }
     }
 
+    function hasActiveInterfaceFilters() {
+      const gapOn = document.getElementById("gap-toggle").getAttribute("aria-pressed") === "true";
+      const floatOn = document.getElementById("float-toggle").getAttribute("aria-pressed") === "true";
+      const numericActive = ["price-min","price-max","rvol-min","volume-min","change-min","change-max"].some(id => numericInput(id) !== null);
+      const gapActive = gapOn && (numericInput("gap-min") !== null || numericInput("gap-max") !== null);
+      const floatActive = floatOn;
+      return numericActive || gapActive || floatActive ||
+        document.getElementById("macd-filter").value !== "any" ||
+        document.getElementById("ema-filter").value !== "any";
+    }
+
     function applyFilters() {
-      const filtered = filteredResults().sort((a, b) => {
+      const activeStrategies = savedStrategies.filter(item => item && item.enabled);
+      const filtersActive = hasActiveInterfaceFilters();
+      let sourceRows = [];
+      let scopeLabel = "Sin filtros ni estrategia activa · tabla vacía";
+      if (activeStrategies.length) {
+        const passedSymbols = new Set();
+        for (const strategy of activeStrategies) {
+          const scan = activeStrategyStates[strategy.id] || {};
+          const evaluations = Array.isArray(scan.evaluations) ? scan.evaluations : [];
+          for (const evaluation of evaluations) {
+            if (evaluation && evaluation.passed && evaluation.symbol) {
+              passedSymbols.add(String(evaluation.symbol).toUpperCase());
+            }
+          }
+        }
+        if (!passedSymbols.size && activeStrategies.length === 1 && activeStrategyId === activeStrategies[0].id &&
+            activeStrategySymbols instanceof Set && activeStrategySymbols.size) {
+          for (const symbol of activeStrategySymbols) passedSymbols.add(String(symbol).toUpperCase());
+        }
+        sourceRows = allResults.filter(item => passedSymbols.has(String(item.symbol || "").toUpperCase()));
+        scopeLabel = "Estrategias activas: " + activeStrategies.length + " · " + passedSymbols.size + " símbolos aprobados";
+      } else if (filtersActive) {
+        sourceRows = allResults;
+        scopeLabel = "Filtros de interfaz activos";
+      }
+      const filtered = (activeStrategies.length || filtersActive ? filteredResults(null, sourceRows) : []).sort((a, b) => {
         // Ranking: mayor cambio porcentual, luego RVOL y finalmente volumen.
         const changeA = Number.isFinite(Number(a.change_pct)) ? Number(a.change_pct) : -Infinity;
         const changeB = Number.isFinite(Number(b.change_pct)) ? Number(b.change_pct) : -Infinity;
         if (changeA !== changeB) return changeB - changeA;
         const rvolA = Number.isFinite(Number(a.rvol)) ? Number(a.rvol) : -Infinity;
         const rvolB = Number.isFinite(Number(b.rvol)) ? Number(b.rvol) : -Infinity;
-        if (rvolA !== rvolB) return rvolB - rvolA;
+        if (rvolA !== changeB) return rvolB - rvolA;
         const volumeA = Number.isFinite(Number(a.volume)) ? Number(a.volume) : -Infinity;
         const volumeB = Number.isFinite(Number(b.volume)) ? Number(b.volume) : -Infinity;
         return volumeB - volumeA;
       });
       const topTen = filtered.slice(0, 10);
       const staleCount = allResults.filter(item => item.quote_is_fresh !== true).length;
-      countNode.textContent = "Mostrando " + topTen.length + " mejores de " + filtered.length + " que cumplen · " + allResults.length + " recibidas" + (staleCount ? " · " + staleCount + " con cotización no actual (referencia)" : "");
+      countNode.textContent = scopeLabel + " · mostrando " + topTen.length + " de " + filtered.length + " resultados" +
+        (activeStrategies.length || filtersActive ? " · " + allResults.length + " snapshots en radar" : "") +
+        (staleCount ? " · " + staleCount + " con cotización no actual (referencia)" : "");
       renderRows(topTen);
       renderFilterAlerts();
     }
