@@ -65,10 +65,15 @@ async def _automatic_scan_loop(stop: asyncio.Event) -> None:
                 record_engine_status(SnapshotStore(), status="error", last_error=type(exc).__name__)
             except (OSError, RuntimeError) + DB_ERRORS:
                 pass
-        try:
-            await asyncio.wait_for(stop.wait(), timeout=interval)
-        except asyncio.TimeoutError:
-            pass
+        # Treat the configured interval as start-to-start cadence, not an
+        # additional sleep after a slow scan. Otherwise history calls add the
+        # full interval on top of every cycle and needlessly slow universe coverage.
+        remaining = max(0.0, interval - (time.monotonic() - started))
+        if remaining > 0:
+            try:
+                await asyncio.wait_for(stop.wait(), timeout=remaining)
+            except asyncio.TimeoutError:
+                pass
 
 
 @asynccontextmanager
