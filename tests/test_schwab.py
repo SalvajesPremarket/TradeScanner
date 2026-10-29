@@ -43,6 +43,28 @@ class SchwabAdapterTests(unittest.TestCase):
         _clear_token_cache()
 
 
+    def test_cached_access_token_skips_reloading_credentials(self):
+        _clear_token_cache()
+        calls = []
+
+        def fake_request(request, timeout=15):
+            calls.append(request.full_url)
+            if request.full_url == "https://api.schwabapi.com/v1/oauth/token":
+                return {"access_token": "test-access-token", "expires_in": 3600}
+            return {"AAPL": {"quote": {"lastPrice": 100.0}, "reference": {}}}
+
+        with patch.dict(os.environ, {
+            "SCHWAB_CLIENT_ID": "test-id",
+            "SCHWAB_CLIENT_SECRET": "test-secret",
+            "SCHWAB_REFRESH_TOKEN": "test-refresh",
+        }), patch("tradescanner.schwab._credentials", return_value=("test-id", "test-secret", "test-refresh")) as credentials, patch("tradescanner.schwab._request_json", side_effect=fake_request):
+            get_quotes(["AAPL"])
+            get_quotes(["AAPL"])
+
+        self.assertEqual(credentials.call_count, 1)
+        self.assertEqual(calls.count("https://api.schwabapi.com/v1/oauth/token"), 1)
+        _clear_token_cache()
+
     def test_identifies_oauth_stage_without_exposing_provider_body(self):
         _clear_token_cache()
         with patch.dict(os.environ, {
