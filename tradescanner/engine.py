@@ -17,7 +17,7 @@ from tradescanner.snapshots import BATCH_SIZE, SnapshotStore, collect_snapshots
 from tradescanner.schwab import SchwabAPIError, SchwabConfigurationError, get_daily_history, get_price_history, get_quotes
 from tradescanner.universe import load_symbol_universe
 from tradescanner.strategies import active_strategies, is_momentum_trader_program, is_momentum_scan_program, strategy_matches
-from tradescanner.momentum_data import average_daily_volume_30d, recent_stock_news
+from tradescanner.momentum_data import recent_stock_news
 from tradescanner.opengap_franco import evaluate as evaluate_open_gap_franco
 
 logger = logging.getLogger(__name__)
@@ -223,7 +223,10 @@ def _evaluate_original_scan_strategy(store: SnapshotStore, batch: list[str], str
         # Most universe symbols have no cached OHLCV yet. Reject those locally
         # before making auxiliary daily-volume/news requests for every ticker.
         enough_candles = len(candles) >= int(cfg.get("min_bars", 35))
-        daily = average_daily_volume_30d(store, symbol) if enough_candles else {"status": "not_requested", "average": None}
+        rvol_data = (
+            candle_store.rvol(symbol, as_of_ms=row.get("quote_time_ms"))
+            if enough_candles else {"rvol": None, "sessions_used": 0}
+        )
         news = recent_stock_news(store, symbol) if enough_candles else {"status": "not_requested", "news": []}
         context = {
             "symbol": symbol,
@@ -231,7 +234,8 @@ def _evaluate_original_scan_strategy(store: SnapshotStore, batch: list[str], str
             "quote_price": row.get("price"),
             "current_volume": row.get("volume"),
             "prev_close": row.get("previous_close"),
-            "avg_volume_30d": daily.get("average"),
+            "rvol": rvol_data.get("rvol"),
+            "rvol_sessions": rvol_data.get("sessions_used", 0),
             "float_shares": row.get("float_shares"),
             "news": news.get("news", []),
         }
@@ -261,7 +265,8 @@ def _evaluate_original_scan_strategy(store: SnapshotStore, batch: list[str], str
             "data_source": "schwab_quotes_and_historical_candles",
             "quote_price": row.get("price"),
             "candles_available": len(candles),
-            "average_daily_volume_status": daily.get("status"),
+            "rvol_sessions_used": rvol_data.get("sessions_used", 0),
+            "rvol_as_of": rvol_data.get("as_of"),
             "news_status": news.get("status"),
         })
 
@@ -558,14 +563,15 @@ def run_scan_cycle(
                     abs_gap = abs(gap) if isinstance(gap, (int, float)) else -1
                     return (fresh, strategy_fit, volume, abs_gap)
 
-                # Existing histories are skipped; the per-cycle cap is unchanged.
-                # Fresh symbols most likely to pass pre-candle strategy gates are
-                # serviced first, then remaining candidates by liquidity/gap.
-                candidates = sorted(missing_history, key=history_priority, reverse=True)[:10]
+                # JeanLong evaluates every fresh candidate with 1-minute OHLCV.
+                # Backfill up to the in-flight ceiling each cycle; otherwise the
+                # 10-symbol cap leaves part of each 21-symbol evaluation batch
+                # without candles and EMA/MACD/RVOL cannot be calculated.
+                candidates = sorted(missing_history, key=history_priority, reverse=True)[:20]
                 if history_fetch in {get_price_history, _get_jeanlong_minute_history}:
                     # Schwab can occasionally take minutes to return a candle payload.
                     # Run production history calls in bounded daemon threads and wait
-                    # at most 8 seconds for this cycle; quotes and strategy checks continue.
+                    # at most 12 seconds for this cycle; quotes and strategy checks continue.
                     jobs = []
                     for candidate in candidates:
                         symbol = candidate["symbol"]
@@ -586,7 +592,7 @@ def run_scan_cycle(
                         jobs.append((symbol, job))
                         thread.start()
 
-                    deadline = time.monotonic() + 8.0
+                    deadline = time.monotonic() + 12.0
                     pending_count = 0
                     for symbol, job in jobs:
                         remaining = max(0.0, deadline - time.monotonic())
