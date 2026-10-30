@@ -172,13 +172,13 @@ def scan(candles: list[dict[str, Any]] | None, ctx: dict[str, Any], cfg: dict[st
         macd_signal = _ema(macd_line, int(config["macd_signal"]))
         # Session eligibility must use the timestamp of the current observed quote,
         # not the timestamp of the newest historical candle (which may be stale).
-        local_time = quote_time.timetz().replace(tzinfo=None)
-        checks: dict[str, tuple[bool, Any, str]] = {}
-        checks["hora"] = (config["session_start"] <= local_time < config["session_end"], local_time.strftime("%H:%M"), f"fuera de {config['session_start'].strftime('%H:%M')}-{config['session_end'].strftime('%H:%M')} ET")
-        checks["precio"] = (config["price_min"] <= price <= config["price_max"], round(price, 4), f"precio fuera de ${config['price_min']}-${config['price_max']}")
-        prev_close = ctx.get("prev_close")
-        gap = ((price - float(prev_close)) / float(prev_close) * 100) if isinstance(prev_close, (int, float)) and not isinstance(prev_close, bool) and prev_close > 0 else None
-        checks["gap_pct"] = (gap is not None and gap >= config["gap_min_pct"], round(gap, 2) if gap is not None else None, "sin cierre anterior" if gap is None else f"gap < {config['gap_min_pct']}%")
+        quote_context = {
+            **ctx,
+            "quote_time_ms": int(quote_time.timestamp() * 1000),
+            "quote_price": price,
+            "current_volume": today_volume,
+        }
+        checks = quote_only_checks(quote_context, config)
         # Use true time-of-day relative volume, not today's volume divided by a
         # full-session daily average (misleading during premarket).
         rvol_value = ctx.get("rvol")
@@ -196,10 +196,6 @@ def scan(candles: list[dict[str, Any]] | None, ctx: dict[str, Any], cfg: dict[st
             "sin sesiones intradía comparables para calcular RVol"
             if rvol is None else f"RVol < {config['rvol_min']}x",
         )
-        checks["volumen_minimo"] = (today_volume >= config["volume_min"], int(today_volume), f"volumen < {config['volume_min']:,}")
-        float_shares = ctx.get("float_shares")
-        float_ok = isinstance(float_shares, (int, float)) and not isinstance(float_shares, bool) and 0 < float_shares < config["float_max"]
-        checks["float"] = (float_ok, int(float_shares) if float_ok else None, "float desconocido" if not isinstance(float_shares, (int, float)) or not float_shares else f"float >= {config['float_max']:,}")
         # Evaluate the latest candle's OPEN against EMA20 as it stood before that candle.
         # This avoids requiring prior closes above EMA20 and avoids using the current candle close
         # to move the reference EMA after the opening price was established.
