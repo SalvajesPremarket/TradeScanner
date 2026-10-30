@@ -66,6 +66,29 @@ class SchwabAdapterTests(unittest.TestCase):
         self.assertIn("frequency=1", history_url)
         _clear_token_cache()
 
+    def test_jeanlong_history_supports_five_extended_hours_sessions(self):
+        _clear_token_cache()
+        requested_urls = []
+
+        def fake_request(request, timeout=15):
+            requested_urls.append(request.full_url)
+            if request.full_url == "https://api.schwabapi.com/v1/oauth/token":
+                return {"access_token": "test-access-token", "expires_in": 3600}
+            return {"candles": []}
+
+        with patch.dict(os.environ, {
+            "SCHWAB_CLIENT_ID": "test-id",
+            "SCHWAB_CLIENT_SECRET": "test-secret",
+            "SCHWAB_REFRESH_TOKEN": "test-refresh",
+        }), patch("tradescanner.schwab._request_json", side_effect=fake_request):
+            get_price_history("AAPL", period=5, frequency=1)
+
+        history_url = next(url for url in requested_urls if "/pricehistory?" in url)
+        self.assertIn("period=5", history_url)
+        self.assertIn("frequency=1", history_url)
+        self.assertIn("needExtendedHoursData=true", history_url)
+        _clear_token_cache()
+
     def test_cached_access_token_skips_reloading_credentials(self):
         _clear_token_cache()
         calls = []
