@@ -63,16 +63,23 @@ def scan(candles: list[dict[str, Any]] | None, ctx: dict[str, Any], cfg: dict[st
             except (KeyError, TypeError, ValueError, OverflowError, OSError):
                 continue
         valid.sort(key=lambda item: item[0])
+        # Current quote fields are authoritative. Never calculate an entry from
+        # yesterday's last candle or from a candle later than the observed quote.
+        quote_time_ms = ctx.get("quote_time_ms")
+        quote_time = valid[-1][0]
+        if isinstance(quote_time_ms, (int, float)) and not isinstance(quote_time_ms, bool) and isfinite(float(quote_time_ms)) and quote_time_ms > 0:
+            quote_time = datetime.fromtimestamp(float(quote_time_ms) / 1000, ET)
+            quote_minute = int(float(quote_time_ms) // 60000)
+            valid = [item for item in valid if int(item[0].timestamp() * 1000 // 60000) <= quote_minute]
+            if not valid or int(valid[-1][0].timestamp() * 1000 // 60000) != quote_minute:
+                out["metrics"]["vela_ultimo_timestamp"] = valid[-1][0].isoformat() if valid else None
+                out["metrics"]["quote_time"] = quote_time.isoformat()
+                out["reasons"].append("velas: falta la vela de 1 minuto correspondiente a la cotización actual")
+                return out
         if len(valid) < int(config["min_bars"]):
             out["reasons"].append("velas: historial válido insuficiente")
             return out
         last_ts, candle_open, candle_price, _ = valid[-1]
-        # Current quote fields are authoritative for live price/session checks.
-        # Historical candles can be days old and must never override a fresh quote.
-        quote_time_ms = ctx.get("quote_time_ms")
-        quote_time = last_ts
-        if isinstance(quote_time_ms, (int, float)) and not isinstance(quote_time_ms, bool) and quote_time_ms > 0:
-            quote_time = datetime.fromtimestamp(float(quote_time_ms) / 1000, ET)
         quote_price = ctx.get("quote_price")
         price = float(quote_price) if isinstance(quote_price, (int, float)) and not isinstance(quote_price, bool) and isfinite(float(quote_price)) and float(quote_price) > 0 else candle_price
         local_today = quote_time.date()
