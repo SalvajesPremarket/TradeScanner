@@ -202,7 +202,7 @@ def _news_session_for_result(article: dict[str, Any]) -> dict[str, str] | None:
 
 def _evaluate_original_scan_strategy(store: SnapshotStore, batch: list[str], strategy: dict[str, Any]) -> dict[str, Any]:
     """Run the stored scan(df, ctx) Momentum contract through the safe OHLCV adapter."""
-    from tradescanner.momentum import scan as evaluate_momentum_scan
+    from tradescanner.momentum import quote_only_checks, scan as evaluate_momentum_scan
     from tradescanner.momentum_runtime import _scan_strategy_config
 
     rows = store.latest_for_symbols(batch)
@@ -219,17 +219,9 @@ def _evaluate_original_scan_strategy(store: SnapshotStore, batch: list[str], str
         if row.get("quote_is_fresh") is not True:
             skipped[symbol] = "quote_not_fresh"
             continue
-        candles = candle_store.latest(symbol, limit=6000)
-        # Most universe symbols have no cached OHLCV yet. Reject those locally
-        # before making auxiliary daily-volume/news requests for every ticker.
-        enough_candles = len(candles) >= int(cfg.get("min_bars", 35))
-        rvol_data = (
-            candle_store.rvol(symbol, as_of_ms=row.get("quote_time_ms"))
-            if enough_candles else {"rvol": None, "sessions_used": 0}
-        )
-        # Evaluate deterministic quote/indicator filters first. Only request
-        # external headlines when every other JeanLong condition already passes;
-        # otherwise slow RSS calls add latency without changing the rejection.
+        # Quote-only checks run before touching the candle table. Most fresh
+        # universe rows fail price/GAP/volume/FLOAT, so loading 6,000 bars and
+        # calculating RVOL for every one was needlessly slow.
         news = {"status": "not_requested", "news": []}
         context = {
             "symbol": symbol,
@@ -237,16 +229,43 @@ def _evaluate_original_scan_strategy(store: SnapshotStore, batch: list[str], str
             "quote_price": row.get("price"),
             "current_volume": row.get("volume"),
             "prev_close": row.get("previous_close"),
-            "rvol": rvol_data.get("rvol"),
-            "rvol_sessions": rvol_data.get("sessions_used", 0),
+            "rvol": None,
+            "rvol_sessions": 0,
             "float_shares": row.get("float_shares"),
             "news": [],
         }
-        result = evaluate_momentum_scan(candles, context, cfg)
-        if enough_candles and cfg.get("news_required", True) and result.get("reasons") == ["noticia: sin noticia fresca verificable"]:
-            news = recent_stock_news(store, symbol)
-            context["news"] = news.get("news", [])
+        quote_checks = quote_only_checks(context, cfg)
+        quote_reasons = [
+            f"{name}: {reason}"
+            for name, (passed, _value, reason) in quote_checks.items()
+            if not passed
+        ]
+        if quote_reasons:
+            candles = []
+            enough_candles = False
+            rvol_data = {"rvol": None, "sessions_used": 0}
+            result = {
+                "passed": False,
+                "metrics": {name: value for name, (_passed, value, _reason) in quote_checks.items()},
+                "reasons": quote_reasons,
+            }
+        else:
+            candles = candle_store.latest(symbol, limit=6000)
+            # Only quote-qualified symbols need indicator history and time-of-day RVOL.
+            enough_candles = len(candles) >= int(cfg.get("min_bars", 35))
+            rvol_data = (
+                candle_store.rvol(symbol, as_of_ms=row.get("quote_time_ms"))
+                if enough_candles else {"rvol": None, "sessions_used": 0}
+            )
+            context["rvol"] = rvol_data.get("rvol")
+            context["rvol_sessions"] = rvol_data.get("sessions_used", 0)
             result = evaluate_momentum_scan(candles, context, cfg)
+            # Headlines are requested only when every price/volume/FLOAT/indicator
+            # condition already passes; an unavailable news source cannot stall scans.
+            if enough_candles and cfg.get("news_required", True) and result.get("reasons") == ["noticia: sin noticia fresca verificable"]:
+                news = recent_stock_news(store, symbol)
+                context["news"] = news.get("news", [])
+                result = evaluate_momentum_scan(candles, context, cfg)
         news_headlines = [
             item for item in (_news_session_for_result(article) for article in news.get("news", []))
             if item is not None
