@@ -15,7 +15,7 @@ ET = ZoneInfo("America/New_York")
 CONFIG: dict[str, Any] = {
     "timezone": "America/New_York", "session_start": dtime(4, 0), "session_end": dtime(16, 0),
     "price_min": 1.0, "price_max": 20.0, "gap_min_pct": 2.0,
-    "rvol_min": 2.0, "float_max": 20_000_000, "volume_min": 0, "ema_period": 20, "max_first_candles": 1,
+    "rvol_min": 2.0, "float_max": 20_000_000, "volume_min": 0, "ema_period": 20, "ema_open_max_distance_pct": 1.0,
     "macd_fast": 12, "macd_slow": 26, "macd_signal": 9,
     "macd_require_above_signal": False, "news_required": True, "news_max_age_hours": 16,
     "news_require_keyword": False, "min_bars": 35,
@@ -53,19 +53,20 @@ def scan(candles: list[dict[str, Any]] | None, ctx: dict[str, Any], cfg: dict[st
         for candle in candles:
             try:
                 stamp = candle.get("candle_time_ms")
+                candle_open = float(candle["open"])
                 close = float(candle["close"])
                 volume = float(candle["volume"])
-                if stamp is None or not isfinite(close) or close <= 0 or not isfinite(volume) or volume < 0:
+                if stamp is None or not isfinite(candle_open) or candle_open <= 0 or not isfinite(close) or close <= 0 or not isfinite(volume) or volume < 0:
                     continue
                 ts = datetime.fromtimestamp(float(stamp) / 1000, ET)
-                valid.append((ts, close, volume))
+                valid.append((ts, candle_open, close, volume))
             except (KeyError, TypeError, ValueError, OverflowError, OSError):
                 continue
         valid.sort(key=lambda item: item[0])
         if len(valid) < int(config["min_bars"]):
             out["reasons"].append("velas: historial válido insuficiente")
             return out
-        last_ts, candle_price, _ = valid[-1]
+        last_ts, candle_open, candle_price, _ = valid[-1]
         # Current quote fields are authoritative for live price/session checks.
         # Historical candles can be days old and must never override a fresh quote.
         quote_time_ms = ctx.get("quote_time_ms")
@@ -79,8 +80,8 @@ def scan(candles: list[dict[str, Any]] | None, ctx: dict[str, Any], cfg: dict[st
         if isinstance(current_volume, (int, float)) and not isinstance(current_volume, bool) and isfinite(float(current_volume)) and float(current_volume) >= 0:
             today_volume = float(current_volume)
         else:
-            today_volume = sum(volume for ts, _, volume in valid if ts.date() == local_today)
-        closes = [close for _, close, _ in valid]
+            today_volume = sum(volume for ts, _, _, volume in valid if ts.date() == local_today)
+        closes = [close for _, _, close, _ in valid]
         ema20 = _ema(closes, int(config["ema_period"]))
         macd_line = [a - b for a, b in zip(_ema(closes, int(config["macd_fast"])), _ema(closes, int(config["macd_slow"])))]
         macd_signal = _ema(macd_line, int(config["macd_signal"]))
@@ -100,12 +101,17 @@ def scan(candles: list[dict[str, Any]] | None, ctx: dict[str, Any], cfg: dict[st
         float_shares = ctx.get("float_shares")
         float_ok = isinstance(float_shares, (int, float)) and not isinstance(float_shares, bool) and 0 < float_shares < config["float_max"]
         checks["float"] = (float_ok, int(float_shares) if float_ok else None, "float desconocido" if not isinstance(float_shares, (int, float)) or not float_shares else f"float >= {config['float_max']:,}")
-        above = [close > ema for close, ema in zip(closes, ema20)]
-        streak = 0
-        for flag in reversed(above):
-            if not flag: break
-            streak += 1
-        checks["velas_sobre_ema20"] = (0 < streak <= config["max_first_candles"] and streak < len(above), streak, "sin cruce reciente sobre EMA20" if streak == 0 or streak >= len(above) else f"ya lleva {streak} velas sobre EMA20 (máx. {config['max_first_candles']})")
+        # Evaluate the latest candle's OPEN against EMA20 as it stood before that candle.
+        # This avoids requiring prior closes above EMA20 and avoids using the current candle close
+        # to move the reference EMA after the opening price was established.
+        ema20_at_open = ema20[-2]
+        open_distance_pct = (candle_open - ema20_at_open) / ema20_at_open * 100
+        ema_open_ok = 0 < open_distance_pct <= float(config["ema_open_max_distance_pct"])
+        checks["apertura_sobre_ema20"] = (
+            ema_open_ok,
+            round(open_distance_pct, 4),
+            "apertura en o debajo de EMA20" if open_distance_pct <= 0 else f"apertura a más de {config['ema_open_max_distance_pct']}% sobre EMA20"
+        )
         macd = macd_line[-1]
         macd_ok = macd > 0 and (not config["macd_require_above_signal"] or macd > macd_signal[-1])
         checks["macd"] = (macd_ok, round(macd, 5), "MACD no positivo")
