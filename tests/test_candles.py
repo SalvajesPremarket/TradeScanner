@@ -109,6 +109,37 @@ class CandleTests(unittest.TestCase):
             self.assertEqual(result["average_volume"], 105)
             self.assertEqual(result["rvol"], 3.8095)
 
+    def test_rvol_uses_quote_time_and_does_not_relabel_stale_session_as_current(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = CandleStore(Path(directory) / "candles.sqlite3")
+            store.save([
+                {"symbol": "AAPL", "candle_time_ms": ms(13, 9, 30),
+                 "open": 10.0, "high": 10.5, "low": 9.5, "close": 10.2, "volume": 200},
+            ])
+            # The quote belongs to the next session, but no current-session candle
+            # has arrived yet. Yesterday must not be reported as today's RVOL.
+            result = store.rvol("AAPL", as_of_ms=ms(14, 9, 30))
+            self.assertIsNone(result["rvol"])
+            self.assertEqual(result["current_volume"], 0)
+            self.assertEqual(result["sessions_used"], 0)
+
+    def test_rvol_uses_quote_minute_for_current_and_historical_sessions(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = CandleStore(Path(directory) / "candles.sqlite3")
+            rows = []
+            for day, volumes in ((12, (50, 50)), (13, (100, 100)), (14, (150, 250))):
+                for minute, volume in zip((30, 31), volumes):
+                    rows.append({
+                        "symbol": "AAPL", "candle_time_ms": ms(day, 9, minute),
+                        "open": 10.0, "high": 10.5, "low": 9.5, "close": 10.2,
+                        "volume": volume,
+                    })
+            store.save(rows)
+            result = store.rvol("AAPL", as_of_ms=ms(14, 9, 31))
+            self.assertEqual(result["current_volume"], 400)
+            self.assertEqual(result["sessions_used"], 2)
+            self.assertEqual(result["rvol"], 2.6667)
+
     def test_rvol_is_unavailable_without_prior_sessions(self):
         with tempfile.TemporaryDirectory() as directory:
             store = CandleStore(Path(directory) / "candles.sqlite3")
