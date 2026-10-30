@@ -23,6 +23,11 @@ from tradescanner.opengap_franco import evaluate as evaluate_open_gap_franco
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
+
+def _get_jeanlong_minute_history(symbol: str) -> dict[str, Any]:
+    """Five days of one-minute candles including extended hours for JeanLong MACD/EMA."""
+    return get_price_history(symbol, period=5, frequency=1)
+
 UNIVERSE_CACHE_SECONDS = 6 * 60 * 60
 _universe_cache: dict[str, Any] | None = None
 _universe_cached_at = 0.0
@@ -495,7 +500,12 @@ def run_scan_cycle(
         # only one ticker leaves almost every candidate unable to calculate EMA/MACD.
         # Backfill a small bounded set of symbols per cycle, prioritizing missing
         # histories and liquid/gapping names. This does not relax strategy filters.
-        history_fetch = candle_fetcher or (get_price_history if quote_fetcher is None else None)
+        active_scan_strategies = [s for s in active_strategies(target_store) if is_momentum_scan_program(s)]
+        jeanlong_minute_scan = any(str(s.get("name", "")).casefold() == "premarketjeanlong" for s in active_scan_strategies)
+        history_fetch = candle_fetcher or (
+            _get_jeanlong_minute_history if quote_fetcher is None and jeanlong_minute_scan
+            else get_price_history if quote_fetcher is None else None
+        )
         candle_state["candle_symbols"] = []
         candle_state["history_requests"] = 0
         candle_state["history_symbols_skipped_with_cache"] = 0
@@ -513,7 +523,11 @@ def run_scan_cycle(
                 missing_history = []
                 history_counts = candle_store.counts_by_symbols([row["symbol"] for row in eligible])
                 for row in eligible:
-                    if history_counts.get(row["symbol"], 0) >= 35:
+                    if jeanlong_minute_scan:
+                        # Refresh current 1-minute extended-hours candles each cycle so
+                        # MACD includes the prior postmarket and current premarket.
+                        missing_history.append(row)
+                    elif history_counts.get(row["symbol"], 0) >= 35:
                         candle_state["history_symbols_skipped_with_cache"] += 1
                     else:
                         missing_history.append(row)
@@ -548,7 +562,7 @@ def run_scan_cycle(
                 # Fresh symbols most likely to pass pre-candle strategy gates are
                 # serviced first, then remaining candidates by liquidity/gap.
                 candidates = sorted(missing_history, key=history_priority, reverse=True)[:10]
-                if history_fetch is get_price_history:
+                if history_fetch in {get_price_history, _get_jeanlong_minute_history}:
                     # Schwab can occasionally take minutes to return a candle payload.
                     # Run production history calls in bounded daemon threads and wait
                     # at most 8 seconds for this cycle; quotes and strategy checks continue.
