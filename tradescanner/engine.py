@@ -582,13 +582,17 @@ def run_scan_cycle(
                         float_shares = row.get("float_shares")
                         quote_stamp = row.get("quote_time_ms")
                         if not all(isinstance(value, (int, float)) and not isinstance(value, bool)
-                                   for value in (price, gap, volume, float_shares, quote_stamp)):
+                                   for value in (price, gap, float_shares, quote_stamp)):
                             continue
-                        if not (
-                            jeanlong_cfg.get("price_min", 1.0) <= price <= jeanlong_cfg.get("price_max", 20.0)
-                            and gap >= jeanlong_cfg.get("gap_min_pct", 2.0)
-                            and volume >= jeanlong_cfg.get("volume_min", 750_000)
-                            and 0 < float_shares < jeanlong_cfg.get("float_max", 50_000_000)
+                        if (
+                            not jeanlong_cfg.get("price_min", 1.0) <= price <= jeanlong_cfg.get("price_max", 20.0)
+                            or gap < jeanlong_cfg.get("gap_min_pct", 2.0)
+                            or not 0 < float_shares < jeanlong_cfg.get("float_max", 50_000_000)
+                            or (
+                                isinstance(volume, (int, float))
+                                and not isinstance(volume, bool)
+                                and volume < jeanlong_cfg.get("volume_min", 750_000)
+                            )
                         ):
                             continue
                         quote_local = datetime.fromtimestamp(quote_stamp / 1000, market_tz)
