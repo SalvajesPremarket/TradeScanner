@@ -15,7 +15,7 @@ ET = ZoneInfo("America/New_York")
 CONFIG: dict[str, Any] = {
     "timezone": "America/New_York", "session_start": dtime(4, 0), "session_end": dtime(16, 0),
     "price_min": 1.0, "price_max": 20.0, "gap_min_pct": 2.0,
-    "rvol_min": 2.0, "float_max": 20_000_000, "ema_period": 20, "max_first_candles": 1,
+    "rvol_min": 2.0, "float_max": 20_000_000, "volume_min": 0, "ema_period": 20, "max_first_candles": 1,
     "macd_fast": 12, "macd_slow": 26, "macd_signal": 9,
     "macd_require_above_signal": False, "news_required": True, "news_max_age_hours": 16,
     "news_require_keyword": False, "min_bars": 35,
@@ -96,6 +96,7 @@ def scan(candles: list[dict[str, Any]] | None, ctx: dict[str, Any], cfg: dict[st
         avg_volume = ctx.get("avg_volume_30d")
         rvol = today_volume / float(avg_volume) if isinstance(avg_volume, (int, float)) and not isinstance(avg_volume, bool) and avg_volume > 0 else None
         checks["rvol"] = (rvol is not None and rvol >= config["rvol_min"], round(rvol, 2) if rvol is not None else None, "sin volumen promedio diario 30d" if rvol is None else f"RVol < {config['rvol_min']}x")
+        checks["volumen_minimo"] = (today_volume >= config["volume_min"], int(today_volume), f"volumen < {config['volume_min']:,}")
         float_shares = ctx.get("float_shares")
         float_ok = isinstance(float_shares, (int, float)) and not isinstance(float_shares, bool) and 0 < float_shares < config["float_max"]
         checks["float"] = (float_ok, int(float_shares) if float_ok else None, "float desconocido" if not isinstance(float_shares, (int, float)) or not float_shares else f"float >= {config['float_max']:,}")
