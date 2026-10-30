@@ -168,6 +168,8 @@ def _scan_strategy_config(strategy: dict[str, Any] | None) -> dict[str, Any]:
             "float_max": 50_000_000,
             "volume_min": 750_000,
             "ema_open_max_distance_pct": 1.0,
+            "macd_require_positive_histogram": True,
+            "timeframe": "1m",
         })
     return parsed
 
