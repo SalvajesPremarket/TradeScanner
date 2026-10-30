@@ -340,8 +340,8 @@ class AutomaticEngineTests(unittest.TestCase):
                     candle_fetcher=fetch_history,
                 )
 
-            self.assertEqual(len(requested_history), 5)
-            self.assertEqual(result["history_requests"], 5)
+            self.assertEqual(len(requested_history), 8)
+            self.assertEqual(result["history_requests"], 8)
             self.assertEqual(result["candle_symbols"], requested_history)
 
 
