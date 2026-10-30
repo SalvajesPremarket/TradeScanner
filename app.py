@@ -141,8 +141,20 @@ async def enforce_single_active_device(request: Request, call_next):
     return await call_next(request)
 
 
-def _scanner_indicators(candles: list[dict]) -> dict[str, float | None]:
-    """Return EMA20 and MACD line from stored chronological candle closes."""
+def _scanner_indicators(
+    candles: list[dict],
+    quote_time_ms: int | float | None = None,
+) -> dict[str, float | None]:
+    """Return indicators only when stored candles include the live quote minute."""
+    if not candles:
+        return {"ema20": None, "macd": None}
+    if isinstance(quote_time_ms, (int, float)) and not isinstance(quote_time_ms, bool) and quote_time_ms > 0:
+        latest_stamp = candles[-1].get("candle_time_ms")
+        if (
+            not isinstance(latest_stamp, (int, float))
+            or int(float(latest_stamp) // 60000) != int(float(quote_time_ms) // 60000)
+        ):
+            return {"ema20": None, "macd": None}
     closes: list[float] = []
     for candle in candles:
         try:
@@ -345,7 +357,7 @@ def snapshots_latest(limit: int = Query(10000, ge=1, le=10000)):
                 row["rvol_as_of"] = None
             try:
                 indicator_candles = candle_store.latest(row["symbol"], limit=100)
-                indicators = _scanner_indicators(indicator_candles)
+                indicators = _scanner_indicators(indicator_candles, row.get("quote_time_ms"))
                 row["ema20"] = indicators["ema20"]
                 row["macd"] = indicators["macd"]
             except (OSError, RuntimeError, ValueError) + DB_ERRORS:
