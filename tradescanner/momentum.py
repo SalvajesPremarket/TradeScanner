@@ -17,7 +17,7 @@ CONFIG: dict[str, Any] = {
     "price_min": 1.0, "price_max": 20.0, "gap_min_pct": 2.0,
     "rvol_min": 2.0, "float_max": 20_000_000, "volume_min": 0, "ema_period": 20, "ema_open_max_distance_pct": 1.0,
     "macd_fast": 12, "macd_slow": 26, "macd_signal": 9,
-    "macd_require_above_signal": False, "news_required": True, "news_max_age_hours": 16,
+    "macd_require_above_signal": False, "macd_require_positive_histogram": False, "timeframe": "1m", "news_required": True, "news_max_age_hours": 16,
     "news_require_keyword": False, "min_bars": 35,
 }
 CATALYSTS = {
@@ -113,8 +113,17 @@ def scan(candles: list[dict[str, Any]] | None, ctx: dict[str, Any], cfg: dict[st
             "apertura en o debajo de EMA20" if open_distance_pct <= 0 else f"apertura a más de {config['ema_open_max_distance_pct']}% sobre EMA20"
         )
         macd = macd_line[-1]
-        macd_ok = macd > 0 and (not config["macd_require_above_signal"] or macd > macd_signal[-1])
-        checks["macd"] = (macd_ok, round(macd, 5), "MACD no positivo")
+        macd_histogram = macd - macd_signal[-1]
+        histogram_required = bool(config.get("macd_require_positive_histogram", False))
+        macd_ok = (
+            macd_histogram > 0 if histogram_required
+            else macd > 0 and (not config["macd_require_above_signal"] or macd > macd_signal[-1])
+        )
+        checks["macd"] = (
+            macd_ok,
+            round(macd_histogram if histogram_required else macd, 5),
+            "histograma MACD no positivo" if histogram_required else "MACD no positivo",
+        )
         news = ctx.get("news")
         now = quote_time
         fresh_news = []
@@ -139,6 +148,8 @@ def scan(candles: list[dict[str, Any]] | None, ctx: dict[str, Any], cfg: dict[st
             out["metrics"][name] = value
             if not passed: out["reasons"].append(f"{name}: {reason}")
         out["metrics"]["ema20"] = round(ema20[-1], 4)
+        out["metrics"]["macd_histogram"] = round(macd_histogram, 6)
+        out["metrics"]["timeframe"] = str(config.get("timeframe", "1m"))
         out["metrics"]["volumen_hoy"] = int(today_volume)
         out["metrics"]["vela_ultimo_timestamp"] = last_ts.isoformat()
         out["passed"] = not out["reasons"]
