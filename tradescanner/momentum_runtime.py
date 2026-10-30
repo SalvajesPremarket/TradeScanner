@@ -167,6 +167,7 @@ def _scan_strategy_config(strategy: dict[str, Any] | None) -> dict[str, Any]:
             "rvol_min": 2.0,
             "float_max": 50_000_000,
             "volume_min": 750_000,
+            "ema_open_max_distance_pct": 1.0,
         })
     return parsed
 
