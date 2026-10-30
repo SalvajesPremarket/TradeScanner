@@ -335,7 +335,7 @@ def snapshots_latest(limit: int = Query(10000, ge=1, le=10000)):
             # RVOL is only needed for fresh quotes shown in the live scanner.
             # Avoid thousands of expensive candle-history reads for stale snapshots.
             if row.get("quote_is_fresh") is True:
-                metrics = candle_store.rvol(row["symbol"])
+                metrics = candle_store.rvol(row["symbol"], as_of_ms=row.get("quote_time_ms"))
                 row["rvol"] = metrics["rvol"]
                 row["rvol_sessions_used"] = metrics["sessions_used"]
                 row["rvol_as_of"] = metrics.get("as_of")
