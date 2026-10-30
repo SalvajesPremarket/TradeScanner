@@ -42,6 +42,84 @@ def _classify_news(headline: str) -> str | None:
     return next((category for category, words in CATALYSTS.items() if any(word in lowered for word in words)), None)
 
 
+def quote_only_checks(
+    ctx: dict[str, Any],
+    cfg: dict[str, Any] | None = None,
+) -> dict[str, tuple[bool, Any, str]]:
+    """Cheap quote-side JeanLong checks; lets the engine avoid needless OHLCV reads."""
+    config = {**CONFIG, **(cfg or {})}
+    stamp = ctx.get("quote_time_ms")
+    quote_time = None
+    if isinstance(stamp, (int, float)) and not isinstance(stamp, bool) and isfinite(float(stamp)) and stamp > 0:
+        quote_time = datetime.fromtimestamp(float(stamp) / 1000, ET)
+
+    checks: dict[str, tuple[bool, Any, str]] = {}
+    if quote_time is None:
+        checks["hora"] = (False, None, "sin timestamp válido de cotización")
+    else:
+        local_time = quote_time.timetz().replace(tzinfo=None)
+        checks["hora"] = (
+            config["session_start"] <= local_time < config["session_end"],
+            local_time.strftime("%H:%M"),
+            f"fuera de {config['session_start'].strftime('%H:%M')}-{config['session_end'].strftime('%H:%M')} ET",
+        )
+
+    price_value = ctx.get("quote_price")
+    price = (
+        float(price_value)
+        if isinstance(price_value, (int, float))
+        and not isinstance(price_value, bool)
+        and isfinite(float(price_value))
+        and float(price_value) > 0
+        else None
+    )
+    checks["precio"] = (
+        price is not None and config["price_min"] <= price <= config["price_max"],
+        round(price, 4) if price is not None else None,
+        f"precio fuera de ${config['price_min']}-${config['price_max']}",
+    )
+
+    previous_close = ctx.get("prev_close")
+    gap = (
+        (price - float(previous_close)) / float(previous_close) * 100
+        if price is not None
+        and isinstance(previous_close, (int, float))
+        and not isinstance(previous_close, bool)
+        and isfinite(float(previous_close))
+        and previous_close > 0
+        else None
+    )
+    checks["gap_pct"] = (
+        gap is not None and gap >= config["gap_min_pct"],
+        round(gap, 2) if gap is not None else None,
+        "sin cierre anterior" if gap is None else f"gap < {config['gap_min_pct']}%",
+    )
+
+    volume = ctx.get("current_volume")
+    if isinstance(volume, (int, float)) and not isinstance(volume, bool) and isfinite(float(volume)) and volume >= 0:
+        checks["volumen_minimo"] = (
+            float(volume) >= config["volume_min"],
+            int(volume),
+            f"volumen < {config['volume_min']:,}",
+        )
+
+    float_shares = ctx.get("float_shares")
+    float_ok = (
+        isinstance(float_shares, (int, float))
+        and not isinstance(float_shares, bool)
+        and isfinite(float(float_shares))
+        and 0 < float_shares < config["float_max"]
+    )
+    checks["float"] = (
+        float_ok,
+        int(float_shares) if float_ok else None,
+        "float desconocido"
+        if not isinstance(float_shares, (int, float)) or not float_shares
+        else f"float >= {config['float_max']:,}",
+    )
+    return checks
+
+
 def scan(candles: list[dict[str, Any]] | None, ctx: dict[str, Any], cfg: dict[str, Any] | None = None) -> dict[str, Any]:
     config = {**CONFIG, **(cfg or {})}
     out: dict[str, Any] = {"passed": False, "strategy": STRATEGY_NAME, "symbol": ctx.get("symbol"), "metrics": {}, "reasons": []}
