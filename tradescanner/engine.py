@@ -419,10 +419,33 @@ def _evaluate_active_strategies(store: SnapshotStore, batch: list[str]) -> dict[
         "matches": list(dict.fromkeys(symbol for state in states for symbol in state.get("matches", []))),
     }
     store.set_state("active_strategies_scan_status", combined)
+    rejection_counts: dict[str, int] = {}
+    for evaluation in combined["evaluations"]:
+        for reason in evaluation.get("reasons", []):
+            key = str(reason).split(":", 1)[0].strip() or "unknown"
+            rejection_counts[key] = rejection_counts.get(key, 0) + 1
+    candles_ready = sum(
+        1 for item in combined["evaluations"]
+        if int(item.get("candles_available", 0) or 0) >= 35
+        and item.get("timeframe") == "1m"
+    )
+    rvol_ready = sum(
+        1 for item in combined["evaluations"]
+        if int(item.get("rvol_sessions_used", 0) or 0) >= 2
+    )
+    macd_checked = sum(
+        1 for item in combined["evaluations"]
+        if isinstance(item.get("metrics", {}).get("macd_histogram"), (int, float))
+    )
+    reason_summary = ",".join(
+        f"{key}:{value}" for key, value in sorted(rejection_counts.items())
+    ) or "none"
     logger.warning(
-        "Scan cycle strategy evaluation active=%s evaluations=%s matches=%s statuses=%s",
+        "Scan cycle strategy evaluation active=%s evaluations=%s matches=%s statuses=%s "
+        "candles_ready=%s rvol_ready=%s macd_checked=%s rejection_counts=%s",
         len(strategies), len(combined["evaluations"]), len(combined["matches"]),
         ",".join(str(state.get("strategy", "unknown")) + ":" + str(state.get("status", "unknown")) for state in states),
+        candles_ready, rvol_ready, macd_checked, reason_summary,
     )
     return combined
 
