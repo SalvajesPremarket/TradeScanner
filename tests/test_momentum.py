@@ -2,7 +2,7 @@ import unittest
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
-from tradescanner.momentum import _ema, scan
+from tradescanner.momentum import _ema, quote_only_checks, scan
 
 
 ET = ZoneInfo("America/New_York")
@@ -13,6 +13,28 @@ def candle_stamp(day, hour, minute):
 
 
 class MomentumScanTests(unittest.TestCase):
+    def test_quote_only_checks_keep_unchanged_jeanlong_thresholds(self):
+        checks = quote_only_checks({
+            "quote_time_ms": candle_stamp(30, 7, 0),
+            "quote_price": 10.0,
+            "prev_close": 9.0,
+            "current_volume": 700_000,
+            "float_shares": 50_000_000,
+        }, {
+            "session_start": datetime(2026, 10, 30, 4, 0, tzinfo=ET).time(),
+            "session_end": datetime(2026, 10, 30, 16, 0, tzinfo=ET).time(),
+            "price_min": 1.0,
+            "price_max": 20.0,
+            "gap_min_pct": 2.0,
+            "volume_min": 750_000,
+            "float_max": 50_000_000,
+        })
+        self.assertTrue(checks["hora"][0])
+        self.assertTrue(checks["precio"][0])
+        self.assertTrue(checks["gap_pct"][0])
+        self.assertFalse(checks["volumen_minimo"][0])
+        self.assertFalse(checks["float"][0])
+
     def test_rejects_previous_session_candles_for_fresh_quote(self):
         candles = []
         start = datetime(2026, 10, 29, 4, 0, tzinfo=ET)
