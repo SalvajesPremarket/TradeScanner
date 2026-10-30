@@ -1,7 +1,10 @@
+import tempfile
 import unittest
 from datetime import datetime, timedelta
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
+from tradescanner.candles import CandleStore
 from tradescanner.momentum import _ema, quote_only_checks, scan
 
 
@@ -34,6 +37,56 @@ class MomentumScanTests(unittest.TestCase):
         self.assertTrue(checks["gap_pct"][0])
         self.assertFalse(checks["volumen_minimo"][0])
         self.assertFalse(checks["float"][0])
+
+    def test_candles_rvol_ema_and_macd_form_a_complete_valid_signal(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = CandleStore(Path(directory) / "candles.sqlite3")
+            start_by_day = {
+                28: datetime(2026, 10, 28, 4, 0, tzinfo=ET),
+                29: datetime(2026, 10, 29, 4, 0, tzinfo=ET),
+                30: datetime(2026, 10, 30, 4, 0, tzinfo=ET),
+            }
+            closes = [10.0 + index * 0.01 for index in range(49)]
+            ema_before = _ema(closes[:-1], 20)[-1]
+            rows = []
+            for day, start in start_by_day.items():
+                for index, close in enumerate(closes):
+                    stamp = start + timedelta(minutes=index)
+                    candle_open = close - 0.005
+                    if day == 30 and index == 48:
+                        candle_open = ema_before * 1.005
+                    rows.append({
+                        "symbol": "TEST",
+                        "candle_time_ms": int(stamp.timestamp() * 1000),
+                        "open": candle_open,
+                        "high": max(candle_open, close) + 0.01,
+                        "low": min(candle_open, close) - 0.01,
+                        "close": close,
+                        "volume": 2_000 if day == 30 else 1_000,
+                    })
+            store.save(rows)
+            quote_time = start_by_day[30] + timedelta(minutes=48, seconds=30)
+            quote_time_ms = int(quote_time.timestamp() * 1000)
+            rvol = store.rvol("TEST", as_of_ms=quote_time_ms)
+            self.assertEqual(rvol["sessions_used"], 2)
+            self.assertEqual(rvol["rvol"], 2.0)
+            result = scan(store.latest("TEST", limit=6000), {
+                "symbol": "TEST",
+                "quote_time_ms": quote_time_ms,
+                "quote_price": 10.5,
+                "current_volume": 1_000_000,
+                "prev_close": 10.0,
+                "rvol": rvol["rvol"],
+                "float_shares": 10_000_000,
+                "news": [],
+            }, {
+                "news_required": False,
+                "macd_require_positive_histogram": True,
+                "timeframe": "1m",
+            })
+            self.assertTrue(result["passed"], result["reasons"])
+            self.assertGreater(result["metrics"]["macd_histogram"], 0)
+            self.assertGreater(result["metrics"]["apertura_sobre_ema20"], 0)
 
     def test_rejects_previous_session_candles_for_fresh_quote(self):
         candles = []
