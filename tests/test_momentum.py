@@ -65,7 +65,7 @@ class MomentumScanTests(unittest.TestCase):
         start = datetime(2026, 10, 30, 4, 0, tzinfo=ET)
         candles = []
         closes = [10.0 + index * 0.01 for index in range(49)]
-        ema_before = _ema(closes, 20)[-1]
+        ema_before = _ema(closes[:-1], 20)[-1]
         for index, close in enumerate(closes):
             stamp = start + timedelta(minutes=index)
             candle_open = close - 0.005
@@ -90,10 +90,11 @@ class MomentumScanTests(unittest.TestCase):
             "rvol": 3.0,
             "float_shares": 10_000_000,
             "news": [],
-        }, {"news_required": False})
+        }, {"news_required": False, "macd_require_positive_histogram": True, "timeframe": "1m"})
         self.assertEqual(result["metrics"]["timeframe"], "1m")
         self.assertGreater(result["metrics"]["macd_histogram"], 0)
         self.assertGreater(result["metrics"]["apertura_sobre_ema20"], 0)
+        self.assertTrue(result["passed"], result["reasons"])
         self.assertFalse(any("falta la vela de 1 minuto" in reason for reason in result["reasons"]))
 
 
