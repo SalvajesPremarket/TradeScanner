@@ -94,9 +94,23 @@ def scan(candles: list[dict[str, Any]] | None, ctx: dict[str, Any], cfg: dict[st
         prev_close = ctx.get("prev_close")
         gap = ((price - float(prev_close)) / float(prev_close) * 100) if isinstance(prev_close, (int, float)) and not isinstance(prev_close, bool) and prev_close > 0 else None
         checks["gap_pct"] = (gap is not None and gap >= config["gap_min_pct"], round(gap, 2) if gap is not None else None, "sin cierre anterior" if gap is None else f"gap < {config['gap_min_pct']}%")
-        avg_volume = ctx.get("avg_volume_30d")
-        rvol = today_volume / float(avg_volume) if isinstance(avg_volume, (int, float)) and not isinstance(avg_volume, bool) and avg_volume > 0 else None
-        checks["rvol"] = (rvol is not None and rvol >= config["rvol_min"], round(rvol, 2) if rvol is not None else None, "sin volumen promedio diario 30d" if rvol is None else f"RVol < {config['rvol_min']}x")
+        # Use true time-of-day relative volume, not today's volume divided by a
+        # full-session daily average (misleading during premarket).
+        rvol_value = ctx.get("rvol")
+        rvol = (
+            float(rvol_value)
+            if isinstance(rvol_value, (int, float))
+            and not isinstance(rvol_value, bool)
+            and isfinite(float(rvol_value))
+            and float(rvol_value) >= 0
+            else None
+        )
+        checks["rvol"] = (
+            rvol is not None and rvol >= config["rvol_min"],
+            round(rvol, 2) if rvol is not None else None,
+            "sin sesiones intradía comparables para calcular RVol"
+            if rvol is None else f"RVol < {config['rvol_min']}x",
+        )
         checks["volumen_minimo"] = (today_volume >= config["volume_min"], int(today_volume), f"volumen < {config['volume_min']:,}")
         float_shares = ctx.get("float_shares")
         float_ok = isinstance(float_shares, (int, float)) and not isinstance(float_shares, bool) and 0 < float_shares < config["float_max"]
