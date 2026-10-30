@@ -165,6 +165,8 @@ def _scan_strategy_config(strategy: dict[str, Any] | None) -> dict[str, Any]:
             "session_end": dtime(16, 0),
             "gap_min_pct": 2.0,
             "rvol_min": 2.0,
+            "float_max": 50_000_000,
+            "volume_min": 750_000,
         })
     return parsed
 
