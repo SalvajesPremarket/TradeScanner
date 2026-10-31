@@ -438,7 +438,7 @@ def _evaluate_rompiendo_maximos(store: SnapshotStore, rows: list[dict[str, Any]]
         "matches": [item["symbol"] for item in evaluations if item.get("passed")],
         "note": "Ruptura en tiempo real: cotización Schwab > máximo High de sesiones diarias completas anteriores. Histórico disponible limitado a 20 años; excluye la sesión actual. No coloca órdenes.",
     }
-    store.set_state("strategy_scan_status:" + str(strategy.get("id)), state)
+    store.set_state("strategy_scan_status:" + str(strategy.get("id")), state)
     return state
 
 
