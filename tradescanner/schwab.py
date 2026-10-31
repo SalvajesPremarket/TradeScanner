@@ -25,6 +25,9 @@ _TOKEN_LOCK = threading.Lock()
 _CACHED_TOKEN: str | None = None
 _CACHED_TOKEN_EXPIRES_AT = 0.0
 _CACHED_CREDENTIALS: tuple[str, str, str] | None = None
+_TOKEN_FAILURE_UNTIL = 0.0
+_TOKEN_FAILURE_CREDENTIALS: tuple[str, str, str] | None = None
+_TOKEN_FAILURE_MESSAGE: str | None = None
 
 
 class SchwabConfigurationError(RuntimeError):
@@ -76,9 +79,17 @@ def _request_json(request: urllib.request.Request, timeout: int = 15) -> Any:
             body = response.read().decode("utf-8")
             return json.loads(body) if body else {}
     except urllib.error.HTTPError as exc:
-        # Do not surface request headers or credentials in errors.
-        # Do not expose upstream response bodies to API clients.
-        raise SchwabAPIError(f"Schwab API returned HTTP {exc.code}.") from None
+        # Keep only a machine-readable OAuth error code; never log bodies or secrets.
+        error_code = None
+        try:
+            payload = json.loads(exc.read().decode("utf-8"))
+            candidate = payload.get("error") if isinstance(payload, dict) else None
+            if isinstance(candidate, str) and re.fullmatch(r"[A-Za-z0-9_.-]{1,48}", candidate):
+                error_code = candidate
+        except (json.JSONDecodeError, UnicodeDecodeError, OSError):
+            pass
+        suffix = f" (oauth_error={error_code})" if error_code else ""
+        raise SchwabAPIError(f"Schwab API returned HTTP {exc.code}{suffix}.") from None
     except (urllib.error.URLError, TimeoutError) as exc:
         raise SchwabAPIError(f"Could not reach Schwab API: {type(exc).__name__}") from None
     except json.JSONDecodeError:
@@ -104,6 +115,12 @@ def _access_token() -> str:
             and now < _CACHED_TOKEN_EXPIRES_AT
         ):
             return _CACHED_TOKEN
+        if (
+            _TOKEN_FAILURE_CREDENTIALS == credentials
+            and now < _TOKEN_FAILURE_UNTIL
+            and _TOKEN_FAILURE_MESSAGE
+        ):
+            raise SchwabAPIError(_TOKEN_FAILURE_MESSAGE)
 
         client_id, client_secret, refresh_token = credentials
         basic = base64.b64encode(f"{client_id}:{client_secret}".encode()).decode()
@@ -124,8 +141,27 @@ def _access_token() -> str:
         try:
             payload = _request_json(request)
         except SchwabAPIError as exc:
-            # Identify the failing stage without logging credentials or upstream bodies.
-            raise SchwabAPIError(f"Schwab OAuth token request failed: {exc}") from None
+            # Back off repeated failures. A newly authorized token changes the
+            # credentials and bypasses this cooldown immediately.
+            detail = str(exc)
+            if "oauth_error=invalid_grant" in detail:
+                message = (
+                    "Schwab refresh token was rejected (invalid_grant). "
+                    "Reconnect Schwab with the Conectar Schwab button."
+                )
+            elif "oauth_error=invalid_client" in detail:
+                message = (
+                    "Schwab rejected the client credentials (invalid_client). "
+                    "Check SCHWAB_CLIENT_ID and SCHWAB_CLIENT_SECRET in Render."
+                )
+            else:
+                message = f"Schwab OAuth token request failed: {detail}"
+            global _TOKEN_FAILURE_UNTIL, _TOKEN_FAILURE_CREDENTIALS, _TOKEN_FAILURE_MESSAGE
+            with _TOKEN_LOCK:
+                _TOKEN_FAILURE_CREDENTIALS = credentials
+                _TOKEN_FAILURE_MESSAGE = message
+                _TOKEN_FAILURE_UNTIL = time.monotonic() + 120.0
+            raise SchwabAPIError(message) from None
         token = payload.get("access_token") if isinstance(payload, dict) else None
         if not token:
             raise SchwabAPIError("Schwab token response did not contain an access token.")
@@ -153,16 +189,23 @@ def _access_token() -> str:
         _CACHED_TOKEN = str(token)
         _CACHED_CREDENTIALS = credentials
         _CACHED_TOKEN_EXPIRES_AT = time.monotonic() + max(1.0, lifetime - 60.0)
+        _TOKEN_FAILURE_UNTIL = 0.0
+        _TOKEN_FAILURE_CREDENTIALS = None
+        _TOKEN_FAILURE_MESSAGE = None
         return _CACHED_TOKEN
 
 
 def _clear_token_cache() -> None:
     """Clear in-memory token state; intended for deterministic tests."""
     global _CACHED_TOKEN, _CACHED_TOKEN_EXPIRES_AT, _CACHED_CREDENTIALS
+    global _TOKEN_FAILURE_UNTIL, _TOKEN_FAILURE_CREDENTIALS, _TOKEN_FAILURE_MESSAGE
     with _TOKEN_LOCK:
         _CACHED_TOKEN = None
         _CACHED_TOKEN_EXPIRES_AT = 0.0
         _CACHED_CREDENTIALS = None
+        _TOKEN_FAILURE_UNTIL = 0.0
+        _TOKEN_FAILURE_CREDENTIALS = None
+        _TOKEN_FAILURE_MESSAGE = None
 
 
 def get_quotes(symbols: list[str]) -> dict[str, Any]:
