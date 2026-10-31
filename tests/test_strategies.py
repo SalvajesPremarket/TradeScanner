@@ -50,14 +50,14 @@ class StrategyTests(unittest.TestCase):
         self.assertFalse(formula_matches("gap_pct > 3 and volume > 10", {"gap_pct": 1, "volume": 100}))
         self.assertTrue(formula_matches("gap_pct > 3 or volume > 10", {"gap_pct": 1, "volume": 100}))
 
-    def test_only_one_formula_strategy_can_be_active(self):
+    def test_independent_formula_strategies_can_be_active_together(self):
         first = save_strategy("GAP", "formula", "gap_pct >= 3", store=self.store)
         second = save_strategy("Volume", "formula", "volume >= 500000", store=self.store)
         set_strategy_enabled(first["id"], True, store=self.store)
         set_strategy_enabled(second["id"], True, store=self.store)
         self.assertEqual(active_strategy(self.store)["id"], second["id"])
         items = list_strategies(self.store)
-        self.assertEqual(sum(bool(item["enabled"]) for item in items), 1)
+        self.assertEqual(sum(bool(item["enabled"]) for item in items), 2)
 
     def test_restricted_python_expression_and_function_are_executable(self):
         expression = save_strategy("Python expression", "python", "gap_pct >= 3 and volume >= 500000", store=self.store)
