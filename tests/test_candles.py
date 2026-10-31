@@ -48,6 +48,22 @@ class CandleTests(unittest.TestCase):
             self.assertNotIn("idx_candles_symbol_time", indexes)
             self.assertTrue(any(unique for unique in indexes.values()))
 
+    def test_history_status_by_symbols_returns_latest_timestamp(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = CandleStore(Path(directory) / "candles.sqlite3")
+            rows = []
+            for minute in (30, 31, 32):
+                rows.append({
+                    "symbol": "AAPL", "candle_time_ms": ms(14, 9, minute),
+                    "open": 10.0, "high": 10.5, "low": 9.5, "close": 10.2,
+                    "volume": 100,
+                })
+            store.save(rows)
+            status = store.history_status_by_symbols(["aapl", "UNKNOWN"])
+            self.assertEqual(status["AAPL"]["count"], 3)
+            self.assertEqual(status["AAPL"]["latest_candle_time_ms"], ms(14, 9, 32))
+            self.assertNotIn("UNKNOWN", status)
+
     def test_counts_by_symbols_uses_normalized_symbols(self):
         with tempfile.TemporaryDirectory() as directory:
             store = CandleStore(Path(directory) / "candles.sqlite3")
