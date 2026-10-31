@@ -452,6 +452,144 @@ def _evaluate_rompiendo_maximos(store: SnapshotStore, rows: list[dict[str, Any]]
     return state
 
 
+
+_ATL_CACHE_TTL_SECONDS = 24 * 60 * 60
+_ATL_ERROR_CACHE_TTL_SECONDS = 5 * 60
+_ATL_MAX_REFRESHES_PER_CYCLE = 8
+_atl_inflight_symbols: set[str] = set()
+_atl_inflight_lock = threading.Lock()
+_atl_fetch_semaphore = threading.BoundedSemaphore(8)
+
+
+def _fetch_atl_in_background(symbol: str, quote_time_ms: int | float, store_path: Any) -> None:
+    """Fetch and persist the prior completed-session ATL without blocking quote scans."""
+    key = "rompiendo_minimos_atl:" + symbol.strip().upper()
+    try:
+        with _atl_fetch_semaphore:
+            payload = get_all_time_daily_history(symbol)
+        quote_day = datetime.fromtimestamp(float(quote_time_ms) / 1000, ZoneInfo("America/New_York")).date()
+        valid = []
+        for candle in payload.get("candles", []):
+            if not isinstance(candle, dict):
+                continue
+            try:
+                stamp = float(candle.get("datetime"))
+                low = float(candle.get("low"))
+                candle_day = datetime.fromtimestamp(stamp / 1000, ZoneInfo("America/New_York")).date()
+            except (TypeError, ValueError, OverflowError, OSError):
+                continue
+            if stamp > 0 and low > 0 and math.isfinite(low) and candle_day < quote_day:
+                valid.append((low, candle_day.isoformat()))
+        if valid:
+            low, atl_date = min(valid, key=lambda item: item[0])
+            result = {"status": "ready", "low": low, "atl_date": atl_date,
+                      "history_sessions": len(valid), "history_window_years": 20}
+        else:
+            result = {"status": "insufficient_history", "low": None, "atl_date": None}
+        SnapshotStore(store_path).set_state(key, {**result, "cached_at": time.time()})
+    except Exception as exc:
+        result = {"status": "unavailable", "low": None, "atl_date": None, "error": type(exc).__name__}
+        try:
+            SnapshotStore(store_path).set_state(key, {**result, "cached_at": time.time()})
+        except Exception:
+            pass
+        logger.warning("RompiendoMinimos ATL fetch failed symbol=%s error_type=%s", symbol, type(exc).__name__)
+    finally:
+        with _atl_inflight_lock:
+            _atl_inflight_symbols.discard(symbol.strip().upper())
+
+
+def _all_time_low_for_symbol(store: SnapshotStore, symbol: str, quote_time_ms: int | float,
+                             fetch_budget: dict[str, int]) -> dict[str, Any]:
+    """Return cached prior-session ATL; missing history refreshes asynchronously."""
+    key = "rompiendo_minimos_atl:" + symbol.strip().upper()
+    cached = store.get_state(key, {})
+    now = time.time()
+    if isinstance(cached, dict):
+        age = now - float(cached.get("cached_at", 0) or 0)
+        ttl = _ATL_ERROR_CACHE_TTL_SECONDS if cached.get("status") == "unavailable" else _ATL_CACHE_TTL_SECONDS
+        if age < ttl:
+            return dict(cached)
+    if fetch_budget["used"] >= _ATL_MAX_REFRESHES_PER_CYCLE:
+        return {"status": "pending", "low": None, "atl_date": None}
+    normalized = symbol.strip().upper()
+    with _atl_inflight_lock:
+        if normalized in _atl_inflight_symbols:
+            return {"status": "pending", "low": None, "atl_date": None}
+        _atl_inflight_symbols.add(normalized)
+    fetch_budget["used"] += 1
+    thread = threading.Thread(
+        target=_fetch_atl_in_background,
+        args=(normalized, quote_time_ms, store.path),
+        name="rompiendo-minimos-atl-" + normalized,
+        daemon=True,
+    )
+    thread.start()
+    return {"status": "pending", "low": None, "atl_date": None}
+
+
+def _evaluate_rompiendo_minimos(store: SnapshotStore, rows: list[dict[str, Any]],
+                               strategy: dict[str, Any]) -> dict[str, Any]:
+    """Evaluate live Schwab quotes against the prior completed daily ATL."""
+    evaluations = []
+    fetch_budget = {"used": 0}
+    for row in rows:
+        symbol = row.get("symbol")
+        if not isinstance(symbol, str) or not symbol or row.get("quote_is_fresh") is not True:
+            continue
+        price, quote_time_ms = row.get("price"), row.get("quote_time_ms")
+        if (not isinstance(price, (int, float)) or isinstance(price, bool)
+                or not math.isfinite(float(price)) or price <= 0
+                or not isinstance(quote_time_ms, (int, float)) or isinstance(quote_time_ms, bool)
+                or quote_time_ms <= 0):
+            evaluations.append({"symbol": symbol, "passed": False, "strategy": strategy.get("name"),
+                                "strategy_id": strategy.get("id"), "reasons": ["cotización inválida o sin timestamp"]})
+            continue
+        if not 1.0 <= float(price) <= 20.0:
+            evaluations.append({
+                "symbol": symbol, "passed": False, "action": None,
+                "strategy": strategy.get("name"), "strategy_id": strategy.get("id"),
+                "quote_price": price, "all_time_low": None, "atl_date": None,
+                "metrics": {"price": price, "price_min": 1.0, "price_max": 20.0},
+                "reasons": ["precio: fuera del rango permitido de $1.00 a $20.00"],
+                "data_source": "Schwab real-time quote",
+            })
+            continue
+        atl = _all_time_low_for_symbol(store, symbol, quote_time_ms, fetch_budget)
+        low = atl.get("low")
+        passed = (atl.get("status") == "ready" and isinstance(low, (int, float))
+                  and float(price) < float(low))
+        if atl.get("status") == "pending":
+            reasons = ["histórico: pendiente de consulta; se procesa en próximos ciclos"]
+        elif atl.get("status") == "unavailable":
+            reasons = ["histórico: Schwab no disponible; no se genera señal"]
+        elif atl.get("status") != "ready":
+            reasons = ["histórico: no hay velas diarias completas disponibles"]
+        elif passed:
+            reasons = []
+        else:
+            reasons = ["ruptura: precio actual no está por debajo del mínimo histórico previo"]
+        evaluations.append({
+            "symbol": symbol, "passed": passed, "action": "ENTER" if passed else None,
+            "strategy": strategy.get("name"), "strategy_id": strategy.get("id"),
+            "quote_price": price, "all_time_low": low, "atl_date": atl.get("atl_date"),
+            "percent_below_atl": round((float(price) / float(low) - 1) * 100, 4) if passed and low else None,
+            "history_window_years": atl.get("history_window_years", 20),
+            "metrics": {"price": price, "all_time_low": low, "atl_date": atl.get("atl_date")},
+            "reasons": reasons, "data_source": "Schwab real-time quote + completed daily history",
+        })
+    state = {
+        "status": "evaluated" if evaluations else "no_fresh_quotes",
+        "strategy_id": strategy.get("id"), "strategy": strategy.get("name"),
+        "evaluated_at": _now(), "candidate_count": len(rows), "processed_quotes": len(evaluations),
+        "atl_refreshes_this_cycle": fetch_budget["used"], "evaluations": evaluations,
+        "matches": [item["symbol"] for item in evaluations if item.get("passed")],
+        "note": "Ruptura en tiempo real: precio entre $1.00 y $20.00 inclusive y cotización Schwab < mínimo Low de sesiones diarias completas anteriores. Histórico disponible limitado a 20 años; excluye la sesión actual. No coloca órdenes.",
+    }
+    store.set_state("strategy_scan_status:" + str(strategy.get("id")), state)
+    return state
+
+
 def _evaluate_active_strategies(store: SnapshotStore, batch: list[str]) -> dict[str, Any]:
     """Evaluate every enabled strategy once per scanner cycle, without placing orders."""
     strategies = active_strategies(store)
@@ -493,6 +631,8 @@ def _evaluate_active_strategies(store: SnapshotStore, batch: list[str]) -> dict[
             store.set_state("strategy_scan_status:" + str(strategy.get("id")), state)
         elif str(strategy.get("name", "")).casefold() == "rompiendomaximos":
             state = _evaluate_rompiendo_maximos(store, rows, strategy)
+        elif str(strategy.get("name", "")).casefold() == "rompiendominimos":
+            state = _evaluate_rompiendo_minimos(store, rows, strategy)
         elif is_momentum_scan_program(strategy):
             state = _evaluate_original_scan_strategy(store, batch, strategy)
             store.set_state("momentum_scan_status", state)
