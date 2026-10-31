@@ -1,4 +1,4 @@
-"""Intraday candle storage and time-of-day relative-volume calculations."""
+"""Persistent OHLCV storage and time-of-day relative-volume calculations."""
 from __future__ import annotations
 
 import math
@@ -90,10 +90,6 @@ class CandleStore:
                     fetched_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     PRIMARY KEY(symbol, candle_time_ms)
                 )"""
-            )
-            connection.execute(
-                "CREATE INDEX IF NOT EXISTS idx_candles_symbol_time "
-                "ON intraday_candles(symbol, candle_time_ms)"
             )
 
     def _connect(self):
