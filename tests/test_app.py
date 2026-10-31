@@ -258,5 +258,29 @@ class AppEntrypointTests(unittest.TestCase):
                 self.assertIn(fragment, html)
 
 
+    def test_scanner_aggregates_thirty_minute_candles(self):
+        candles = [
+            {"candle_time_ms": 1_800_000, "open": 10, "high": 11, "low": 9, "close": 10.5, "volume": 100},
+            {"candle_time_ms": 1_860_000, "open": 10.5, "high": 12, "low": 10, "close": 11.5, "volume": 150},
+            {"candle_time_ms": 3_600_000, "open": 11.5, "high": 13, "low": 11, "close": 12.5, "volume": 200},
+        ]
+        aggregated = app_module._aggregate_scanner_candles(candles, "30m")
+        self.assertEqual(len(aggregated), 2)
+        self.assertEqual(aggregated[0]["high"], 12)
+        self.assertEqual(aggregated[0]["low"], 9)
+        self.assertEqual(aggregated[0]["close"], 11.5)
+        self.assertEqual(aggregated[0]["volume"], 250)
+
+    def test_daily_and_weekly_scanner_indicators_accept_schwab_candles(self):
+        candles = [
+            {"candle_time_ms": index * 86_400_000, "close": 10 + index / 10}
+            for index in range(30)
+        ]
+        daily = app_module._scanner_indicators(candles, None, "1d")
+        weekly = app_module._scanner_indicators(candles, None, "1w")
+        self.assertIsNotNone(daily["ema20"])
+        self.assertIsNotNone(weekly["ema20"])
+
+
 if __name__ == "__main__":
     unittest.main()
