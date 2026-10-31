@@ -14,7 +14,7 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException, Query, Body, Request
 from fastapi.responses import FileResponse, JSONResponse
 
-from tradescanner.candles import CandleStore
+from tradescanner.candles import CandleStore, normalize_price_history
 from tradescanner.db import DB_ERRORS, is_postgres
 from tradescanner.core import apply_filters, normalize_schwab_quotes
 import urllib.error
@@ -38,7 +38,7 @@ ROOT = Path(__file__).resolve().parent
 logger = logging.getLogger(__name__)
 
 _SCANNER_HISTORY_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=6, thread_name_prefix="scanner-history")
-_SCANNER_HISTORY_LOCK = threading.Lock()
+_SCANNER_HISTORY_LOCK = threading.RLock()
 _SCANNER_HISTORY_CACHE: dict[tuple[str, str], tuple[float, list[dict]]] = {}
 _SCANNER_HISTORY_INFLIGHT: set[tuple[str, str]] = set()
 _SCANNER_HISTORY_CACHE_TTL = 900.0
@@ -151,7 +151,7 @@ async def enforce_single_active_device(request: Request, call_next):
 
 def _aggregate_scanner_candles(candles: list[dict], timeframe: str) -> list[dict]:
     """Aggregate stored one-minute Schwab candles into scanner intervals."""
-    durations = {"1m": 60_000, "5m": 300_000, "15m": 900_000, "1h": 3_600_000}
+    durations = {"1m": 60_000, "5m": 300_000, "15m": 900_000, "30m": 1_800_000, "1h": 3_600_000}
     duration = durations[timeframe]
     if duration == 60_000:
         return candles
@@ -188,8 +188,7 @@ def _schedule_daily_weekly_history(symbol: str, timeframe: str) -> list[dict]:
             _SCANNER_HISTORY_INFLIGHT.add(key)
             provider_timeframe = "day" if timeframe == "1d" else "week"
             future = _SCANNER_HISTORY_EXECUTOR.submit(
-                lambda: __import__("tradescanner.candles", fromlist=["normalize_price_history"])
-                .normalize_price_history(symbol, get_chart_history(symbol, provider_timeframe))
+                lambda: normalize_price_history(symbol, get_chart_history(symbol, provider_timeframe))
             )
             def store_result(done: concurrent.futures.Future, cache_key: tuple[str, str] = key) -> None:
                 try:
