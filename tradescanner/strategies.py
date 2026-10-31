@@ -368,6 +368,24 @@ def set_strategy_enabled(strategy_id: str, enabled: bool,
         if item.get("id") == strategy_id:
             item["enabled"] = bool(enabled)
     target.set_state(STATE_KEY, items)
+
+    # A state change must not keep showing matches from an earlier activation.
+    # The next automatic scan cycle will populate fresh evaluations.
+    target.set_state("strategy_scan_status:" + str(strategy_id), {
+        "status": "waiting_for_cycle" if enabled else "inactive",
+        "strategy_id": strategy_id,
+        "strategy": selected.get("name", ""),
+        "evaluated_at": None,
+        "candidate_count": 0,
+        "processed_quotes": 0,
+        "evaluations": [],
+        "matches": [],
+        "skipped": {},
+        "note": (
+            "Estrategia activada; esperando el siguiente ciclo automático."
+            if enabled else "Estrategia desactivada; ya no participa en el escáner."
+        ),
+    })
     return next(item for item in items if item.get("id") == strategy_id)
 
 
