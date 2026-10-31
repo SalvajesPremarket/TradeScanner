@@ -227,7 +227,7 @@
         <h3>ALERTAS DE COMPATIBILIDAD ENTRE FILTROS</h3>
         <div id="filter-alert-content">Comprobando compatibilidad de filtros…</div>
       </section>
-      <div class="tools"><span class="muted" id="result-count">Resultados: 0</span><span class="muted" id="engine-message">Esperando estado del motor.</span></div>
+      <div class="tools"><span class="muted" id="result-count">Resultados: 0</span><div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><label class="filter" for="results-refresh-interval"><b>REFRESH</b><select id="results-refresh-interval" aria-label="Frecuencia de actualización de resultados"><option value="10000">Cada 10 segundos</option><option value="15000" selected>Cada 15 segundos</option><option value="30000">Cada 30 segundos</option><option value="60000">Cada 1 minuto</option><option value="0">Manual · pausado</option></select></label><button class="action secondary" id="refresh-results-now" type="button">Actualizar ahora</button></div><span class="muted" id="engine-message">Esperando estado del motor.</span></div>
       <p class="code-hint" id="radar-source-note">RADAR · Estas filas son cotizaciones/snapshots del escáner; no son señales de entrada de JeanLong. La estrategia activa se evalúa por separado y solo sus evaluaciones con resultado aprobado cuentan como señales.</p>
       <div class="table-wrap">
         <table class="results-table" aria-label="Resultados del radar">
@@ -1299,8 +1299,17 @@
       } catch(error) { target.textContent="No se pudo consultar la configuración: "+apiMessage(error); }
     }
     document.getElementById("refresh-settings").addEventListener("click",loadSettings);
+    let scannerRefreshTimer = null;
+    function configureScannerRefresh() {
+      if (scannerRefreshTimer !== null) window.clearInterval(scannerRefreshTimer);
+      scannerRefreshTimer = null;
+      const interval = Number(document.getElementById("results-refresh-interval").value);
+      if (interval > 0) scannerRefreshTimer = window.setInterval(refreshScanner, interval);
+    }
+    document.getElementById("results-refresh-interval").addEventListener("change", configureScannerRefresh);
+    document.getElementById("refresh-results-now").addEventListener("click", refreshScanner);
     refreshScanner();
-    window.setInterval(refreshScanner, 15000);
+    configureScannerRefresh();
     updateLanguageHelp();
   </script>
 
