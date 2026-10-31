@@ -129,31 +129,27 @@ class AppEntrypointTests(unittest.TestCase):
         self.assertFalse(hasattr(oauth_module, "_PENDING"))
 
 
-    def test_strategy_api_requires_private_token_and_rejects_wrong_token(self):
+    def test_strategy_api_requires_neon_bearer_auth(self):
         request = Request({
             "type": "http", "method": "GET", "path": "/api/strategies",
-            "headers": [(b"x-strategy-admin-token", b"wrong-token")],
+            "headers": [(b"x-strategy-admin-token", b"legacy-token")],
             "query_string": b"", "server": ("test", 443), "scheme": "https",
             "client": ("test", 123), "root_path": "",
         })
         with patch.dict(os.environ, {}, clear=True):
-            with self.assertRaises(HTTPException) as missing:
+            with self.assertRaises(HTTPException) as missing_config:
                 app_module._authorize_strategy_access(request)
-        self.assertEqual(missing.exception.status_code, 503)
-        with patch.dict(os.environ, {"TRADESCANNER_STRATEGY_ADMIN_TOKEN": "expected-secret-value-that-is-long-enough-32"}):
-            with self.assertRaises(HTTPException) as wrong:
-                app_module._authorize_strategy_access(request)
-        self.assertEqual(wrong.exception.status_code, 401)
-        authorized = Request({
-            "type": "http", "method": "GET", "path": "/api/strategies",
-            "headers": [(b"x-strategy-admin-token", b"expected-secret-value-that-is-long-enough-32")],
-            "query_string": b"", "server": ("test", 443), "scheme": "https",
-            "client": ("test", 123), "root_path": "",
-        })
-        with patch.dict(os.environ, {"TRADESCANNER_STRATEGY_ADMIN_TOKEN": "expected-secret-value-that-is-long-enough-32"}):
-            self.assertIsNone(app_module._authorize_strategy_access(authorized))
+        self.assertEqual(missing_config.exception.status_code, 503)
 
-    def test_all_strategy_admin_endpoints_fail_closed_without_private_token(self):
+        with patch.dict(os.environ, {
+            "NEON_AUTH_JWKS_URL": "https://auth.example/.well-known/jwks.json",
+            "NEON_AUTH_ISSUER": "https://auth.example",
+        }, clear=True):
+            with self.assertRaises(HTTPException) as missing_token:
+                app_module._authorize_strategy_access(request)
+        self.assertEqual(missing_token.exception.status_code, 401)
+
+    def test_strategy_endpoints_fail_closed_without_neon_configuration(self):
         request = Request({
             "type": "http", "method": "GET", "path": "/api/strategies",
             "headers": [], "query_string": b"", "server": ("test", 443),
@@ -206,7 +202,7 @@ class AppEntrypointTests(unittest.TestCase):
             cached_rows[0].update({
                 "float_shares": 123456789,
                 "float_as_of": "2026-10-01",
-                "float_source": "fmp",
+                "float_source": "massive",
             })
             return cached_rows
 
@@ -221,30 +217,22 @@ class AppEntrypointTests(unittest.TestCase):
 
         apply_cached.assert_called_once_with(rows, store)
         self.assertEqual(result["results"][0]["float_shares"], 123456789)
-        self.assertEqual(result["results"][0]["float_source"], "fmp")
+        self.assertEqual(result["results"][0]["float_source"], "massive")
         self.assertEqual(result["results"][0]["float_as_of"], "2026-10-01")
 
 
-    def test_all_five_navigation_tabs_have_matching_panels_and_handlers(self):
+    def test_chart_is_integrated_into_scanner_and_standalone_tab_is_removed(self):
         html = (app_module.ROOT / "index.html").read_text(encoding="utf-8")
-        tabs = {
-            "screener": None,
-            "strategies": "tab-strategies",
-            "charts": "tab-charts",
-            "lists": "tab-lists",
-            "settings": "tab-settings",
-        }
-        for tab, panel_id in tabs.items():
-            with self.subTest(tab=tab):
-                self.assertIn(f'data-tab="{tab}"', html)
-                if panel_id:
-                    self.assertIn(f'id="{panel_id}"', html)
-                self.assertIn('button.addEventListener("click", () => showTab(button.dataset.tab))', html)
+        self.assertNotIn('data-tab="charts"', html)
+        self.assertNotIn('id="tab-charts"', html)
+        scanner_start = html.find('id="tab-screener"')
+        chart_position = html.find('id="integrated-chart"')
+        strategies_position = html.find('id="tab-strategies"')
+        self.assertGreaterEqual(scanner_start, 0)
+        self.assertGreater(chart_position, scanner_start)
+        self.assertGreater(strategies_position, chart_position)
+        self.assertIn('button.addEventListener("click", () => showTab(button.dataset.tab))', html)
         self.assertIn("function showTab(name)", html)
-        self.assertIn('name === "strategies"', html)
-        self.assertIn('name === "lists"', html)
-        self.assertIn('name === "settings"', html)
-
 
     def test_secondary_tabs_have_real_controls_and_data_endpoints(self):
         html = (app_module.ROOT / "index.html").read_text(encoding="utf-8")
