@@ -241,15 +241,6 @@ def status():
     }
 
 
-@app.post("/api/diagnostics/float/fmp")
-@app.post("/api/diagnostics/float/fmp/resolve-legacy-cooldown")
-@app.post("/api/diagnostics/float/fmp/refresh-cache")
-def disabled_fmp_float_routes(request: Request):
-    """Legacy FMP endpoints are intentionally disabled; no outbound FMP calls are made."""
-    _authorize_strategy_access(request)
-    raise HTTPException(status_code=410, detail="FMP está deshabilitado en TradeScanner. FLOAT utiliza Massive y su caché local.")
-
-
 @app.post("/api/diagnostics/float/massive")
 def test_massive_float(request: Request, symbol: str = Query("AAPL", min_length=1, max_length=12)):
     """Make one authenticated, bounded FLOAT request to Massive for verification."""
@@ -273,7 +264,6 @@ def test_massive_float(request: Request, symbol: str = Query("AAPL", min_length=
         "float_shares": result.get("float_shares"),
         "effective_date": result.get("effective_date"),
         "rows_saved": result.get("rows_saved", 0),
-        "note": "No FMP fallback is used; this test requests FLOAT only.",
     }
 
 
