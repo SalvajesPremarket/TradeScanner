@@ -111,6 +111,28 @@ class SchwabAdapterTests(unittest.TestCase):
         self.assertEqual(calls.count("https://api.schwabapi.com/v1/oauth/token"), 1)
         _clear_token_cache()
 
+    def test_refresh_token_invalid_grant_has_reconnect_guidance_and_cooldown(self):
+        _clear_token_cache()
+        calls = []
+
+        def fake_request(request, timeout=15):
+            calls.append(request.full_url)
+            if request.full_url == "https://api.schwabapi.com/v1/oauth/token":
+                raise SchwabAPIError("Schwab API returned HTTP 400 (oauth_error=invalid_grant).")
+            raise AssertionError("Quotes must not be requested after OAuth failure.")
+
+        with patch.dict(os.environ, {
+            "SCHWAB_CLIENT_ID": "test-id",
+            "SCHWAB_CLIENT_SECRET": "test-secret",
+            "SCHWAB_REFRESH_TOKEN": "test-refresh",
+        }), patch("tradescanner.schwab._request_json", side_effect=fake_request):
+            for _ in range(2):
+                with self.assertRaisesRegex(SchwabAPIError, "Reconnect Schwab"):
+                    get_quotes(["AAPL"])
+
+        self.assertEqual(calls.count("https://api.schwabapi.com/v1/oauth/token"), 1)
+        _clear_token_cache()
+
     def test_identifies_oauth_stage_without_exposing_provider_body(self):
         _clear_token_cache()
         with patch.dict(os.environ, {
