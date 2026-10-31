@@ -1,9 +1,11 @@
 import asyncio
+import concurrent.futures
 import hmac
 import jwt
 import logging
 import os
 import time
+import threading
 import uuid
 from datetime import datetime, timezone
 from contextlib import asynccontextmanager
@@ -34,6 +36,12 @@ from tradescanner.schwab import (
 
 ROOT = Path(__file__).resolve().parent
 logger = logging.getLogger(__name__)
+
+_SCANNER_HISTORY_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=6, thread_name_prefix="scanner-history")
+_SCANNER_HISTORY_LOCK = threading.Lock()
+_SCANNER_HISTORY_CACHE: dict[tuple[str, str], tuple[float, list[dict]]] = {}
+_SCANNER_HISTORY_INFLIGHT: set[tuple[str, str]] = set()
+_SCANNER_HISTORY_CACHE_TTL = 900.0
 logger.setLevel(logging.INFO)
 
 
@@ -168,6 +176,36 @@ def _aggregate_scanner_candles(candles: list[dict], timeframe: str) -> list[dict
     return [buckets[key] for key in sorted(buckets)]
 
 
+def _schedule_daily_weekly_history(symbol: str, timeframe: str) -> list[dict]:
+    """Return cached Schwab daily/weekly candles and refresh the cache in background."""
+    key = (symbol.strip().upper(), timeframe)
+    now = time.monotonic()
+    with _SCANNER_HISTORY_LOCK:
+        cached = _SCANNER_HISTORY_CACHE.get(key)
+        if cached and now - cached[0] < _SCANNER_HISTORY_CACHE_TTL:
+            return cached[1]
+        if key not in _SCANNER_HISTORY_INFLIGHT:
+            _SCANNER_HISTORY_INFLIGHT.add(key)
+            provider_timeframe = "day" if timeframe == "1d" else "week"
+            future = _SCANNER_HISTORY_EXECUTOR.submit(
+                lambda: __import__("tradescanner.candles", fromlist=["normalize_price_history"])
+                .normalize_price_history(symbol, get_chart_history(symbol, provider_timeframe))
+            )
+            def store_result(done: concurrent.futures.Future, cache_key: tuple[str, str] = key) -> None:
+                try:
+                    candles = done.result()
+                    with _SCANNER_HISTORY_LOCK:
+                        _SCANNER_HISTORY_CACHE[cache_key] = (time.monotonic(), candles)
+                except Exception as exc:
+                    logger.warning("Scanner historical timeframe fetch failed symbol=%s timeframe=%s error=%s",
+                                   cache_key[0], cache_key[1], type(exc).__name__)
+                finally:
+                    with _SCANNER_HISTORY_LOCK:
+                        _SCANNER_HISTORY_INFLIGHT.discard(cache_key)
+            future.add_done_callback(store_result)
+        return cached[1] if cached else []
+
+
 def _scanner_indicators(
     candles: list[dict],
     quote_time_ms: int | float | None = None,
@@ -176,7 +214,8 @@ def _scanner_indicators(
     """Calculate indicators only when candles include the live quote interval."""
     if not candles:
         return {"ema20": None, "macd": None}
-    duration = {"1m": 60_000, "5m": 300_000, "15m": 900_000, "1h": 3_600_000}[timeframe]
+    duration = {"1m": 60_000, "5m": 300_000, "15m": 900_000, "30m": 1_800_000,
+                "1h": 3_600_000, "1d": 86_400_000, "1w": 604_800_000}[timeframe]
     if isinstance(quote_time_ms, (int, float)) and not isinstance(quote_time_ms, bool) and quote_time_ms > 0:
         latest_stamp = candles[-1].get("candle_time_ms")
         if (
@@ -359,7 +398,7 @@ def snapshots_status():
 @app.get("/api/snapshots/latest")
 def snapshots_latest(
     limit: int = Query(10000, ge=1, le=10000),
-    timeframe: str = Query("1m", pattern="^(1m|5m|15m|1h)$"),
+    timeframe: str = Query("1m", pattern="^(1m|5m|15m|30m|1h|1d|1w)$"),
 ):
     try:
         store = SnapshotStore()
@@ -378,10 +417,14 @@ def snapshots_latest(
                 row["rvol_sessions_used"] = 0
                 row["rvol_as_of"] = None
             try:
-                history_limits = {"1m": 100, "5m": 130, "15m": 390, "1h": 1560}
-                indicator_candles = candle_store.latest(row["symbol"], limit=history_limits[timeframe])
-                scanner_candles = _aggregate_scanner_candles(indicator_candles, timeframe)
-                indicators = _scanner_indicators(scanner_candles[-100:], row.get("quote_time_ms"), timeframe)
+                if timeframe in {"1d", "1w"}:
+                    scanner_candles = _schedule_daily_weekly_history(row["symbol"], timeframe)
+                    indicators = _scanner_indicators(scanner_candles[-100:], None, timeframe)
+                else:
+                    history_limits = {"1m": 100, "5m": 130, "15m": 390, "30m": 3900, "1h": 1560}
+                    indicator_candles = candle_store.latest(row["symbol"], limit=history_limits[timeframe])
+                    scanner_candles = _aggregate_scanner_candles(indicator_candles, timeframe)
+                    indicators = _scanner_indicators(scanner_candles[-100:], row.get("quote_time_ms"), timeframe)
                 row["ema20"] = indicators["ema20"]
                 row["macd"] = indicators["macd"]
                 row["scanner_timeframe"] = timeframe
