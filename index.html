@@ -50,6 +50,7 @@
     .results-table tr.quote-stale td:first-child{color:#8a5200;font-weight:700}
     .results-table td.ticker-bearish{color:#b42318;font-weight:800}
     .results-table td.ticker-bullish{color:#16703c;font-weight:800}
+    .chart-ticker-link{padding:0;border:0;background:transparent;color:#55dff0;font:inherit;font-weight:850;text-decoration:underline;text-underline-offset:3px;cursor:pointer}.chart-ticker-link:hover{color:#8fffe7;text-shadow:0 0 12px #22d3ee55}
     thead th{padding:11px 10px;background:var(--head);border-top:1px solid var(--line);border-bottom:1px solid var(--line);color:#4a5e72;text-align:left;white-space:nowrap;font-size:10px}
     tbody td{height:43px;padding:10px;border-bottom:1px solid #e9eef3}
     .empty{padding:27px 15px;text-align:center;color:var(--muted);font-size:12px}
@@ -656,11 +657,17 @@
       for (const item of results) {
         const tr = document.createElement("tr");
         const details = strategyDetailsForSymbol(item.symbol);
-        const tickerCellIndex = tr.children.length;
+        const tickerCell = document.createElement("td");
         const quoteFresh = item.quote_is_fresh === true;
         if (!quoteFresh) tr.classList.add("quote-stale");
-        cell(tr, quoteFresh ? item.symbol : item.symbol + " · ÚLTIMO DATO");
-        const tickerCell = tr.children[tickerCellIndex];
+        const tickerButton = document.createElement("button");
+        tickerButton.type = "button";
+        tickerButton.className = "chart-ticker-link";
+        tickerButton.textContent = (quoteFresh ? item.symbol : item.symbol + " · ÚLTIMO DATO");
+        tickerButton.title = "Abrir " + item.symbol + " en el gráfico integrado";
+        tickerButton.addEventListener("click", () => loadChartForSymbol(item.symbol));
+        tickerCell.appendChild(tickerButton);
+        tr.appendChild(tickerCell);
         if (!quoteFresh) tickerCell.title = "Cotización guardada no confirmada como actual. Se muestra como referencia, no como precio en tiempo real.";
         if (details.zone === "bearish") {
           tr.classList.add("trend-bearish");
@@ -1186,13 +1193,15 @@
       label(left,496,first);label(right,496,last,"end");
     }
 
-    document.getElementById("chart-form").addEventListener("submit", async event => {
-      event.preventDefault();
-      const symbol = document.getElementById("chart-symbol").value.trim().toUpperCase();
+    async function loadChartForSymbol(rawSymbol) {
+      const symbol = String(rawSymbol || "").trim().toUpperCase();
+      if (!/^[A-Z0-9.\\-]{1,15}$/.test(symbol)) return;
+      document.getElementById("chart-symbol").value = symbol;
       const limit = Math.min(500,Math.max(10,Number(document.getElementById("chart-limit").value)||100));
       const timeframe = document.getElementById("chart-timeframe").value;
       const body = document.getElementById("chart-rows"); body.replaceChildren();
-      document.getElementById("chart-message").textContent = "Cargando velas reales…";
+      document.getElementById("chart-message").textContent = "Cargando velas reales de " + symbol + "…";
+      document.getElementById("integrated-chart").scrollIntoView({behavior:"smooth",block:"start"});
       try {
         const payload = await readJson(await fetch("/api/candles/" + encodeURIComponent(symbol) + "?limit=" + limit + "&timeframe=" + encodeURIComponent(timeframe),{cache:"no-store"}));
         chartRows = payload.candles || [];
@@ -1208,6 +1217,10 @@
         }
         document.getElementById("chart-message").textContent = symbol + " · " + (payload.timeframe_label || timeframe) + ": " + chartRows.length + " velas recibidas de Schwab. " + (payload.source === "stored" ? "Datos guardados." : "Histórico solicitado al proveedor en vivo.") + " RVOL: " + (payload.rvol && payload.rvol.rvol != null ? payload.rvol.rvol : "sin datos suficientes");
       } catch(error) { document.getElementById("chart-message").textContent = apiMessage(error); }
+    }
+    document.getElementById("chart-form").addEventListener("submit", event => {
+      event.preventDefault();
+      loadChartForSymbol(document.getElementById("chart-symbol").value);
     });
 
     function readWatchlist() {
