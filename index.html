@@ -183,7 +183,7 @@
 <body>
   <header>
     <div class="brand">Trade<span>Scanner</span></div>
-    <nav aria-label="Navegación"><button type="button" data-tab="screener" aria-current="page">SCREENER / ACCIONES</button><button type="button" data-tab="strategies">ESTRATEGIAS</button><button type="button" data-tab="charts">GRÁFICOS</button><button type="button" data-tab="lists">LISTAS</button><button type="button" data-tab="settings">CONFIGURACIÓN</button></nav>
+    <nav aria-label="Navegación"><button type="button" data-tab="screener" aria-current="page">SCREENER / ACCIONES</button><button type="button" data-tab="strategies">ESTRATEGIAS</button><button type="button" data-tab="lists">LISTAS</button><button type="button" data-tab="settings">CONFIGURACIÓN</button></nav>
   </header>
   <main>
     <section class="heading">
@@ -229,6 +229,16 @@
         </table>
       </div>
       <footer>Los filtros no generan ni completan datos faltantes. RVOL y FLOAT solo filtran filas cuando hay valores reales almacenados.</footer>
+    <section id="integrated-chart" aria-label="Gráficos y velas reales de Schwab" style="margin-top:18px;border:1px solid #244256;border-radius:11px;background:linear-gradient(155deg,#0b1b29,#08131f);overflow:hidden">
+      <div class="panel-head"><h2>GRÁFICOS · VELAS REALES DE SCHWAB</h2><span class="muted">Indicadores técnicos</span></div>
+      <div class="tab-body">
+        <form id="chart-form" class="tools"><label class="field" style="min-width:150px;flex:1">Ticker<input id="chart-symbol" maxlength="15" value="AAPL" required></label><label class="field" style="width:150px">Timeframe<select id="chart-timeframe"><option value="1m">1 minuto</option><option value="5m">5 minutos</option><option value="15m">15 minutos</option><option value="1h">1 hora</option><option value="day">Día</option><option value="week">Semana</option></select></label><label class="field" style="width:130px">N.º de velas<input id="chart-limit" type="number" min="10" max="500" value="100"></label><button class="action" type="submit">Cargar velas</button></form>
+        <div id="chart-message" class="tab-message">El gráfico mostrará únicamente velas que estén guardadas. No se inventarán precios.</div>
+        <svg id="chart-svg" viewBox="0 0 1000 500" width="100%" role="img" aria-label="Gráfico de velas de Schwab" style="display:block;min-height:260px;border:1px solid #24465b;background:#eef2f5;margin-bottom:14px"><text x="500" y="160" text-anchor="middle" fill="#718096" font-size="14">Carga velas guardadas para mostrar el gráfico</text></svg>
+        <div class="table-wrap"><table class="simple-table"><thead><tr><th>FECHA</th><th>OPEN</th><th>HIGH</th><th>LOW</th><th>CLOSE</th><th>VOLUMEN</th></tr></thead><tbody id="chart-rows"><tr><td colspan="6">Introduce un ticker y carga sus velas.</td></tr></tbody></table></div>
+      </div>
+    </section>
+
     </section>
 
     <section id="tab-strategies" class="panel tab-panel" hidden aria-label="Editor de estrategias">
@@ -903,7 +913,6 @@
         }
       });
       document.getElementById("tab-strategies").hidden = name !== "strategies";
-      document.getElementById("tab-charts").hidden = name !== "charts";
       document.getElementById("tab-lists").hidden = name !== "lists";
       document.getElementById("tab-settings").hidden = name !== "settings";
       document.querySelector("main > .panel[aria-label='Radar de acciones']").hidden = name !== "screener";
@@ -1110,38 +1119,81 @@
     });
 
 
+    function emaSeries(values, period) {
+      const result = [];
+      const k = 2 / (period + 1);
+      let current = null;
+      for (const raw of values) {
+        const value = Number(raw);
+        current = current === null ? value : value * k + current * (1-k);
+        result.push(current);
+      }
+      return result;
+    }
     function drawCandles(candles) {
       const svg = document.getElementById("chart-svg");
       const ns = "http://www.w3.org/2000/svg";
       svg.replaceChildren();
       const add = (tag,attrs,textValue) => {
-        const element = document.createElementNS(ns,tag);
-        for (const [key,value] of Object.entries(attrs||{})) element.setAttribute(key,String(value));
-        if (textValue != null) element.textContent = textValue;
-        svg.appendChild(element); return element;
+        const el = document.createElementNS(ns,tag);
+        for (const [key,value] of Object.entries(attrs||{})) el.setAttribute(key,String(value));
+        if (textValue != null) el.textContent = textValue;
+        svg.appendChild(el); return el;
       };
-      if (!candles.length) {
-        add("text",{x:500,y:160,"text-anchor":"middle",fill:"#718096","font-size":14},"No hay velas reales guardadas para graficar");
-        return;
+      const label=(x,y,text,anchor="start",fill="#526170")=>add("text",{x,y,"text-anchor":anchor,fill,"font-size":10,"font-family":"Arial"},text);
+      if (!candles.length) { add("text",{x:500,y:245,"text-anchor":"middle",fill:"#526170","font-size":14},"No hay velas reales guardadas para graficar"); return; }
+      const valid=candles.filter(c=>[c.open,c.high,c.low,c.close].every(v=>Number.isFinite(Number(v))));
+      if(!valid.length){add("text",{x:500,y:245,"text-anchor":"middle",fill:"#526170","font-size":14},"Las velas guardadas no contienen OHLC válido");return;}
+      const closes=valid.map(c=>Number(c.close));
+      const ema3=emaSeries(closes,3), ema9=emaSeries(closes,9), ema50=emaSeries(closes,50), ema200=emaSeries(closes,200);
+      const bbMid=[],bbUpper=[],bbLower=[];
+      for(let i=0;i<closes.length;i++){
+        if(i<19){bbMid.push(null);bbUpper.push(null);bbLower.push(null);continue;}
+        const window=closes.slice(i-19,i+1),mean=window.reduce((a,b)=>a+b,0)/20;
+        const variance=window.reduce((a,b)=>a+(b-mean)**2,0)/20,sd=Math.sqrt(variance);
+        bbMid.push(mean);bbUpper.push(mean+2*sd);bbLower.push(mean-2*sd);
       }
-      const valid = candles.filter(c=>[c.open,c.high,c.low,c.close].every(v=>Number.isFinite(Number(v))));
-      if (!valid.length) { add("text",{x:500,y:160,"text-anchor":"middle",fill:"#718096","font-size":14},"Las velas guardadas no contienen OHLC válido"); return; }
-      const min = Math.min(...valid.map(c=>Number(c.low))), max = Math.max(...valid.map(c=>Number(c.high)));
-      const span = max-min || 1, left=62, right=980, top=20, bottom=275, plotH=bottom-top;
-      for(let i=0;i<=4;i++){
-        const y=top+i*plotH/4, value=max-i*span/4;
-        add("line",{x1:left,y1:y,x2:right,y2:y,stroke:"#e4eaf0","stroke-width":1});
-        add("text",{x:left-8,y:y+4,"text-anchor":"end",fill:"#718096","font-size":11},value.toFixed(2));
-      }
-      const step=(right-left)/valid.length, bodyWidth=Math.max(2,Math.min(10,step*0.58));
+      const fast=emaSeries(closes,12),slow=emaSeries(closes,26),macd=fast.map((v,i)=>v-slow[i]),signal=emaSeries(macd,9),hist=macd.map((v,i)=>v-signal[i]);
+      const volumes=valid.map(c=>Math.max(0,Number(c.volume)||0));
+      const left=65,right=980,step=(right-left)/valid.length,xAt=i=>left+step*(i+.5);
+      const priceTop=24,priceBottom=280,macdTop=310,macdBottom=395,volTop=422,volBottom=480;
+      const allPrice=[...valid.map(c=>Number(c.low)),...valid.map(c=>Number(c.high)),...ema3,...ema9,...ema50,...ema200,...bbUpper.filter(v=>v!==null),...bbLower.filter(v=>v!==null)];
+      const min=Math.min(...allPrice),max=Math.max(...allPrice),span=max-min||1;
+      const yPrice=v=>priceBottom-(v-min)/span*(priceBottom-priceTop);
+      const grid="#d7dee5";
+      for(let k=0;k<=4;k++){const y=priceTop+k*(priceBottom-priceTop)/4,val=max-k*span/4;add("line",{x1:left,y1:y,x2:right,y2:y,stroke:grid,"stroke-width":1});label(left-8,y+3,val.toFixed(2),"end");}
+      const bw=Math.max(1.5,Math.min(9,step*.58));
       valid.forEach((c,i)=>{
-        const x=left+step*(i+0.5), y=v=>bottom-(Number(v)-min)/span*plotH;
-        const open=y(c.open), close=y(c.close), high=y(c.high), low=y(c.low), rising=Number(c.close)>=Number(c.open), color=rising?"#16845b":"#c34444";
-        add("line",{x1:x,y1:high,x2:x,y2:low,stroke:color,"stroke-width":1.3});
-        add("rect",{x:x-bodyWidth/2,y:Math.min(open,close),width:bodyWidth,height:Math.max(1,Math.abs(close-open)),fill:color,stroke:color});
+        const x=xAt(i),open=yPrice(Number(c.open)),close=yPrice(Number(c.close)),high=yPrice(Number(c.high)),low=yPrice(Number(c.low));
+        const color=Number(c.close)>=Number(c.open)?"#15966b":"#d34b57";
+        add("line",{x1:x,y1:high,x2:x,y2:low,stroke:color,"stroke-width":1.2});
+        add("rect",{x:x-bw/2,y:Math.min(open,close),width:bw,height:Math.max(1,Math.abs(close-open)),fill:color,stroke:color});
       });
-      add("text",{x:left,y:302,fill:"#718096","font-size":11},valid[0].candle_time_ms?new Date(valid[0].candle_time_ms).toLocaleString():"Más antiguas");
-      add("text",{x:right,y:302,"text-anchor":"end",fill:"#718096","font-size":11},valid[valid.length-1].candle_time_ms?new Date(valid[valid.length-1].candle_time_ms).toLocaleString():"Más recientes");
+      const line=(values,color,width,dash="")=>{
+        let path="";
+        values.forEach((v,i)=>{if(v===null||!Number.isFinite(v))return;path+=(path?" L":"M")+xAt(i).toFixed(2)+" "+yPrice(v).toFixed(2);});
+        if(path)add("path",{d:path,fill:"none",stroke:color,"stroke-width":width,"stroke-linejoin":"round","stroke-linecap":"round",...(dash?{"stroke-dasharray":dash}:{})});
+      };
+      // Bollinger outer bands use a clearly dashed black line.
+      line(bbUpper,"#111827",3,"2 5"); line(bbLower,"#111827",3,"2 5");
+      line(ema3,"#8b5cf6",1); line(ema9,"#ef4444",1); line(ema50,"#ef4444",3); line(ema200,"#16a34a",3);
+      label(left,14,"PRECIO + EMA + BANDAS BOLLINGER","start","#344454");
+      // MACD panel: green MACD line, red signal line and green/red histogram.
+      const macdAbs=Math.max(.000001,...macd.map(Math.abs),...signal.map(Math.abs),...hist.map(Math.abs));
+      const yMacd=v=>(macdBottom+macdTop)/2-v/macdAbs*(macdBottom-macdTop)*.46;
+      add("line",{x1:left,y1:yMacd(0),x2:right,y2:yMacd(0),stroke:"#9aa7b3","stroke-width":1});
+      hist.forEach((v,i)=>{const x=xAt(i),y=yMacd(v),zero=yMacd(0);add("rect",{x:x-bw/2,y:Math.min(y,zero),width:bw,height:Math.max(1,Math.abs(zero-y)),fill:v>=0?"#16a34a":"#dc4444",opacity:.72});});
+      const macdPath=values=>values.map((v,i)=>(i?"L":"M")+xAt(i).toFixed(2)+" "+yMacd(v).toFixed(2)).join(" ");
+      add("path",{d:macdPath(macd),fill:"none",stroke:"#16a34a","stroke-width":1.8});
+      add("path",{d:macdPath(signal),fill:"none",stroke:"#dc4444","stroke-width":1.8});
+      label(left,302,"MACD 12 / 26 / 9","start","#344454");
+      // Volume panel.
+      const maxVol=Math.max(1,...volumes);
+      volumes.forEach((v,i)=>{const h=v/maxVol*(volBottom-volTop);add("rect",{x:xAt(i)-bw/2,y:volBottom-h,width:bw,height:h,fill:"#5b91ad",opacity:.8});});
+      label(left,414,"VOLUMEN","start","#344454");
+      const first=valid[0].candle_time_ms?new Date(valid[0].candle_time_ms).toLocaleString():"Más antiguas";
+      const last=valid[valid.length-1].candle_time_ms?new Date(valid[valid.length-1].candle_time_ms).toLocaleString():"Más recientes";
+      label(left,496,first);label(right,496,last,"end");
     }
 
     document.getElementById("chart-form").addEventListener("submit", async event => {
