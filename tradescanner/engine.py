@@ -25,9 +25,13 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 
-def _get_jeanlong_minute_history(symbol: str) -> dict[str, Any]:
-    """Five days of one-minute candles including extended hours for JeanLong MACD/EMA."""
+def _get_multi_session_minute_history(symbol: str) -> dict[str, Any]:
+    """Five sessions of one-minute extended-hours candles for indicators and RVOL."""
     return get_price_history(symbol, period=5, frequency=1)
+
+
+_HISTORY_REFRESH_INTERVAL_SECONDS = 60.0
+_HISTORY_MAX_QUOTE_LAG_MS = 120_000
 
 UNIVERSE_CACHE_SECONDS = 6 * 60 * 60
 _universe_cache: dict[str, Any] | None = None
@@ -38,10 +42,27 @@ _HISTORY_MAX_INFLIGHT = 8
 _history_fetch_semaphore = threading.BoundedSemaphore(8)
 _history_inflight_symbols: set[str] = set()
 _history_inflight_lock = threading.Lock()
+_history_last_attempt_at: dict[str, float] = {}
 
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _history_lags_quote(row: dict[str, Any], latest_candle_time_ms: int | None) -> bool:
+    """True when a fresh quote is more than two minutes ahead of stored OHLCV."""
+    quote_time_ms = row.get("quote_time_ms")
+    if (
+        row.get("quote_is_fresh") is not True
+        or isinstance(quote_time_ms, bool)
+        or not isinstance(quote_time_ms, (int, float))
+        or not math.isfinite(float(quote_time_ms))
+        or quote_time_ms <= 0
+    ):
+        return False
+    if latest_candle_time_ms is None:
+        return True
+    return float(quote_time_ms) - latest_candle_time_ms > _HISTORY_MAX_QUOTE_LAG_MS
 
 
 def _ema20_from_candles(candles: list[dict[str, Any]]) -> float | None:
@@ -836,10 +857,18 @@ def run_scan_cycle(
         # only one ticker leaves almost every candidate unable to calculate EMA/MACD.
         # Backfill a small bounded set of symbols per cycle, prioritizing missing
         # histories and liquid/gapping names. This does not relax strategy filters.
-        active_scan_strategies = [s for s in active_strategies(target_store) if is_momentum_scan_program(s)]
+        enabled_strategies = active_strategies(target_store)
+        active_scan_strategies = [s for s in enabled_strategies if is_momentum_scan_program(s)]
         jeanlong_minute_scan = any(str(s.get("name", "")).casefold() == "premarketjeanlong" for s in active_scan_strategies)
+        needs_multi_session_history = any(
+            is_momentum_scan_program(strategy)
+            or is_momentum_trader_program(strategy)
+            or "rvol" in str(strategy.get("source", "")).casefold()
+            for strategy in enabled_strategies
+        )
         history_fetch = candle_fetcher or (
-            _get_jeanlong_minute_history if quote_fetcher is None and jeanlong_minute_scan
+            _get_multi_session_minute_history
+            if quote_fetcher is None and needs_multi_session_history
             else get_price_history if quote_fetcher is None else None
         )
         candle_state["candle_symbols"] = []
@@ -857,7 +886,11 @@ def run_scan_cycle(
                 ]
                 candle_store = CandleStore(target_store.path)
                 missing_history = []
-                history_counts = candle_store.counts_by_symbols([row["symbol"] for row in eligible])
+                history_status = candle_store.history_status_by_symbols([row["symbol"] for row in eligible])
+                history_counts = {
+                    symbol: int(status["count"])
+                    for symbol, status in history_status.items()
+                }
                 # Resolve active scan settings before selecting history work.
                 scan_configs = []
                 try:
@@ -911,10 +944,16 @@ def run_scan_cycle(
                         missing_history.append(row)
                 else:
                     for row in eligible:
-                        if history_counts.get(row["symbol"], 0) >= 35:
-                            candle_state["history_symbols_skipped_with_cache"] += 1
-                        else:
+                        status = history_status.get(row["symbol"], {})
+                        count = int(status.get("count", 0))
+                        latest_candle_time_ms = status.get("latest_candle_time_ms")
+                        if count < 35 or (
+                            enabled_strategies
+                            and _history_lags_quote(row, latest_candle_time_ms)
+                        ):
                             missing_history.append(row)
+                        elif count >= 35:
+                            candle_state["history_symbols_skipped_with_cache"] += 1
 
                 def history_priority(row: dict[str, Any]) -> tuple[Any, ...]:
                     price = row.get("price")
@@ -935,10 +974,22 @@ def run_scan_cycle(
                 # Backfill up to the in-flight ceiling each cycle; otherwise the
                 # 10-symbol cap leaves part of each 21-symbol evaluation batch
                 # without candles and EMA/MACD/RVOL cannot be calculated.
-                candidates = sorted(missing_history, key=history_priority, reverse=True)[:8]
+                ordered_candidates = sorted(missing_history, key=history_priority, reverse=True)
+                if history_fetch in {get_price_history, _get_multi_session_minute_history}:
+                    # Avoid repeatedly requesting unchanged history for the same symbols.
+                    now_monotonic = time.monotonic()
+                    with _history_inflight_lock:
+                        candidates = [
+                            row for row in ordered_candidates
+                            if row["symbol"] not in _history_inflight_symbols
+                            and now_monotonic - _history_last_attempt_at.get(row["symbol"], 0.0)
+                            >= _HISTORY_REFRESH_INTERVAL_SECONDS
+                        ][:8]
+                else:
+                    candidates = ordered_candidates[:8]
                 candle_state["history_candidates_eligible"] = len(missing_history)
                 candle_state["history_candidates_deferred"] = max(0, len(missing_history) - len(candidates))
-                if history_fetch in {get_price_history, _get_jeanlong_minute_history}:
+                if history_fetch in {get_price_history, _get_multi_session_minute_history}:
                     # Schwab can occasionally take minutes to return a candle payload.
                     # Run production history calls in bounded daemon threads and wait
                     # at most 15 seconds for this cycle; quotes and strategy checks continue.
@@ -951,6 +1002,7 @@ def run_scan_cycle(
                             if len(_history_inflight_symbols) >= _HISTORY_MAX_INFLIGHT:
                                 break
                             _history_inflight_symbols.add(symbol)
+                            _history_last_attempt_at[symbol] = time.monotonic()
                         job = {"done": threading.Event()}
                         thread = threading.Thread(
                             target=_fetch_history_in_background,
