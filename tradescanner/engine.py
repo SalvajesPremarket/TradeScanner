@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import math
 import os
 import threading
 import time
@@ -14,7 +15,7 @@ from tradescanner.db import DB_ERRORS
 from tradescanner.float_provider import apply_cached_float, refresh_float_cache
 from tradescanner.infisical_vault import is_configured as infisical_is_configured
 from tradescanner.snapshots import BATCH_SIZE, SnapshotStore, collect_snapshots
-from tradescanner.schwab import SchwabAPIError, SchwabConfigurationError, get_daily_history, get_price_history, get_quotes
+from tradescanner.schwab import SchwabAPIError, SchwabConfigurationError, get_all_time_daily_history, get_daily_history, get_price_history, get_quotes
 from tradescanner.universe import load_symbol_universe
 from tradescanner.strategies import active_strategies, is_momentum_trader_program, is_momentum_scan_program, strategy_matches
 from tradescanner.momentum_data import recent_stock_news
@@ -312,6 +313,108 @@ def _evaluate_original_scan_strategy(store: SnapshotStore, batch: list[str], str
     return state
 
 
+
+_ATH_CACHE_TTL_SECONDS = 24 * 60 * 60
+_ATH_ERROR_CACHE_TTL_SECONDS = 5 * 60
+_ATH_MAX_REFRESHES_PER_CYCLE = 8
+
+
+def _all_time_high_for_symbol(store: SnapshotStore, symbol: str, quote_time_ms: int | float,
+                              fetch_budget: dict[str, int]) -> dict[str, Any]:
+    """Cached prior-session ATH; never includes the current, incomplete session."""
+    key = "rompiendo_maximos_ath:" + symbol.strip().upper()
+    cached = store.get_state(key, {})
+    now = time.time()
+    if isinstance(cached, dict):
+        age = now - float(cached.get("cached_at", 0) or 0)
+        ttl = _ATH_ERROR_CACHE_TTL_SECONDS if cached.get("status") == "unavailable" else _ATH_CACHE_TTL_SECONDS
+        if age < ttl:
+            return dict(cached)
+    if fetch_budget["used"] >= _ATH_MAX_REFRESHES_PER_CYCLE:
+        return {"status": "pending", "high": None, "ath_date": None}
+    fetch_budget["used"] += 1
+    try:
+        payload = get_all_time_daily_history(symbol)
+        quote_day = datetime.fromtimestamp(float(quote_time_ms) / 1000, ZoneInfo("America/New_York")).date()
+        valid = []
+        for candle in payload.get("candles", []):
+            if not isinstance(candle, dict):
+                continue
+            try:
+                stamp = float(candle.get("datetime"))
+                high = float(candle.get("high"))
+                candle_day = datetime.fromtimestamp(stamp / 1000, ZoneInfo("America/New_York")).date()
+            except (TypeError, ValueError, OverflowError, OSError):
+                continue
+            if stamp > 0 and high > 0 and math.isfinite(high) and candle_day < quote_day:
+                valid.append((high, candle_day.isoformat()))
+        if valid:
+            high, ath_date = max(valid, key=lambda item: item[0])
+            result = {"status": "ready", "high": high, "ath_date": ath_date,
+                      "history_sessions": len(valid), "history_window_years": 20}
+        else:
+            result = {"status": "insufficient_history", "high": None, "ath_date": None}
+        store.set_state(key, {**result, "cached_at": now})
+        return result
+    except Exception as exc:
+        result = {"status": "unavailable", "high": None, "ath_date": None, "error": type(exc).__name__}
+        store.set_state(key, {**result, "cached_at": now})
+        logger.warning("RompiendoMaximos ATH fetch failed symbol=%s error_type=%s", symbol, type(exc).__name__)
+        return result
+
+
+def _evaluate_rompiendo_maximos(store: SnapshotStore, rows: list[dict[str, Any]],
+                               strategy: dict[str, Any]) -> dict[str, Any]:
+    """Evaluate live Schwab quotes against the prior completed daily ATH."""
+    evaluations = []
+    fetch_budget = {"used": 0}
+    for row in rows:
+        symbol = row.get("symbol")
+        if not isinstance(symbol, str) or not symbol or row.get("quote_is_fresh") is not True:
+            continue
+        price, quote_time_ms = row.get("price"), row.get("quote_time_ms")
+        if (not isinstance(price, (int, float)) or isinstance(price, bool)
+                or not math.isfinite(float(price)) or price <= 0
+                or not isinstance(quote_time_ms, (int, float)) or isinstance(quote_time_ms, bool)
+                or quote_time_ms <= 0):
+            evaluations.append({"symbol": symbol, "passed": False, "strategy": strategy.get("name"),
+                                "strategy_id": strategy.get("id"), "reasons": ["cotización inválida o sin timestamp"]})
+            continue
+        ath = _all_time_high_for_symbol(store, symbol, quote_time_ms, fetch_budget)
+        high = ath.get("high")
+        passed = (ath.get("status") == "ready" and isinstance(high, (int, float))
+                  and float(price) > float(high))
+        if ath.get("status") == "pending":
+            reasons = ["histórico: pendiente de consulta; se procesa en próximos ciclos"]
+        elif ath.get("status") == "unavailable":
+            reasons = ["histórico: Schwab no disponible; no se genera señal"]
+        elif ath.get("status") != "ready":
+            reasons = ["histórico: no hay velas diarias completas disponibles"]
+        elif passed:
+            reasons = []
+        else:
+            reasons = ["ruptura: precio actual no supera el máximo histórico previo"]
+        evaluations.append({
+            "symbol": symbol, "passed": passed, "action": "ENTER" if passed else None,
+            "strategy": strategy.get("name"), "strategy_id": strategy.get("id"),
+            "quote_price": price, "all_time_high": high, "ath_date": ath.get("ath_date"),
+            "percent_above_ath": round((float(price) / float(high) - 1) * 100, 4) if passed and high else None,
+            "history_window_years": ath.get("history_window_years", 20),
+            "metrics": {"price": price, "all_time_high": high, "ath_date": ath.get("ath_date")},
+            "reasons": reasons, "data_source": "Schwab real-time quote + completed daily history",
+        })
+    state = {
+        "status": "evaluated" if evaluations else "no_fresh_quotes",
+        "strategy_id": strategy.get("id"), "strategy": strategy.get("name"),
+        "evaluated_at": _now(), "candidate_count": len(rows), "processed_quotes": len(evaluations),
+        "ath_refreshes_this_cycle": fetch_budget["used"], "evaluations": evaluations,
+        "matches": [item["symbol"] for item in evaluations if item.get("passed")],
+        "note": "Ruptura en tiempo real: cotización Schwab > máximo High de sesiones diarias completas anteriores. Histórico disponible limitado a 20 años; excluye la sesión actual. No coloca órdenes.",
+    }
+    store.set_state("strategy_scan_status:" + str(strategy.get("id)), state)
+    return state
+
+
 def _evaluate_active_strategies(store: SnapshotStore, batch: list[str]) -> dict[str, Any]:
     """Evaluate every enabled strategy once per scanner cycle, without placing orders."""
     strategies = active_strategies(store)
@@ -351,6 +454,8 @@ def _evaluate_active_strategies(store: SnapshotStore, batch: list[str]) -> dict[
                 "note": "OpenGapFranco usa Bollinger y MACD en velas diarias; volumen, precio, float y hora proceden de datos observados. No coloca órdenes.",
             }
             store.set_state("strategy_scan_status:" + str(strategy.get("id")), state)
+        elif str(strategy.get("name", "")).casefold() == "rompiendomaximos":
+            state = _evaluate_rompiendo_maximos(store, rows, strategy)
         elif is_momentum_scan_program(strategy):
             state = _evaluate_original_scan_strategy(store, batch, strategy)
             store.set_state("momentum_scan_status", state)
