@@ -23,6 +23,9 @@ class AppEntrypointTests(unittest.TestCase):
         self.assertIn("/api/snapshots/latest", paths)
         self.assertIn("/api/strategies", paths)
         self.assertIn("/api/strategies/active-matches", paths)
+        self.assertNotIn("/api/diagnostics/float/fmp", paths)
+        self.assertNotIn("/api/diagnostics/float/fmp/resolve-legacy-cooldown", paths)
+        self.assertNotIn("/api/diagnostics/float/fmp/refresh-cache", paths)
 
     def test_automatic_scan_defaults_to_disabled(self):
         with patch.dict(os.environ, {}, clear=True), patch("app.get_engine_status", return_value={}):
