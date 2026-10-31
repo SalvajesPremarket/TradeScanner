@@ -378,7 +378,8 @@ def snapshots_latest(
                 row["rvol_sessions_used"] = 0
                 row["rvol_as_of"] = None
             try:
-                indicator_candles = candle_store.latest(row["symbol"], limit=6000)
+                history_limits = {"1m": 100, "5m": 130, "15m": 390, "1h": 1560}
+                indicator_candles = candle_store.latest(row["symbol"], limit=history_limits[timeframe])
                 scanner_candles = _aggregate_scanner_candles(indicator_candles, timeframe)
                 indicators = _scanner_indicators(scanner_candles[-100:], row.get("quote_time_ms"), timeframe)
                 row["ema20"] = indicators["ema20"]
