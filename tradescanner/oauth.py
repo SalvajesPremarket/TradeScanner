@@ -14,6 +14,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 
 from .infisical_vault import InfisicalError, is_configured as infisical_is_configured
 from .infisical_vault import write_secret
+from .schwab import _clear_token_cache
 
 router = APIRouter()
 TOKEN_URL = "https://api.schwabapi.com/v1/oauth/token"
@@ -120,6 +121,7 @@ def oauth_callback(
 
     try:
         write_secret("SCHWAB_REFRESH_TOKEN", refresh_token)
+        _clear_token_cache()
     except InfisicalError:
         raise HTTPException(
             status_code=503,
