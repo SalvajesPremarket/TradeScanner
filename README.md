@@ -17,7 +17,6 @@ Scanner de acciones basado en cotizaciones e histórico de **Schwab**, con persi
 - **Google News RSS**: titulares auxiliares con fecha publicada; no se inventan noticias.
 - **Nasdaq Trader**: universo público de símbolos.
 - **Infisical**: almacén opcional del refresh token de Schwab.
-- FMP está deshabilitado. Las rutas antiguas de diagnóstico FMP responden HTTP 410 para comunicar que el proveedor fue retirado; no realizan llamadas externas.
 
 Los valores ausentes permanecen ausentes. El scanner no sustituye FLOAT por shares outstanding ni fabrica precios, velas, volumen, RVOL o noticias.
 
@@ -39,7 +38,7 @@ Los valores ausentes permanecen ausentes. El scanner no sustituye FLOAT por shar
 - `GET /api/strategies/active-matches`: evaluaciones y coincidencias de estrategias activas.
 - `POST /api/diagnostics/float/massive?symbol=AAPL`: consulta diagnóstica explícita de FLOAT Massive.
 
-Las rutas de administración de estrategias requieren un JWT válido de Neon Auth (`Authorization: Bearer ...`) y la sesión de dispositivo activo. No utilizan el antiguo encabezado `X-Strategy-Admin-Token`.
+Las rutas de administración de estrategias requieren un JWT válido de Neon Auth (`Authorization: Bearer ...`) y una sesión de dispositivo activo.
 
 ## Configuración
 
