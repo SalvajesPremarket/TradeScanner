@@ -194,7 +194,7 @@ class AppEntrypointTests(unittest.TestCase):
             store.latest.return_value = rows
             store.path = "unused-test-db"
             candle_class.return_value.rvol.return_value = {"rvol": None, "sessions_used": 0}
-            result = app_module.snapshots_latest(limit=100)
+            result = app_module.snapshots_latest(limit=100, timeframe="1m")
         self.assertEqual([row["symbol"] for row in result["results"]], ["AAA", "BBB", "CCC", "DDD"])
         self.assertEqual(result["active_strategy"]["id"], "strategy-1")
 
@@ -216,7 +216,7 @@ class AppEntrypointTests(unittest.TestCase):
             store.latest.return_value = rows
             store.path = "unused-test-db"
             candle_class.return_value.rvol.return_value = {"rvol": None, "sessions_used": 0}
-            result = app_module.snapshots_latest(limit=100)
+            result = app_module.snapshots_latest(limit=100, timeframe="1m")
 
         apply_cached.assert_called_once_with(rows, store)
         self.assertEqual(result["results"][0]["float_shares"], 123456789)
