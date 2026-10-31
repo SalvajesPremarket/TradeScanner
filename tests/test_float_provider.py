@@ -118,7 +118,7 @@ class MassiveFloatProviderTests(unittest.TestCase):
         self.assertEqual(first["float_shares"], 123456)
         self.assertEqual(len(calls), 1)
 
-    def test_legacy_fmp_rows_are_ignored_and_never_overwrite_schwab(self):
+    def test_legacy_provider_rows_are_ignored_and_never_overwrite_schwab(self):
         with self.store._connect() as connection:
             connection.execute(
                 """CREATE TABLE float_cache (
@@ -128,7 +128,7 @@ class MassiveFloatProviderTests(unittest.TestCase):
             )
             connection.execute(
                 "INSERT INTO float_cache VALUES (?, ?, ?, ?, ?)",
-                ("AAPL", 123456, "2026-10-01", 100000, "fmp"),
+                ("AAPL", 123456, "2026-10-01", 100000, "legacy"),
             )
             connection.execute(
                 "INSERT INTO float_cache VALUES (?, ?, ?, ?, ?)",
