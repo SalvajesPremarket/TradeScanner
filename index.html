@@ -1154,7 +1154,7 @@
       const valid=candles.filter(c=>[c.open,c.high,c.low,c.close].every(v=>Number.isFinite(Number(v))));
       if(!valid.length){add("text",{x:500,y:245,"text-anchor":"middle",fill:"#526170","font-size":14},"Las velas guardadas no contienen OHLC válido");return;}
       const closes=valid.map(c=>Number(c.close));
-      const ema3=emaSeries(closes,3), ema9=emaSeries(closes,9), ema50=emaSeries(closes,50), ema200=emaSeries(closes,200);
+      const ema3=emaSeries(closes,3), ema9=emaSeries(closes,9), ema20=emaSeries(closes,20), ema50=emaSeries(closes,50), ema200=emaSeries(closes,200);
       const bbMid=[],bbUpper=[],bbLower=[];
       for(let i=0;i<closes.length;i++){
         if(i<19){bbMid.push(null);bbUpper.push(null);bbLower.push(null);continue;}
@@ -1166,7 +1166,7 @@
       const volumes=valid.map(c=>Math.max(0,Number(c.volume)||0));
       const left=65,right=980,step=(right-left)/valid.length,xAt=i=>left+step*(i+.5);
       const priceTop=24,priceBottom=280,macdTop=310,macdBottom=395,volTop=422,volBottom=480;
-      const allPrice=[...valid.map(c=>Number(c.low)),...valid.map(c=>Number(c.high)),...ema3,...ema9,...ema50,...ema200,...bbUpper.filter(v=>v!==null),...bbLower.filter(v=>v!==null)];
+      const allPrice=[...valid.map(c=>Number(c.low)),...valid.map(c=>Number(c.high)),...ema3,...ema9,...ema20,...ema50,...ema200,...bbUpper.filter(v=>v!==null),...bbLower.filter(v=>v!==null)];
       const min=Math.min(...allPrice),max=Math.max(...allPrice),span=max-min||1;
       const yPrice=v=>priceBottom-(v-min)/span*(priceBottom-priceTop);
       const grid="#d7dee5";
@@ -1186,7 +1186,6 @@
       // Bollinger outer bands use a clearly dashed black line.
       line(bbUpper,"#111827",3,"2 5"); line(bbLower,"#111827",3,"2 5");
       // EMA20 usa exactamente el mismo color, grosor y patrón discontinuo que Bollinger.
-      const ema20=emaSeries(closes,20);
       line(ema20,"#111827",3,"2 5");
       line(ema3,"#8b5cf6",1); line(ema9,"#ef4444",1); line(ema50,"#ef4444",3); line(ema200,"#16a34a",3);
       label(left,14,"PRECIO + EMA20 + EMA3/9/50/200 + BANDAS BOLLINGER","start","#344454");
