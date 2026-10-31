@@ -1,7 +1,7 @@
 """Massive FLOAT integration with bounded refresh and a local-only read path.
 
 Schwab remains the quote provider. Massive supplies free-float values only.
-Legacy FMP cache rows are deliberately ignored and FMP is never contacted.
+Legacy provider cache rows are ignored; only Massive FLOAT records are read.
 """
 from __future__ import annotations
 
@@ -178,7 +178,7 @@ def refresh_symbol_float(
     now: float | None = None,
     force: bool = False,
 ) -> dict[str, Any]:
-    """Request a single symbol for an explicit diagnostic; never falls back to FMP."""
+    """Request a single symbol for an explicit Massive diagnostic."""
     normalized = symbol.strip().upper() if isinstance(symbol, str) else ""
     if not normalized:
         return {"status": "invalid_symbol", "provider": "Massive"}
