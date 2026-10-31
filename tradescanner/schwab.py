@@ -98,6 +98,7 @@ def _request_json(request: urllib.request.Request, timeout: int = 15) -> Any:
 
 def _access_token() -> str:
     global _CACHED_TOKEN, _CACHED_TOKEN_EXPIRES_AT, _CACHED_CREDENTIALS
+    global _TOKEN_FAILURE_UNTIL, _TOKEN_FAILURE_CREDENTIALS, _TOKEN_FAILURE_MESSAGE
     # Check the in-memory access token before reading the refresh token from
     # Infisical. Previously every market-data request performed a vault read
     # before discovering that the access token was still valid.
@@ -156,7 +157,6 @@ def _access_token() -> str:
                 )
             else:
                 message = f"Schwab OAuth token request failed: {detail}"
-            global _TOKEN_FAILURE_UNTIL, _TOKEN_FAILURE_CREDENTIALS, _TOKEN_FAILURE_MESSAGE
             with _TOKEN_LOCK:
                 _TOKEN_FAILURE_CREDENTIALS = credentials
                 _TOKEN_FAILURE_MESSAGE = message
