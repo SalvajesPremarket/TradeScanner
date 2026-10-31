@@ -314,27 +314,21 @@ def _evaluate_original_scan_strategy(store: SnapshotStore, batch: list[str], str
 
 
 
+
 _ATH_CACHE_TTL_SECONDS = 24 * 60 * 60
 _ATH_ERROR_CACHE_TTL_SECONDS = 5 * 60
 _ATH_MAX_REFRESHES_PER_CYCLE = 8
+_ath_inflight_symbols: set[str] = set()
+_ath_inflight_lock = threading.Lock()
+_ath_fetch_semaphore = threading.BoundedSemaphore(8)
 
 
-def _all_time_high_for_symbol(store: SnapshotStore, symbol: str, quote_time_ms: int | float,
-                              fetch_budget: dict[str, int]) -> dict[str, Any]:
-    """Cached prior-session ATH; never includes the current, incomplete session."""
+def _fetch_ath_in_background(symbol: str, quote_time_ms: int | float, store_path: Any) -> None:
+    """Fetch ATH off the scanner's critical path and persist it for later quote cycles."""
     key = "rompiendo_maximos_ath:" + symbol.strip().upper()
-    cached = store.get_state(key, {})
-    now = time.time()
-    if isinstance(cached, dict):
-        age = now - float(cached.get("cached_at", 0) or 0)
-        ttl = _ATH_ERROR_CACHE_TTL_SECONDS if cached.get("status") == "unavailable" else _ATH_CACHE_TTL_SECONDS
-        if age < ttl:
-            return dict(cached)
-    if fetch_budget["used"] >= _ATH_MAX_REFRESHES_PER_CYCLE:
-        return {"status": "pending", "high": None, "ath_date": None}
-    fetch_budget["used"] += 1
     try:
-        payload = get_all_time_daily_history(symbol)
+        with _ath_fetch_semaphore:
+            payload = get_all_time_daily_history(symbol)
         quote_day = datetime.fromtimestamp(float(quote_time_ms) / 1000, ZoneInfo("America/New_York")).date()
         valid = []
         for candle in payload.get("candles", []):
@@ -354,13 +348,46 @@ def _all_time_high_for_symbol(store: SnapshotStore, symbol: str, quote_time_ms: 
                       "history_sessions": len(valid), "history_window_years": 20}
         else:
             result = {"status": "insufficient_history", "high": None, "ath_date": None}
-        store.set_state(key, {**result, "cached_at": now})
-        return result
+        SnapshotStore(store_path).set_state(key, {**result, "cached_at": time.time()})
     except Exception as exc:
         result = {"status": "unavailable", "high": None, "ath_date": None, "error": type(exc).__name__}
-        store.set_state(key, {**result, "cached_at": now})
+        try:
+            SnapshotStore(store_path).set_state(key, {**result, "cached_at": time.time()})
+        except Exception:
+            pass
         logger.warning("RompiendoMaximos ATH fetch failed symbol=%s error_type=%s", symbol, type(exc).__name__)
-        return result
+    finally:
+        with _ath_inflight_lock:
+            _ath_inflight_symbols.discard(symbol.strip().upper())
+
+
+def _all_time_high_for_symbol(store: SnapshotStore, symbol: str, quote_time_ms: int | float,
+                              fetch_budget: dict[str, int]) -> dict[str, Any]:
+    """Return cached prior-session ATH; missing history refreshes asynchronously."""
+    key = "rompiendo_maximos_ath:" + symbol.strip().upper()
+    cached = store.get_state(key, {})
+    now = time.time()
+    if isinstance(cached, dict):
+        age = now - float(cached.get("cached_at", 0) or 0)
+        ttl = _ATH_ERROR_CACHE_TTL_SECONDS if cached.get("status") == "unavailable" else _ATH_CACHE_TTL_SECONDS
+        if age < ttl:
+            return dict(cached)
+    if fetch_budget["used"] >= _ATH_MAX_REFRESHES_PER_CYCLE:
+        return {"status": "pending", "high": None, "ath_date": None}
+    normalized = symbol.strip().upper()
+    with _ath_inflight_lock:
+        if normalized in _ath_inflight_symbols:
+            return {"status": "pending", "high": None, "ath_date": None}
+        _ath_inflight_symbols.add(normalized)
+    fetch_budget["used"] += 1
+    thread = threading.Thread(
+        target=_fetch_ath_in_background,
+        args=(normalized, quote_time_ms, store.path),
+        name="rompiendo-maximos-ath-" + normalized,
+        daemon=True,
+    )
+    thread.start()
+    return {"status": "pending", "high": None, "ath_date": None}
 
 
 def _evaluate_rompiendo_maximos(store: SnapshotStore, rows: list[dict[str, Any]],
