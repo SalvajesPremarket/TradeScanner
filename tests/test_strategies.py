@@ -33,15 +33,25 @@ class StrategyTests(unittest.TestCase):
         self.assertFalse(formula_matches("not (gap_pct > 3)", {"gap_pct": None}))
         self.assertFalse(formula_matches("not (gap_pct > 3)", {}))
 
-    def test_formula_rejects_python_execution_constructs(self):
+    def test_formula_python_construct_is_saved_but_not_executable(self):
+        strategy = save_strategy(
+            "Unsafe", "formula", "__import__('os').system('echo nope')", store=self.store
+        )
+        self.assertFalse(strategy["execution_ready"])
         with self.assertRaises(ValueError):
-            save_strategy("Unsafe", "formula", "__import__('os').system('echo nope')", store=self.store)
+            set_strategy_enabled(strategy["id"], True, store=self.store)
 
-    def test_formula_complexity_and_large_constants_are_rejected(self):
+    def test_formula_complexity_and_large_constants_are_saved_as_non_executable(self):
+        too_complex = save_strategy(
+            "Too complex", "formula", " and ".join(["True"] * 400), store=self.store
+        )
+        huge_string = save_strategy(
+            "Huge string", "formula", repr("x" * 257) + " == 'x'", store=self.store
+        )
+        self.assertFalse(too_complex["execution_ready"])
+        self.assertFalse(huge_string["execution_ready"])
         with self.assertRaises(ValueError):
-            save_strategy("Too complex", "formula", " and ".join(["True"] * 400), store=self.store)
-        with self.assertRaises(ValueError):
-            save_strategy("Huge string", "formula", repr("x" * 257) + " == 'x'", store=self.store)
+            set_strategy_enabled(too_complex["id"], True, store=self.store)
 
     def test_string_repetition_is_bounded_during_evaluation(self):
         self.assertFalse(formula_matches("'x' * 1000000000 == 'x'", {}))
@@ -55,7 +65,7 @@ class StrategyTests(unittest.TestCase):
         second = save_strategy("Volume", "formula", "volume >= 500000", store=self.store)
         set_strategy_enabled(first["id"], True, store=self.store)
         set_strategy_enabled(second["id"], True, store=self.store)
-        self.assertEqual(active_strategy(self.store)["id"], second["id"])
+        self.assertEqual(active_strategy(self.store)["id"], first["id"])
         items = list_strategies(self.store)
         self.assertEqual(sum(bool(item["enabled"]) for item in items), 2)
 
@@ -71,11 +81,18 @@ class StrategyTests(unittest.TestCase):
         self.assertTrue(strategy_matches(function, {"gap_pct": 4, "volume": 800000}))
         self.assertFalse(strategy_matches(function, {"gap_pct": 1, "volume": 800000}))
 
-    def test_python_rejects_imports_and_arbitrary_attribute_access(self):
+    def test_python_imports_and_arbitrary_attribute_access_are_not_executable(self):
+        unsafe_import = save_strategy("Unsafe import", "python", "import os", store=self.store)
+        unsafe_attribute = save_strategy(
+            "Unsafe attribute", "python",
+            "def evaluate(stock): return stock.__class__", store=self.store
+        )
+        self.assertFalse(unsafe_import["execution_ready"])
+        self.assertFalse(unsafe_attribute["execution_ready"])
         with self.assertRaises(ValueError):
-            save_strategy("Unsafe import", "python", "import os", store=self.store)
+            set_strategy_enabled(unsafe_import["id"], True, store=self.store)
         with self.assertRaises(ValueError):
-            save_strategy("Unsafe attribute", "python", "def evaluate(stock): return stock.__class__", store=self.store)
+            set_strategy_enabled(unsafe_attribute["id"], True, store=self.store)
 
     def test_active_strategy_can_be_edited_to_supported_python_adapter(self):
         strategy = save_strategy("Editable", "formula", "gap_pct >= 3", store=self.store)
@@ -94,8 +111,13 @@ class StrategyTests(unittest.TestCase):
         self.assertTrue(strategy["execution_ready"])
         self.assertTrue(strategy_matches(strategy, {"price": 10}))
         self.assertFalse(strategy_matches(strategy, {"price": 4}))
+        unsupported = save_strategy(
+            "History unsupported", "thinkscript",
+            "plot scan = close > Average(close, 20);", store=self.store
+        )
+        self.assertFalse(unsupported["execution_ready"])
         with self.assertRaises(ValueError):
-            save_strategy("History unsupported", "thinkscript", "plot scan = close > Average(close, 20);", store=self.store)
+            set_strategy_enabled(unsupported["id"], True, store=self.store)
 
     def test_edit_preserves_id_and_delete_removes_strategy(self):
         saved = save_strategy("First name", "formula", "price > 5", store=self.store)
