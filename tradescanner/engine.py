@@ -171,7 +171,7 @@ def _evaluate_momentum_strategy(store: SnapshotStore, batch: list[str], strategy
         "skipped": runtime.get("skipped", {}),
         "note": runtime.get("note"),
     }
-    store.set_state("strategy_scan_status:" + str(strategy.get("id")), state)
+    store.set_state("strategy_scan_status:" + str(strategy.get('id')), state)
     return state
 
 def _news_session_for_result(article: dict[str, Any]) -> dict[str, str] | None:
