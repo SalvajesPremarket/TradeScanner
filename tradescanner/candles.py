@@ -118,8 +118,8 @@ class CandleStore:
             )
         return len(records)
 
-    def counts_by_symbols(self, symbols: list[str]) -> dict[str, int]:
-        """Return stored candle counts for many symbols with one database query."""
+    def history_status_by_symbols(self, symbols: list[str]) -> dict[str, dict[str, int | None]]:
+        """Return candle counts and newest timestamps for a bounded symbol batch."""
         normalized = list(dict.fromkeys(
             symbol.strip().upper()
             for symbol in symbols
@@ -130,11 +130,24 @@ class CandleStore:
         placeholders = ",".join("?" for _ in normalized)
         with self._connect() as connection:
             rows = connection.execute(
-                f"SELECT symbol, COUNT(*) FROM intraday_candles "
+                f"SELECT symbol, COUNT(*), MAX(candle_time_ms) FROM intraday_candles "
                 f"WHERE symbol IN ({placeholders}) GROUP BY symbol",
                 tuple(normalized),
             ).fetchall()
-        return {str(row[0]).strip().upper(): int(row[1]) for row in rows}
+        return {
+            str(row[0]).strip().upper(): {
+                "count": int(row[1]),
+                "latest_candle_time_ms": int(row[2]) if row[2] is not None else None,
+            }
+            for row in rows
+        }
+
+    def counts_by_symbols(self, symbols: list[str]) -> dict[str, int]:
+        """Return stored candle counts for many symbols with one database query."""
+        return {
+            symbol: int(status["count"])
+            for symbol, status in self.history_status_by_symbols(symbols).items()
+        }
 
     def latest(self, symbol: str, limit: int = 6000) -> list[dict[str, Any]]:
         bounded_limit = max(1, min(int(limit), 10000))
