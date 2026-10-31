@@ -176,7 +176,7 @@ class AppEntrypointTests(unittest.TestCase):
         self.assertEqual(raised.exception.status_code, 400)
         self.assertIn("100 unique symbols", raised.exception.detail)
 
-    def test_active_strategy_filters_snapshots_and_excludes_explicitly_stale_quotes(self):
+    def test_radar_keeps_snapshots_independent_of_strategy_evaluations(self):
         rows = [
             {"symbol": "AAA", "gap_pct": 4, "quote_is_fresh": True},
             {"symbol": "BBB", "gap_pct": 2, "quote_is_fresh": True},
@@ -192,7 +192,7 @@ class AppEntrypointTests(unittest.TestCase):
             store.path = "unused-test-db"
             candle_class.return_value.rvol.return_value = {"rvol": None, "sessions_used": 0}
             result = app_module.snapshots_latest(limit=100)
-        self.assertEqual([row["symbol"] for row in result["results"]], ["AAA"])
+        self.assertEqual([row["symbol"] for row in result["results"]], ["AAA", "BBB", "CCC", "DDD"])
         self.assertEqual(result["active_strategy"]["id"], "strategy-1")
 
 
@@ -225,7 +225,7 @@ class AppEntrypointTests(unittest.TestCase):
         html = (app_module.ROOT / "index.html").read_text(encoding="utf-8")
         self.assertNotIn('data-tab="charts"', html)
         self.assertNotIn('id="tab-charts"', html)
-        scanner_start = html.find('id="tab-screener"')
+        scanner_start = html.find('data-tab="screener"')
         chart_position = html.find('id="integrated-chart"')
         strategies_position = html.find('id="tab-strategies"')
         self.assertGreaterEqual(scanner_start, 0)
