@@ -212,7 +212,7 @@
       <div class="panel-head"><h2>ACCIONES</h2></div>
       <div class="filters-title">FILTROS · SE APLICAN A LOS SNAPSHOTS DISPONIBLES</div>
       <div class="filters" aria-label="Filtros funcionales">
-        <label class="filter"><b>TIMEFRAME SCANNER</b><select id="scanner-timeframe" aria-label="Temporalidad de los resultados del scanner"><option value="1m">1 minuto</option><option value="5m">5 minutos</option><option value="15m">15 minutos</option><option value="1h">1 hora</option></select></label>
+        <label class="filter"><b>TIMEFRAME SCANNER</b><select id="scanner-timeframe" aria-label="Temporalidad de los resultados del scanner"><option value="1m">1 minuto</option><option value="5m">5 minutos</option><option value="15m">15 minutos</option><option value="30m">30 minutos</option><option value="1h">1 hora</option><option value="1d">1 día</option><option value="1w">1 semana</option></select></label>
         <label class="filter"><b>PRECIO</b><input id="price-min" type="number" min="0" step="0.01" placeholder="MIN" aria-label="Precio mínimo"><span>–</span><input id="price-max" type="number" min="0" step="0.01" placeholder="MAX" aria-label="Precio máximo"></label>
         <div class="filter"><b>GAP</b><button class="toggle" id="gap-toggle" type="button" aria-pressed="false">OFF</button><input id="gap-min" type="number" step="0.1" placeholder="MIN %" aria-label="GAP mínimo" disabled><input id="gap-max" type="number" step="0.1" placeholder="MAX %" aria-label="GAP máximo" disabled></div>
         <div class="filter"><b>FLOAT</b><button class="toggle" id="float-toggle" type="button" aria-pressed="false">OFF</button><input id="float-min" type="number" min="0" step="1000000" placeholder="MIN" aria-label="FLOAT mínimo en acciones" disabled><span>–</span><input id="float-max" type="number" min="0" step="1000000" placeholder="MAX" aria-label="FLOAT máximo en acciones" disabled></div>
@@ -692,7 +692,7 @@
         cell(tr, item.sector, "Sector no proporcionado en los datos actuales del proveedor.");
         cell(tr, details.news, "Solo se muestran titulares con fecha verificada en postmarket, overnight o premarket; no se inventan noticias.");
         const scannerTimeframe = item.scanner_timeframe || document.getElementById("scanner-timeframe").value;
-        const timeframeLabel = {"1m":"1 minuto","5m":"5 minutos","15m":"15 minutos","1h":"1 hora"}[scannerTimeframe] || scannerTimeframe;
+        const timeframeLabel = {"1m":"1 minuto","5m":"5 minutos","15m":"15 minutos","30m":"30 minutos","1h":"1 hora","1d":"1 día","1w":"1 semana"}[scannerTimeframe] || scannerTimeframe;
         const strategyTimeframe = details.timeframe && details.timeframe !== "—" && details.timeframe !== "No reportada" ? details.timeframe : null;
         cell(tr, "Scanner: " + timeframeLabel + (strategyTimeframe ? " · Estrategia: " + strategyTimeframe : ""),
           "Temporalidad usada para calcular EMA20/MACD del scanner. La temporalidad propia de la estrategia se indica por separado.");
@@ -1187,7 +1187,7 @@
       line(bbUpper,"#111827",3,"2 5"); line(bbLower,"#111827",3,"2 5");
       // EMA20 usa exactamente el mismo color, grosor y patrón discontinuo que Bollinger.
       line(ema20,"#111827",3,"2 5");
-      line(ema3,"#8b5cf6",1); line(ema9,"#ef4444",1); line(ema50,"#ef4444",3); line(ema200,"#16a34a",3);
+      line(ema3,"#8b5cf6",1); line(ema9,"#ef4444",1); line(ema50,"#722f37",3); line(ema200,"#16a34a",3);
       label(left,14,"PRECIO + EMA20 + EMA3/9/50/200 + BANDAS BOLLINGER","start","#344454");
       // MACD panel: green MACD line, red signal line and green/red histogram.
       const macdAbs=Math.max(.000001,...macd.map(Math.abs),...signal.map(Math.abs),...hist.map(Math.abs));
