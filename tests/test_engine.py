@@ -112,7 +112,7 @@ class AutomaticEngineTests(unittest.TestCase):
                 )
                 connection.execute(
                     "INSERT INTO float_cache VALUES (?, ?, ?, ?, ?)",
-                    ("AAPL", 123456.0, "2026-10-01", 100000.0, "fmp"),
+                    ("AAPL", 123456.0, "2026-10-01", 100000.0, "massive"),
                 )
 
             def fetch(batch):
@@ -126,9 +126,7 @@ class AutomaticEngineTests(unittest.TestCase):
                 "SCHWAB_CLIENT_SECRET": "test-secret",
                 "SCHWAB_REFRESH_TOKEN": "test-refresh",
             }), patch("tradescanner.engine.refresh_float_cache", return_value={
-                "status": "cached", "provider": "FMP", "rows_saved": 0
-            }), patch("tradescanner.engine.refresh_symbol_float", return_value={
-                "status": "cached", "provider": "FMP", "symbol": "AAPL"
+                "status": "cached", "provider": "Massive", "rows_saved": 0
             }):
                 result = run_scan_cycle(
                     store, universe_loader=lambda: {"symbols": ["AAPL"]}, quote_fetcher=fetch
@@ -138,7 +136,7 @@ class AutomaticEngineTests(unittest.TestCase):
             self.assertEqual(result["float_symbol"], "AAPL")
             self.assertEqual(result["float_shares"], 123456.0)
             self.assertEqual(result["float_as_of"], "2026-10-01")
-            self.assertEqual(result["float_source"], "fmp")
+            self.assertEqual(result["float_source"], "massive")
 
     def test_scan_cycle_saves_candidate_candles_and_computes_rvol(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -258,7 +256,7 @@ class AutomaticEngineTests(unittest.TestCase):
                 )
                 connection.execute(
                     "INSERT INTO float_cache VALUES (?, ?, ?, ?, ?)",
-                    ("AAPL", 123456.0, "2026-10-01", 100000.0, "fmp"),
+                    ("AAPL", 123456.0, "2026-10-01", 100000.0, "massive"),
                 )
 
             def fetch(batch):
@@ -292,10 +290,7 @@ class AutomaticEngineTests(unittest.TestCase):
             }), patch.object(store, "latest_for_symbols", side_effect=[
                 float_rows, candle_rows, fresh_rows
             ]), patch("tradescanner.engine.refresh_float_cache", return_value={
-                "status": "cached", "provider": "FMP", "rows_saved": 0
-            }), patch("tradescanner.engine.refresh_symbol_float", return_value={
-                "status": "cached", "provider": "FMP", "symbol": "AAPL",
-                "float_shares": 123456.0
+                "status": "cached", "provider": "Massive", "rows_saved": 0
             }):
                 result = run_scan_cycle(
                     store,
