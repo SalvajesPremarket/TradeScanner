@@ -407,6 +407,16 @@ def _evaluate_rompiendo_maximos(store: SnapshotStore, rows: list[dict[str, Any]]
             evaluations.append({"symbol": symbol, "passed": False, "strategy": strategy.get("name"),
                                 "strategy_id": strategy.get("id"), "reasons": ["cotización inválida o sin timestamp"]})
             continue
+        if not 1.0 <= float(price) <= 20.0:
+            evaluations.append({
+                "symbol": symbol, "passed": False, "action": None,
+                "strategy": strategy.get("name"), "strategy_id": strategy.get("id"),
+                "quote_price": price, "all_time_high": None, "ath_date": None,
+                "metrics": {"price": price, "price_min": 1.0, "price_max": 20.0},
+                "reasons": ["precio: fuera del rango permitido de $1.00 a $20.00"],
+                "data_source": "Schwab real-time quote",
+            })
+            continue
         ath = _all_time_high_for_symbol(store, symbol, quote_time_ms, fetch_budget)
         high = ath.get("high")
         passed = (ath.get("status") == "ready" and isinstance(high, (int, float))
@@ -436,7 +446,7 @@ def _evaluate_rompiendo_maximos(store: SnapshotStore, rows: list[dict[str, Any]]
         "evaluated_at": _now(), "candidate_count": len(rows), "processed_quotes": len(evaluations),
         "ath_refreshes_this_cycle": fetch_budget["used"], "evaluations": evaluations,
         "matches": [item["symbol"] for item in evaluations if item.get("passed")],
-        "note": "Ruptura en tiempo real: cotización Schwab > máximo High de sesiones diarias completas anteriores. Histórico disponible limitado a 20 años; excluye la sesión actual. No coloca órdenes.",
+        "note": "Ruptura en tiempo real: precio entre $1.00 y $20.00 inclusive y cotización Schwab > máximo High de sesiones diarias completas anteriores. Histórico disponible limitado a 20 años; excluye la sesión actual. No coloca órdenes.",
     }
     store.set_state("strategy_scan_status:" + str(strategy.get("id")), state)
     return state
