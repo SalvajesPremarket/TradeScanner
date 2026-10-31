@@ -31,7 +31,7 @@ _COMPARE = {
 }
 _ALLOWED_NAMES = {
     "price", "previous_close", "change", "change_pct", "gap_pct",
-    "float_shares", "rvol", "volume", "sector", "symbol",
+    "float_shares", "rvol", "volume", "sector", "symbol", "all_time_high",
 }
 _ALLOWED_CALLS = {"abs": abs, "min": min, "max": max}
 
