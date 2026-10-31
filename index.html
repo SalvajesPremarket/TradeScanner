@@ -225,8 +225,8 @@
       <p class="code-hint" id="radar-source-note">RADAR · Estas filas son cotizaciones/snapshots del escáner; no son señales de entrada de JeanLong. La estrategia activa se evalúa por separado y solo sus evaluaciones con resultado aprobado cuentan como señales.</p>
       <div class="table-wrap">
         <table class="results-table" aria-label="Resultados del radar">
-          <thead><tr><th>TICKER</th><th>EMPRESA</th><th>PRECIO</th><th>CAMBIO %</th><th>GAP %</th><th>FLOAT</th><th>RVOL</th><th>VOLUMEN</th><th>SECTOR</th><th>NOTICIA POST/PRE</th><th>TEMPORALIDAD</th><th>GRÁFICO</th></tr></thead>
-          <tbody id="result-rows"><tr><td colspan="12"><div class="empty">Esperando primeras cotizaciones reales de Schwab.</div></td></tr></tbody>
+          <thead><tr><th>TICKER</th><th>EMPRESA</th><th>PRECIO</th><th>CAMBIO %</th><th>GAP %</th><th>FLOAT</th><th>RVOL</th><th>VOLUMEN</th><th>SECTOR</th><th>NOTICIA POST/PRE</th><th>TEMPORALIDAD</th></tr></thead>
+          <tbody id="result-rows"><tr><td colspan="11"><div class="empty">Esperando primeras cotizaciones reales de Schwab.</div></td></tr></tbody>
         </table>
       </div>
       <footer>Los filtros no generan ni completan datos faltantes. RVOL y FLOAT solo filtran filas cuando hay valores reales almacenados.</footer>
@@ -236,14 +236,13 @@
         <form id="chart-form" class="tools"><label class="field" style="min-width:150px;flex:1">Ticker<input id="chart-symbol" maxlength="15" value="AAPL" required></label><label class="field" style="width:150px">Timeframe<select id="chart-timeframe"><option value="1m">1 minuto</option><option value="5m">5 minutos</option><option value="15m">15 minutos</option><option value="1h">1 hora</option><option value="day">Día</option><option value="week">Semana</option></select></label><label class="field" style="width:130px">N.º de velas<input id="chart-limit" type="number" min="10" max="500" value="100"></label><button class="action" type="submit">Cargar velas</button></form>
         <div id="chart-message" class="tab-message">El gráfico mostrará únicamente velas que estén guardadas. No se inventarán precios.</div>
         <svg id="chart-svg" viewBox="0 0 1000 500" width="100%" role="img" aria-label="Gráfico de velas de Schwab" style="display:block;min-height:260px;border:1px solid #24465b;background:#eef2f5;margin-bottom:14px"><text x="500" y="160" text-anchor="middle" fill="#718096" font-size="14">Carga velas guardadas para mostrar el gráfico</text></svg>
-        <div class="table-wrap"><table class="simple-table"><thead><tr><th>FECHA</th><th>OPEN</th><th>HIGH</th><th>LOW</th><th>CLOSE</th><th>VOLUMEN</th></tr></thead><tbody id="chart-rows"><tr><td colspan="6">Introduce un ticker y carga sus velas.</td></tr></tbody></table></div>
-      </div>
+        <div class="table-wrap"><table class="simple-table"><thead><tr><th>FECHA</th><th>OPEN</th><th>HIGH</th><th>LOW</th><th>CLOSE</th><th>VOLUMEN</th></tr></thead><tbody id="chart-rows"><tr><td colspan="6">Introduce un ticker y carga sus velas.</td></tr></tbody></table></div>      </div>
     </section>
 
     </section>
 
     <section id="tab-strategies" class="panel tab-panel" hidden aria-label="Editor de estrategias">
-      <div class="panel-head"><h2>EDITOR DE ESTRATEGIAS · ESTILO THINKORSWIM</h2><span class="muted">Una sola estrategia activa a la vez</span></div>
+      <div class="panel-head"><h2>EDITOR DE ESTRATEGIAS · ESTILO THINKORSWIM</h2><span class="muted">Varias estrategias pueden estar activas a la vez</span></div>
       <div class="tab-body">
         <p class="code-hint" id="strategy-access-message">Acceso al editor mediante tu sesión de Neon Auth. Inicia sesión arriba para consultar y gestionar estrategias.</p>
         <div class="grid-two"><div>
@@ -516,8 +515,7 @@
         const failed = evaluated - passed;
         const commonReasons = new Map();
         for (const item of strategyEvidence) for (const [reason, count] of item.reasons) {
-          commonReasons.set(reason, (commonReasons.get(reason) || 0) + count);
-        }
+          commonReasons.set(reason, (commonReasons.get(reason) || 0) + count);        }
         const topReasons = [...commonReasons.entries()].sort((a,b) => b[1]-a[1]).slice(0,3);
         const note = document.createElement("div");
         note.className = "alert-item";
@@ -645,7 +643,7 @@
       if (!results.length) {
         const tr = document.createElement("tr");
         const td = document.createElement("td");
-        td.colSpan = 12;
+        td.colSpan = 11;
         const empty = document.createElement("div");
         empty.className = "empty";
         empty.textContent = allResults.length
@@ -688,7 +686,6 @@
         cell(tr, item.sector, "Sector no proporcionado en los datos actuales del proveedor.");
         cell(tr, details.news, "Solo se muestran titulares con fecha verificada en postmarket, overnight o premarket; no se inventan noticias.");
         cell(tr, details.timeframe, "La temporalidad se muestra solo cuando la evaluación la informa explícitamente.");
-        cell(tr, "—", "Gráfico no disponible en esta fila; consulta la pestaña GRÁFICOS para un ticker con velas guardadas.");
         rowsNode.appendChild(tr);
       }
     }
@@ -756,8 +753,7 @@
       button.textContent = enabled ? "ON" : "OFF";
       if (id === "gap-toggle") {
         document.getElementById("gap-min").disabled = !enabled;
-        document.getElementById("gap-max").disabled = !enabled;
-      }
+        document.getElementById("gap-max").disabled = !enabled;      }
       if (id === "float-toggle") {
         document.getElementById("float-min").disabled = !enabled;
         document.getElementById("float-max").disabled = !enabled;
@@ -1096,8 +1092,7 @@
     }
     document.getElementById("strategy-new").addEventListener("click", clearStrategyForm);
     document.getElementById("strategy-form").addEventListener("submit", async event => {
-      event.preventDefault();
-      const payload = {
+      event.preventDefault();      const payload = {
         id: document.getElementById("strategy-id").value || null,
         name: document.getElementById("strategy-name").value,
         language: document.getElementById("strategy-language").value,
@@ -1376,8 +1371,7 @@
       }
       form.addEventListener("submit", async event => {
         event.preventDefault();
-        signIn.disabled = signUp.disabled = true;
-        try {
+        signIn.disabled = signUp.disabled = true;        try {
           await authRequest("/sign-in/email", {email:email.value.trim(), password:password.value});
           await refreshSession();
         } catch (error) {
