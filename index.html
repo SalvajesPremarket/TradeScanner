@@ -920,24 +920,41 @@
       const token = await window.tradeScannerGetAccessToken();
       return Object.assign({"Authorization":"Bearer " + token}, extra);
     }
+    let strategyLoadSequence = 0;
     async function loadStrategies() {
       const list = document.getElementById("strategy-list");
+      const loadSequence = ++strategyLoadSequence;
       try {
         const headers = await strategyHeaders();
-        const [payload, matchPayload] = await Promise.all([
-          fetch("/api/strategies", {cache:"no-store",headers}),
-          fetch("/api/strategies/active-matches", {cache:"no-store",headers})
-        ].map(async request => readJson(await request)));
+        // Show saved strategies as soon as their own lightweight endpoint responds.
+        // Scan evaluations can be slower, so they must never block the saved list.
+        const payload = await readJson(await fetch("/api/strategies", {cache:"no-store",headers}));
+        if (loadSequence !== strategyLoadSequence) return;
         savedStrategies = payload.strategies || [];
         const active = savedStrategies.find(item => item.enabled);
         activeStrategyId = active ? active.id : null;
-        activeStrategySymbols = matchPayload.strategy ? new Set(matchPayload.symbols || []) : null;
-        activeMomentumState = matchPayload.momentum || null;
-        activeStrategyStates = Object.fromEntries((matchPayload.strategies || []).map(item => [item.id, item.scan || {}]));
+        activeStrategySymbols = null;
         applyFilters();
         renderStrategies();
+
+        // Load monitoring data independently and update the cards when it arrives.
+        void (async () => {
+          try {
+            const matchPayload = await readJson(await fetch("/api/strategies/active-matches", {cache:"no-store",headers}));
+            if (loadSequence !== strategyLoadSequence) return;
+            activeStrategySymbols = matchPayload.strategy ? new Set(matchPayload.symbols || []) : null;
+            activeMomentumState = matchPayload.momentum || null;
+            activeStrategyStates = Object.fromEntries((matchPayload.strategies || []).map(item => [item.id, item.scan || {}]));
+            applyFilters();
+            renderStrategies();
+          } catch (_) {
+            // Keep the saved strategies visible even if scan monitoring is unavailable.
+          }
+        })();
       } catch (error) {
-        list.textContent = "No se pudieron cargar las estrategias: " + apiMessage(error);
+        if (loadSequence === strategyLoadSequence) {
+          list.textContent = "No se pudieron cargar las estrategias: " + apiMessage(error);
+        }
       }
     }
     function renderStrategies() {
