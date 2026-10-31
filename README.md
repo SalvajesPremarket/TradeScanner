@@ -17,6 +17,7 @@ Scanner de acciones basado en cotizaciones e histórico de **Schwab**, con persi
 - **Google News RSS**: titulares auxiliares con fecha publicada; no se inventan noticias.
 - **Nasdaq Trader**: universo público de símbolos.
 - **Infisical**: almacén opcional del refresh token de Schwab.
+- **Histórico de estrategias**: las estrategias OHLCV/RVOL reciben hasta cinco sesiones intradía; con una estrategia activa, el motor vuelve a consultar velas cuando el histórico queda más de dos minutos detrás de una cotización fresca, limitando cada símbolo a una consulta por minuto.
 
 Los valores ausentes permanecen ausentes. El scanner no sustituye FLOAT por shares outstanding ni fabrica precios, velas, volumen, RVOL o noticias.
 
