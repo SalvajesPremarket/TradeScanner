@@ -137,10 +137,9 @@
     .simple-table th{color:#83b1c7;background:#102334;letter-spacing:.6px}
     #chart-svg{border:1px solid #24465b!important;border-radius:9px;background:linear-gradient(180deg,#081724,#06101a)!important}
 
-    /* Tabla OHLC del gráfico: fondo blanco hueso, sin alterar el tema del resto de la app. */
-    #integrated-chart .simple-table{background:#f5f1e8;color:#263445}
-    #integrated-chart .simple-table thead th{background:#e9e2d5;color:#39495a;border-bottom:1px solid #d5cbbb}
-    #integrated-chart .simple-table tbody td{background:#f8f5ed;color:#263445;border-bottom:1px solid #e2dccf}
+    /* Área interior del gráfico: blanco hueso; la tabla OHLC conserva el tema general. */
+    #integrated-chart #chart-svg{background:#f5f1e8!important;border-color:#d5cbbb!important}
+    #integrated-chart #chart-svg text{fill:#39495a}
 
     #auth-form input{background:#071522!important;color:#e0f2fc!important;border-color:#28465a!important}
     #auth-form label{color:#a8c4d4}
