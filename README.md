@@ -27,7 +27,7 @@ Los valores ausentes permanecen ausentes. El scanner no sustituye FLOAT por shar
 - `GET /api/engine/status`: estado del worker, ciclo, cursor y métricas.
 - `GET /api/universe/status`: universo de símbolos.
 - `GET /api/snapshots/status`: almacenamiento y métricas de snapshots.
-- `GET /api/snapshots/latest?limit=100`: snapshots más recientes.
+- `GET /api/snapshots/latest?limit=100&timeframe=1m`: snapshots más recientes con EMA20/MACD calculados en la temporalidad seleccionada; admite `1m`, `5m`, `15m`, `30m`, `1h`, `1d`, `1w`.
 - `GET /api/candles/{symbol}?limit=500&timeframe=1m`: histórico Schwab; temporalidades admitidas: `1m`, `5m`, `15m`, `1h`, `day`, `week`.
 - `GET /api/quotes?symbols=AAPL,MSFT`: cotizaciones y filtros básicos.
 - `POST /api/scan?symbols=AAPL,MSFT`: escaneo manual, máximo 100 símbolos únicos.
