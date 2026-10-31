@@ -1,3 +1,4 @@
+import sqlite3
 import tempfile
 import unittest
 from datetime import datetime
@@ -34,6 +35,18 @@ class CandleTests(unittest.TestCase):
             {"datetime": ms(14, 9, 33), "open": 0, "high": 11, "low": 0, "close": 10.2, "volume": 100},
         ]}
         self.assertEqual(normalize_price_history("AAPL", payload), [])
+
+    def test_store_does_not_create_a_duplicate_symbol_time_index(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "candles.sqlite3"
+            CandleStore(path)
+            with sqlite3.connect(path) as connection:
+                indexes = {
+                    row[1]: row[2]
+                    for row in connection.execute("PRAGMA index_list(intraday_candles)")
+                }
+            self.assertNotIn("idx_candles_symbol_time", indexes)
+            self.assertTrue(any(unique for unique in indexes.values()))
 
     def test_counts_by_symbols_uses_normalized_symbols(self):
         with tempfile.TemporaryDirectory() as directory:
