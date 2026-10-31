@@ -923,11 +923,14 @@
     async function loadStrategies() {
       const list = document.getElementById("strategy-list");
       try {
-        const payload = await readJson(await fetch("/api/strategies", {cache:"no-store",headers:await strategyHeaders()}));
+        const headers = await strategyHeaders();
+        const [payload, matchPayload] = await Promise.all([
+          fetch("/api/strategies", {cache:"no-store",headers}),
+          fetch("/api/strategies/active-matches", {cache:"no-store",headers})
+        ].map(async request => readJson(await request)));
         savedStrategies = payload.strategies || [];
         const active = savedStrategies.find(item => item.enabled);
         activeStrategyId = active ? active.id : null;
-        const matchPayload = await readJson(await fetch("/api/strategies/active-matches", {cache:"no-store",headers:await strategyHeaders()}));
         activeStrategySymbols = matchPayload.strategy ? new Set(matchPayload.symbols || []) : null;
         activeMomentumState = matchPayload.momentum || null;
         activeStrategyStates = Object.fromEntries((matchPayload.strategies || []).map(item => [item.id, item.scan || {}]));
@@ -949,19 +952,56 @@
         const card = document.createElement("div"); card.className = "strategy-item";
         const title = document.createElement("strong"); title.textContent = strategy.name; card.appendChild(title);
         const details = document.createElement("div"); details.className = "muted";
-        details.textContent = strategy.language.toUpperCase() + (strategy.enabled ? " · ACTIVA" : " · INACTIVA") + (strategy.execution_ready ? " · EJECUTABLE (SUBCONJUNTO SEGURO)" : " · SOLO GUARDADA");
+        const scanState = activeStrategyStates[strategy.id] || {};
+        const waiting = strategy.enabled && ["waiting_for_cycle","no_fresh_quotes"].includes(scanState.status);
+        details.textContent = strategy.language.toUpperCase() + (strategy.enabled ? " · ACTIVA" : " · INACTIVA") + (waiting ? " · ESPERANDO EVALUACIÓN" : "") + (strategy.execution_ready ? " · EJECUTABLE (SUBCONJUNTO SEGURO)" : " · SOLO GUARDADA");
         card.appendChild(details);
         const actions = document.createElement("div"); actions.className = "strategy-actions";
         const toggle = document.createElement("button"); toggle.className = "action " + (strategy.enabled ? "secondary" : "");
         toggle.textContent = strategy.enabled ? "Desactivar" : "Activar";
         toggle.addEventListener("click", async () => {
+          const desiredEnabled = !strategy.enabled;
+          toggle.disabled = true;
+          toggle.textContent = "Guardando…";
           try {
-            await readJson(await fetch("/api/strategies/" + encodeURIComponent(strategy.id) + "/activate", {
-              method:"POST", headers:await strategyHeaders({"Content-Type":"application/json"}), body:JSON.stringify({enabled:!strategy.enabled})
-            }));
-            document.getElementById("strategy-message").textContent = strategy.enabled ? "Estrategia desactivada." : "Estrategia activada. Se evaluará automáticamente en cada ciclo; puedes mantener varias estrategias activas.";
+            const response = await fetch("/api/strategies/" + encodeURIComponent(strategy.id) + "/activate", {
+              method:"POST", headers:await strategyHeaders({"Content-Type":"application/json"}), body:JSON.stringify({enabled:desiredEnabled})
+            });
+            const result = await readJson(response);
+            const saved = result.strategy || strategy;
+            strategy.enabled = desiredEnabled;
+            const index = savedStrategies.findIndex(item => item.id === strategy.id);
+            if (index >= 0) savedStrategies[index] = {...savedStrategies[index], ...saved, enabled:desiredEnabled};
+
+            // Update the visible state immediately; do not wait for a full reload.
+            activeStrategyStates[strategy.id] = {
+              status: desiredEnabled ? "waiting_for_cycle" : "inactive",
+              evaluations: [], matches: [], note: desiredEnabled
+                ? "Estrategia activada; esperando el siguiente ciclo automático."
+                : "Estrategia desactivada."
+            };
+            const activeNow = savedStrategies.filter(item => item.enabled);
+            activeStrategyId = activeNow.length ? activeNow[0].id : null;
+            const activeMatches = activeNow.flatMap(item => {
+              const state = activeStrategyStates[item.id] || {};
+              return Array.isArray(state.matches) ? state.matches : [];
+            });
+            activeStrategySymbols = activeNow.length ? new Set(activeMatches) : null;
+            const momentum = activeNow.find(item => String(item.name || "").toLowerCase().includes("momentum"));
+            activeMomentumState = momentum ? (activeStrategyStates[momentum.id] || {status:"waiting_for_cycle",evaluations:[],matches:[]}) : {status:"inactive",evaluations:[],matches:[]};
+            applyFilters();
+            renderStrategies();
+            document.getElementById("strategy-message").textContent = desiredEnabled
+              ? "Estrategia activada. Esperando la próxima evaluación automática."
+              : "Estrategia desactivada inmediatamente.";
+            // Refresh results in the background; the button and UI are no longer blocked.
+            void loadStrategies();
+          } catch(error) {
+            document.getElementById("strategy-message").textContent = apiMessage(error);
             await loadStrategies();
-          } catch(error) { document.getElementById("strategy-message").textContent = apiMessage(error); }
+          } finally {
+            toggle.disabled = false;
+          }
         });
         const edit = document.createElement("button"); edit.className = "action secondary"; edit.textContent = "Editar";
         edit.addEventListener("click", () => {
