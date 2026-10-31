@@ -141,18 +141,47 @@ async def enforce_single_active_device(request: Request, call_next):
     return await call_next(request)
 
 
+def _aggregate_scanner_candles(candles: list[dict], timeframe: str) -> list[dict]:
+    """Aggregate stored one-minute Schwab candles into scanner intervals."""
+    durations = {"1m": 60_000, "5m": 300_000, "15m": 900_000, "1h": 3_600_000}
+    duration = durations[timeframe]
+    if duration == 60_000:
+        return candles
+    buckets: dict[int, dict] = {}
+    for candle in candles:
+        stamp = candle.get("candle_time_ms")
+        if not isinstance(stamp, (int, float)):
+            continue
+        bucket = int(stamp // duration) * duration
+        current = buckets.get(bucket)
+        if current is None:
+            buckets[bucket] = {
+                "candle_time_ms": bucket, "open": candle.get("open"),
+                "high": candle.get("high"), "low": candle.get("low"),
+                "close": candle.get("close"), "volume": int(candle.get("volume") or 0),
+            }
+        else:
+            current["high"] = max(float(current["high"]), float(candle["high"]))
+            current["low"] = min(float(current["low"]), float(candle["low"]))
+            current["close"] = candle.get("close")
+            current["volume"] += int(candle.get("volume") or 0)
+    return [buckets[key] for key in sorted(buckets)]
+
+
 def _scanner_indicators(
     candles: list[dict],
     quote_time_ms: int | float | None = None,
+    timeframe: str = "1m",
 ) -> dict[str, float | None]:
-    """Return indicators only when stored candles include the live quote minute."""
+    """Calculate indicators only when candles include the live quote interval."""
     if not candles:
         return {"ema20": None, "macd": None}
+    duration = {"1m": 60_000, "5m": 300_000, "15m": 900_000, "1h": 3_600_000}[timeframe]
     if isinstance(quote_time_ms, (int, float)) and not isinstance(quote_time_ms, bool) and quote_time_ms > 0:
         latest_stamp = candles[-1].get("candle_time_ms")
         if (
             not isinstance(latest_stamp, (int, float))
-            or int(float(latest_stamp) // 60000) != int(float(quote_time_ms) // 60000)
+            or int(float(latest_stamp) // duration) != int(float(quote_time_ms) // duration)
         ):
             return {"ema20": None, "macd": None}
     closes: list[float] = []
@@ -328,7 +357,10 @@ def snapshots_status():
 
 
 @app.get("/api/snapshots/latest")
-def snapshots_latest(limit: int = Query(10000, ge=1, le=10000)):
+def snapshots_latest(
+    limit: int = Query(10000, ge=1, le=10000),
+    timeframe: str = Query("1m", pattern="^(1m|5m|15m|1h)$"),
+):
     try:
         store = SnapshotStore()
         rows = store.latest(limit)
@@ -346,10 +378,12 @@ def snapshots_latest(limit: int = Query(10000, ge=1, le=10000)):
                 row["rvol_sessions_used"] = 0
                 row["rvol_as_of"] = None
             try:
-                indicator_candles = candle_store.latest(row["symbol"], limit=100)
-                indicators = _scanner_indicators(indicator_candles, row.get("quote_time_ms"))
+                indicator_candles = candle_store.latest(row["symbol"], limit=6000)
+                scanner_candles = _aggregate_scanner_candles(indicator_candles, timeframe)
+                indicators = _scanner_indicators(scanner_candles[-100:], row.get("quote_time_ms"), timeframe)
                 row["ema20"] = indicators["ema20"]
                 row["macd"] = indicators["macd"]
+                row["scanner_timeframe"] = timeframe
             except (OSError, RuntimeError, ValueError) + DB_ERRORS:
                 row["ema20"] = None
                 row["macd"] = None
@@ -364,6 +398,7 @@ def snapshots_latest(limit: int = Query(10000, ge=1, le=10000)):
         return {
             "results": rows,
             "limit": limit,
+            "timeframe": timeframe,
             "active_strategy": (
                 {"id": selected_strategy["id"], "name": selected_strategy["name"]}
                 if selected_strategy else None
