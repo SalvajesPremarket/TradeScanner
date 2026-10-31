@@ -157,10 +157,10 @@ def _access_token() -> str:
                 )
             else:
                 message = f"Schwab OAuth token request failed: {detail}"
-            with _TOKEN_LOCK:
-                _TOKEN_FAILURE_CREDENTIALS = credentials
-                _TOKEN_FAILURE_MESSAGE = message
-                _TOKEN_FAILURE_UNTIL = time.monotonic() + 120.0
+            # _access_token already holds _TOKEN_LOCK around the refresh request.
+            _TOKEN_FAILURE_CREDENTIALS = credentials
+            _TOKEN_FAILURE_MESSAGE = message
+            _TOKEN_FAILURE_UNTIL = time.monotonic() + 120.0
             raise SchwabAPIError(message) from None
         token = payload.get("access_token") if isinstance(payload, dict) else None
         if not token:
