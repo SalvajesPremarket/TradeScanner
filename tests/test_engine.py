@@ -226,7 +226,7 @@ class AutomaticEngineTests(unittest.TestCase):
 
 
 
-    def test_history_sampling_prefers_higher_volume_symbol_over_larger_gap(self):
+    def test_history_sampling_prioritizes_low_volume_when_no_strategy_is_active(self):
         with tempfile.TemporaryDirectory() as directory:
             store = SnapshotStore(Path(directory) / "engine.sqlite3")
             symbols = ["THIN", "LIQUID"]
@@ -260,7 +260,7 @@ class AutomaticEngineTests(unittest.TestCase):
                     candle_fetcher=fetch_history,
                 )
 
-            self.assertEqual(requested_history, ["LIQUID", "THIN"])
+            self.assertEqual(requested_history, ["THIN", "LIQUID"])
 
 
     def test_infisical_can_supply_refresh_token_without_render_refresh_variable(self):
