@@ -231,6 +231,7 @@ class AppEntrypointTests(unittest.TestCase):
     def test_radar_volume_filter_uses_session_cumulative_volume_since_0400_et(self):
         html = (app_module.ROOT / "index.html").read_text(encoding="utf-8")
         self.assertIn('id="volume-max"', html)
+        self.assertIn('id="volume-max" type="number" min="0" step="1000" value="1000000"', html)
         self.assertIn('VOL. ACUM. DESDE 04:00 ET', html)
         self.assertIn('item.premarket_volume', html)
         self.assertIn('["volume-max", maxVolume, item.premarket_volume, "max"]', html)
