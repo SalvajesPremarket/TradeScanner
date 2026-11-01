@@ -411,10 +411,18 @@ def snapshots_latest(
                 row["rvol"] = metrics["rvol"]
                 row["rvol_sessions_used"] = metrics["sessions_used"]
                 row["rvol_as_of"] = metrics.get("as_of")
+                # This is the session volume accumulated from 04:00 ET, not
+                # Schwab quote.totalVolume and not the volume of one candle.
+                row["premarket_volume"] = candle_store.premarket_volume(
+                    row["symbol"], as_of_ms=row.get("quote_time_ms")
+                )
+                row["premarket_volume_as_of"] = row.get("quote_time_ms") if row.get("premarket_volume") is not None else None
             else:
                 row["rvol"] = None
                 row["rvol_sessions_used"] = 0
                 row["rvol_as_of"] = None
+                row["premarket_volume"] = None
+                row["premarket_volume_as_of"] = None
             try:
                 if timeframe in {"1d", "1w"}:
                     scanner_candles = _schedule_daily_weekly_history(row["symbol"], timeframe)
