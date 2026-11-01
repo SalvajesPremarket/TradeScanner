@@ -20,6 +20,7 @@ class AppEntrypointTests(unittest.TestCase):
         self.assertIn("/api/status", paths)
         self.assertIn("/api/engine/status", paths)
         self.assertIn("/api/candles/{symbol}", paths)
+        self.assertIn("/api/quote/{symbol}", paths)
         self.assertIn("/api/snapshots/latest", paths)
         self.assertIn("/api/strategies", paths)
         self.assertIn("/api/strategies/active-matches", paths)
@@ -267,12 +268,30 @@ class AppEntrypointTests(unittest.TestCase):
             'fetch("/api/universe/status"',
             'id="strategy-form"',
             'fetch("/api/strategies"',
-            'function drawCandles(candles)',
+            'function drawCandles(candles, liveQuote = null)',
+            'fetch("/api/quote/"',
+            'setInterval(() => void refreshChartQuote(symbol, sequence), 2000)',
+            'id="chart-live-price"',
+            'event.target.closest(".chart-ticker-link")',
         ]
         for fragment in required:
             with self.subTest(fragment=fragment):
                 self.assertIn(fragment, html)
 
+
+    def test_selected_chart_quote_comes_from_schwab_without_persisting_snapshots(self):
+        quote = {"symbol": "AAPL", "price": 123.45, "quote_time_ms": 1_800_000_000_000}
+        with patch("app.get_quotes", return_value={"AAPL": {}}) as fetch_quotes, patch(
+            "app.normalize_schwab_quotes", return_value=[quote]
+        ), patch("app.SnapshotStore") as store_class:
+            result = app_module.quote_status("aapl")
+        fetch_quotes.assert_called_once_with(["AAPL"])
+        store_class.assert_not_called()
+        self.assertEqual(result["symbol"], "AAPL")
+        self.assertEqual(result["provider"], "Schwab")
+        self.assertEqual(result["price"], 123.45)
+        self.assertEqual(result["source"], "schwab_quote")
+        self.assertIn("is_live", result)
 
     def test_chart_endpoint_accepts_thirty_minute_timeframe(self):
         candle = {
