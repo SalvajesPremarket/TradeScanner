@@ -289,6 +289,7 @@ def get_chart_history(symbol: str, timeframe: str) -> dict[str, Any]:
         "1m": ("day", 5, "minute", 1, "true", "false"),
         "5m": ("day", 10, "minute", 5, "true", "false"),
         "15m": ("day", 10, "minute", 15, "true", "false"),
+        "30m": ("day", 10, "minute", 30, "true", "false"),
         "1h": ("day", 10, "minute", 30, "true", "false"),
         "day": ("month", 6, "daily", 1, "false", "true"),
         "week": ("year", 5, "weekly", 1, "false", "true"),
