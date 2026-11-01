@@ -181,8 +181,8 @@ class AppEntrypointTests(unittest.TestCase):
 
     def test_radar_keeps_snapshots_independent_of_strategy_evaluations(self):
         rows = [
-            {"symbol": "AAA", "gap_pct": 4, "quote_is_fresh": True},
-            {"symbol": "BBB", "gap_pct": 2, "quote_is_fresh": True},
+            {"symbol": "AAA", "gap_pct": 4, "quote_is_fresh": True, "quote_time_ms": 1000, "trade_time_ms": 900},
+            {"symbol": "BBB", "gap_pct": 2, "quote_is_fresh": True, "quote_time_ms": 2000},
             {"symbol": "CCC", "gap_pct": 5, "quote_is_fresh": False},
             {"symbol": "DDD", "gap_pct": 5},
         ]
@@ -199,6 +199,7 @@ class AppEntrypointTests(unittest.TestCase):
         self.assertEqual([row["symbol"] for row in result["results"]], ["AAA", "BBB", "CCC", "DDD"])
         self.assertEqual(result["active_strategy"]["id"], "strategy-1")
         self.assertEqual(result["results"][0]["premarket_volume"], 1234)
+        candle_class.return_value.premarket_volume.assert_any_call("AAA", as_of_ms=900)
         self.assertIsNone(result["results"][1]["premarket_volume"])
         self.assertIsNone(result["results"][2]["premarket_volume"])
 
