@@ -19,7 +19,7 @@ Scanner de acciones basado en cotizaciones e histórico de **Schwab**, con persi
 - **Infisical**: almacén opcional del refresh token de Schwab.
 - **Histórico de estrategias**: las estrategias OHLCV/RVOL reciben hasta cinco sesiones intradía; con una estrategia activa, el motor vuelve a consultar velas cuando el histórico queda más de dos minutos detrás de una cotización fresca, limitando cada símbolo a una consulta por minuto.
 
-Los valores ausentes permanecen ausentes. El scanner no sustituye FLOAT por shares outstanding ni fabrica precios, velas, volumen, RVOL o noticias.
+Los valores ausentes permanecen ausentes. El scanner no sustituye FLOAT por shares outstanding ni fabrica precios, velas, volumen, RVOL o noticias. El filtro de volumen del radar usa la suma de velas intradía de la sesión actual desde las 04:00 ET hasta la hora de la cotización; no usa el volumen de una vela ni el campo genérico `totalVolume` de la cotización. El filtro admite mínimo y máximo y deja el dato vacío si no hay velas actuales disponibles.
 
 ## Rutas principales
 
