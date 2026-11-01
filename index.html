@@ -368,6 +368,7 @@
           if (threshold === null) continue;
           if (actual === null || actual === undefined || !Number.isFinite(Number(actual))) return false;
           if (mode === "min" && Number(actual) < threshold) return false;
+          if (id === "volume-max" && Number(actual) >= threshold) return false;
           if (mode === "max" && Number(actual) > threshold) return false;
         }
         return true;
