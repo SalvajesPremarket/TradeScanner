@@ -57,6 +57,13 @@ class SnapshotStore:
                 "CREATE INDEX IF NOT EXISTS idx_quote_snapshots_symbol_time "
                 "ON quote_snapshots(symbol, captured_at)"
             )
+            # Keep the global latest-radar query index-backed. The existing
+            # symbol-first index serves per-symbol lookups; this time-first
+            # index lets PostgreSQL walk newest batches and stop at the limit.
+            connection.execute(
+                "CREATE INDEX IF NOT EXISTS idx_quote_snapshots_captured_symbol "
+                "ON quote_snapshots(captured_at DESC, symbol)"
+            )
             connection.execute(
                 "CREATE TABLE IF NOT EXISTS scanner_state ("
                 "state_key TEXT PRIMARY KEY, state_json TEXT NOT NULL)"
