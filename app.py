@@ -608,7 +608,7 @@ def strategies_active_matches(request: Request):
 def candles_status(
     symbol: str,
     limit: int = Query(500, ge=1, le=5000),
-    timeframe: str | None = Query(None, pattern="^(1m|5m|15m|1h|day|week)$"),
+    timeframe: str | None = Query(None, pattern="^(1m|5m|15m|30m|1h|day|week)$"),
 ):
     normalized = symbol.strip().upper()
     if not normalized or len(normalized) > 15:
@@ -642,7 +642,7 @@ def candles_status(
                     current["volume"] += candle["volume"]
             candles = list(hourly.values())
         candles = candles[-limit:]
-        labels = {"1m":"1 minuto","5m":"5 minutos","15m":"15 minutos","1h":"1 hora","day":"Diaria","week":"Semanal"}
+        labels = {"1m":"1 minuto","5m":"5 minutos","15m":"15 minutos","30m":"30 minutos","1h":"1 hora","day":"1D · Diaria","week":"1W · Semanal"}
         return {
             "symbol": normalized,
             "provider": "Schwab",
