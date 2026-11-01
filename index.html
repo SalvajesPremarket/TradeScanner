@@ -217,7 +217,7 @@
         <div class="filter"><b>GAP</b><button class="toggle" id="gap-toggle" type="button" aria-pressed="false">OFF</button><input id="gap-min" type="number" step="0.1" placeholder="MIN %" aria-label="GAP mínimo" disabled><input id="gap-max" type="number" step="0.1" placeholder="MAX %" aria-label="GAP máximo" disabled></div>
         <div class="filter"><b>FLOAT</b><button class="toggle" id="float-toggle" type="button" aria-pressed="false">OFF</button><input id="float-min" type="number" min="0" step="1000000" placeholder="MIN" aria-label="FLOAT mínimo en acciones" disabled><span>–</span><input id="float-max" type="number" min="0" step="1000000" placeholder="MAX" aria-label="FLOAT máximo en acciones" disabled></div>
         <label class="filter"><b>RVOL ≥</b><input id="rvol-min" type="number" min="0" step="0.1" placeholder="MIN" aria-label="RVOL mínimo"></label>
-        <label class="filter"><b>VOLUMEN ≥</b><input id="volume-min" type="number" min="0" step="1000" placeholder="MIN" aria-label="Volumen mínimo"></label>
+        <label class="filter"><b>VOL. PREMARKET 04:00 ET</b><input id="volume-min" type="number" min="0" step="1000" placeholder="MIN" aria-label="Volumen acumulado mínimo desde las 04:00 ET"><span>–</span><input id="volume-max" type="number" min="0" step="1000" placeholder="MAX" aria-label="Volumen acumulado máximo desde las 04:00 ET"></label>
         <label class="filter"><b>MACD</b><select id="macd-filter" aria-label="Filtro MACD"><option value="any">No exigir</option><option value="positive">Positivo</option><option value="negative">Negativo</option></select></label>
         <label class="filter"><b>EMA20</b><select id="ema-filter" aria-label="Filtro EMA20"><option value="any">No exigir</option><option value="above">Por encima</option><option value="below">Por debajo</option></select></label>
         <label class="filter"><b>CAMBIO %</b><input id="change-min" type="number" step="0.1" placeholder="MIN" aria-label="Cambio porcentual mínimo"><span>–</span><input id="change-max" type="number" step="0.1" placeholder="MAX" aria-label="Cambio porcentual máximo"></label>
@@ -231,7 +231,7 @@
       <p class="code-hint" id="radar-source-note">RADAR · Estas filas son cotizaciones/snapshots del escáner; no son señales de entrada de JeanLong. La estrategia activa se evalúa por separado y solo sus evaluaciones con resultado aprobado cuentan como señales.</p>
       <div class="table-wrap">
         <table class="results-table" aria-label="Resultados del radar">
-          <thead><tr><th>TICKER</th><th>EMPRESA</th><th>PRECIO</th><th>CAMBIO %</th><th>GAP %</th><th>FLOAT</th><th>RVOL</th><th>VOLUMEN</th><th>SECTOR</th><th>NOTICIA POST/PRE</th><th>TEMPORALIDAD</th></tr></thead>
+          <thead><tr><th>TICKER</th><th>EMPRESA</th><th>PRECIO</th><th>CAMBIO %</th><th>GAP %</th><th>FLOAT</th><th>RVOL</th><th>VOL. PREMARKET 04:00 ET</th><th>SECTOR</th><th>NOTICIA POST/PRE</th><th>TEMPORALIDAD</th></tr></thead>
           <tbody id="result-rows"><tr><td colspan="11"><div class="empty">Esperando primeras cotizaciones reales de Schwab.</div></td></tr></tbody>
         </table>
       </div>
@@ -297,7 +297,7 @@
     const countNode = document.getElementById("result-count");
     const rowsNode = document.getElementById("result-rows");
     let allResults = [];
-    const filterIds = ["price-min","price-max","gap-min","gap-max","float-min","float-max","rvol-min","volume-min","change-min","change-max"];
+    const filterIds = ["price-min","price-max","gap-min","gap-max","float-min","float-max","rvol-min","volume-min","volume-max","change-min","change-max"];
 
     function numericInput(id) {
       const raw = document.getElementById(id).value.trim();
@@ -334,6 +334,7 @@
       const maxFloat = floatOn && !ignored("float-max") ? numericInput("float-max") : null;
       const minRvol = ignored("rvol-min") ? null : numericInput("rvol-min");
       const minVolume = ignored("volume-min") ? null : numericInput("volume-min");
+      const maxVolume = ignored("volume-max") ? null : numericInput("volume-max");
       const minChange = ignored("change-min") ? null : numericInput("change-min");
       const maxChange = ignored("change-max") ? null : numericInput("change-max");
       const macdFilter = ignored("macd-filter") ? "any" : document.getElementById("macd-filter").value;
@@ -354,7 +355,7 @@
         const checks = [
           ["price-min", minPrice, item.price, "min"], ["price-max", maxPrice, item.price, "max"],
           ["gap-min", minGap, item.gap_pct, "min"], ["gap-max", maxGap, item.gap_pct, "max"],
-          ["rvol-min", minRvol, item.rvol, "min"], ["volume-min", minVolume, item.volume, "min"],
+          ["rvol-min", minRvol, item.rvol, "min"], ["volume-min", minVolume, item.premarket_volume, "min"], ["volume-max", maxVolume, item.premarket_volume, "max"],
           ["change-min", minChange, item.change_pct, "min"], ["change-max", maxChange, item.change_pct, "max"]
         ];
         if (floatOn) {
@@ -487,7 +488,7 @@
               "price-min":{field:"price",dir:"min",label:"PRECIO mínimo"},"price-max":{field:"price",dir:"max",label:"PRECIO máximo"},
               "gap-min":{field:"gap_pct",dir:"min",label:"GAP mínimo"},"gap-max":{field:"gap_pct",dir:"max",label:"GAP máximo"},
               "float-min":{field:"float_shares",dir:"min",label:"FLOAT mínimo"},"float-max":{field:"float_shares",dir:"max",label:"FLOAT máximo"},
-              "rvol-min":{field:"rvol",dir:"min",label:"RVOL mínimo"},"volume-min":{field:"volume",dir:"min",label:"VOLUMEN mínimo"},
+              "rvol-min":{field:"rvol",dir:"min",label:"RVOL mínimo"},"volume-min":{field:"premarket_volume",dir:"min",label:"VOLUMEN PREMARKET mínimo"},"volume-max":{field:"premarket_volume",dir:"max",label:"VOLUMEN PREMARKET máximo"},
               "change-min":{field:"change_pct",dir:"min",label:"CAMBIO mínimo"},"change-max":{field:"change_pct",dir:"max",label:"CAMBIO máximo"}
             };
             const spec=map[id]; if(!spec) continue;
@@ -498,7 +499,7 @@
               continue;
             }
             const suggested=spec.dir==="min"?Math.min(...values):Math.max(...values);
-            const rounded=spec.field==="float_shares"||spec.field==="volume"?Math.floor(suggested):Number(suggested.toFixed(spec.field==="price"?2:1));
+            const rounded=spec.field==="float_shares"||spec.field==="volume"||spec.field==="premarket_volume"?Math.floor(suggested):Number(suggested.toFixed(spec.field==="price"?2:1));
             alerts.push({severity:"warn",title:"Posible conflicto combinado · "+spec.label,
               detail:"Al relajar este filtro se recuperan "+best.count+" candidato(s) en la muestra. Sugerencia basada en esos datos: "+(spec.dir==="min"?"disminuir":"aumentar")+" a "+displayNumber(rounded)+"; no garantiza una señal ni una operación rentable.",
               action:{filter:id,value:String(rounded),label:(spec.dir==="min"?"Bajar mínimo a ":"Subir máximo a ")+displayNumber(rounded)},
@@ -550,7 +551,7 @@
               suggestion = "Quitar la condición visual " + (id === "macd-filter" ? "MACD" : "EMA20");
             } else {
               const fieldMap = {"price-min":["price","min"],"price-max":["price","max"],"gap-min":["gap_pct","min"],"gap-max":["gap_pct","max"],
-                "float-min":["float_shares","min"],"float-max":["float_shares","max"],"rvol-min":["rvol","min"],"volume-min":["volume","min"],
+                "float-min":["float_shares","min"],"float-max":["float_shares","max"],"rvol-min":["rvol","min"],"volume-min":["premarket_volume","min"],"volume-max":["premarket_volume","max"],
                 "change-min":["change_pct","min"],"change-max":["change_pct","max"]};
               const spec = fieldMap[id];
               const values = spec ? best.rows.map(row => row[spec[0]]).filter(value => typeof value === "number" && Number.isFinite(value)) : [];
@@ -688,7 +689,7 @@
         cell(tr, item.gap_pct == null ? "—" : displayNumber(item.gap_pct) + "%");
         cell(tr, item.float_shares == null ? null : displayNumber(item.float_shares, 0), "FLOAT no disponible: no hay un valor guardado en la caché local.");
         cell(tr, item.rvol == null ? null : displayNumber(item.rvol) + "x", "RVOL no disponible: hacen falta velas actuales y al menos dos sesiones históricas comparables.");
-        cell(tr, item.volume == null ? null : displayNumber(item.volume, 0));
+        cell(tr, item.premarket_volume == null ? null : displayNumber(item.premarket_volume, 0), "Volumen acumulado no disponible: faltan velas de la sesión actual desde las 04:00 ET.");
         cell(tr, item.sector, "Sector no proporcionado en los datos actuales del proveedor.");
         cell(tr, details.news, "Solo se muestran titulares con fecha verificada en postmarket, overnight o premarket; no se inventan noticias.");
         const scannerTimeframe = item.scanner_timeframe || document.getElementById("scanner-timeframe").value;
@@ -703,7 +704,7 @@
     function hasActiveInterfaceFilters() {
       const gapOn = document.getElementById("gap-toggle").getAttribute("aria-pressed") === "true";
       const floatOn = document.getElementById("float-toggle").getAttribute("aria-pressed") === "true";
-      const numericActive = ["price-min","price-max","rvol-min","volume-min","change-min","change-max"].some(id => numericInput(id) !== null);
+      const numericActive = ["price-min","price-max","rvol-min","volume-min","volume-max","change-min","change-max"].some(id => numericInput(id) !== null);
       const gapActive = gapOn && (numericInput("gap-min") !== null || numericInput("gap-max") !== null);
       const floatActive = floatOn;
       return numericActive || gapActive || floatActive ||
@@ -745,8 +746,8 @@
         const rvolA = Number.isFinite(Number(a.rvol)) ? Number(a.rvol) : -Infinity;
         const rvolB = Number.isFinite(Number(b.rvol)) ? Number(b.rvol) : -Infinity;
         if (rvolA !== rvolB) return rvolB - rvolA;
-        const volumeA = Number.isFinite(Number(a.volume)) ? Number(a.volume) : -Infinity;
-        const volumeB = Number.isFinite(Number(b.volume)) ? Number(b.volume) : -Infinity;
+        const volumeA = Number.isFinite(Number(a.premarket_volume)) ? Number(a.premarket_volume) : -Infinity;
+        const volumeB = Number.isFinite(Number(b.premarket_volume)) ? Number(b.premarket_volume) : -Infinity;
         return volumeB - volumeA;
       });
       const topTen = filtered.slice(0, 10);
