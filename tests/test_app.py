@@ -258,6 +258,26 @@ class AppEntrypointTests(unittest.TestCase):
                 self.assertIn(fragment, html)
 
 
+    def test_chart_endpoint_accepts_thirty_minute_timeframe(self):
+        candle = {
+            "candle_time_ms": 1_800_000,
+            "open": 10.0,
+            "high": 11.0,
+            "low": 9.0,
+            "close": 10.5,
+            "volume": 100,
+        }
+        with patch("app.SnapshotStore") as store_class, patch("app.CandleStore") as candle_class, patch(
+            "app.get_chart_history", return_value={"candles": [candle]}
+        ), patch("tradescanner.candles.normalize_price_history", return_value=[candle]):
+            store_class.return_value.path = "unused-test-db"
+            candle_class.return_value.rvol.return_value = {"rvol": None, "sessions_used": 0}
+            result = app_module.candles_status("AAPL", limit=100, timeframe="30m")
+
+        self.assertEqual(result["timeframe"], "30m")
+        self.assertEqual(result["timeframe_label"], "30 minutos")
+        self.assertEqual(len(result["candles"]), 1)
+
     def test_scanner_aggregates_thirty_minute_candles(self):
         candles = [
             {"candle_time_ms": 1_800_000, "open": 10, "high": 11, "low": 9, "close": 10.5, "volume": 100},
