@@ -194,9 +194,13 @@ class AppEntrypointTests(unittest.TestCase):
             store.latest.return_value = rows
             store.path = "unused-test-db"
             candle_class.return_value.rvol.return_value = {"rvol": None, "sessions_used": 0}
+            candle_class.return_value.premarket_volume.side_effect = lambda symbol, as_of_ms=None: 1234 if symbol == "AAA" else None
             result = app_module.snapshots_latest(limit=100, timeframe="1m")
         self.assertEqual([row["symbol"] for row in result["results"]], ["AAA", "BBB", "CCC", "DDD"])
         self.assertEqual(result["active_strategy"]["id"], "strategy-1")
+        self.assertEqual(result["results"][0]["premarket_volume"], 1234)
+        self.assertIsNone(result["results"][1]["premarket_volume"])
+        self.assertIsNone(result["results"][2]["premarket_volume"])
 
 
     def test_snapshots_latest_applies_cached_float_to_rows(self):
@@ -223,6 +227,14 @@ class AppEntrypointTests(unittest.TestCase):
         self.assertEqual(result["results"][0]["float_source"], "massive")
         self.assertEqual(result["results"][0]["float_as_of"], "2026-10-01")
 
+
+    def test_radar_volume_filter_uses_session_cumulative_volume_since_0400_et(self):
+        html = (app_module.ROOT / "index.html").read_text(encoding="utf-8")
+        self.assertIn('id="volume-max"', html)
+        self.assertIn('VOL. ACUM. DESDE 04:00 ET', html)
+        self.assertIn('item.premarket_volume', html)
+        self.assertIn('["volume-max", maxVolume, item.premarket_volume, "max"]', html)
+        self.assertNotIn('["volume-min", minVolume, item.volume, "min"]', html)
 
     def test_chart_is_integrated_into_scanner_and_standalone_tab_is_removed(self):
         html = (app_module.ROOT / "index.html").read_text(encoding="utf-8")
