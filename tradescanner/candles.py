@@ -181,12 +181,17 @@ class CandleStore:
         session_start_ms = int(as_of.replace(hour=4, minute=0, second=0, microsecond=0).timestamp() * 1000)
         with self._connect() as connection:
             row = connection.execute(
-                """SELECT COALESCE(SUM(volume), 0), COUNT(*)
+                """SELECT COALESCE(SUM(volume), 0), COUNT(*), MAX(candle_time_ms)
                    FROM intraday_candles
                    WHERE symbol = ? AND candle_time_ms >= ? AND candle_time_ms <= ?""",
                 (symbol.strip().upper(), session_start_ms, int(float(as_of_ms))),
             ).fetchone()
         if not row or int(row[1]) == 0:
+            return None
+        # Do not pass a partial sum as if it were current. Compare with last
+        # trade time (not quote time), because an illiquid stock can have a
+        # fresh quote while its last trade and cumulative volume have not moved.
+        if int(float(as_of_ms)) - int(row[2]) > 120_000:
             return None
         return int(row[0])
 
