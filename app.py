@@ -613,6 +613,30 @@ def strategies_active_matches(request: Request):
         "momentum": momentum_state,
     }
 
+@app.get("/api/quote/{symbol}")
+def quote_status(symbol: str):
+    """Return one fresh Schwab quote for the symbol currently shown in the chart."""
+    normalized = symbol.strip().upper()
+    if not normalized or len(normalized) > 15 or not normalized.replace(".", "").replace("-", "").isalnum():
+        raise HTTPException(status_code=400, detail="Invalid ticker symbol.")
+    try:
+        raw = get_quotes([normalized])
+        rows = normalize_schwab_quotes(raw)
+        quote = next((row for row in rows if str(row.get("symbol", "")).upper() == normalized), None)
+        if not isinstance(quote, dict) or not isinstance(quote.get("price"), (int, float)) or quote["price"] <= 0:
+            raise HTTPException(status_code=503, detail="Schwab no devolvió una cotización válida para este símbolo.")
+        stamp = quote.get("trade_time_ms") or quote.get("quote_time_ms")
+        if not isinstance(stamp, (int, float)) or isinstance(stamp, bool) or stamp <= 0:
+            raise HTTPException(status_code=503, detail="Schwab no proporcionó la hora de la cotización.")
+        age = time.time() - float(stamp) / 1000.0
+        return {"symbol": normalized, "provider": "Schwab", "price": float(quote["price"]),
+                "quote_time_ms": int(stamp), "quote_age_seconds": round(age, 3),
+                "is_live": -5 <= age <= 15, "source": "schwab_quote"}
+    except (SchwabAPIError, SchwabConfigurationError) as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from None
+    except (OSError, RuntimeError, ValueError) + DB_ERRORS:
+        raise HTTPException(status_code=503, detail="Schwab quote is temporarily unavailable.") from None
+
 @app.get("/api/candles/{symbol}")
 def candles_status(
     symbol: str,
