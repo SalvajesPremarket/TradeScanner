@@ -45,6 +45,9 @@ def normalize_schwab_quotes(payload: dict[str, Any]) -> list[dict[str, Any]]:
         quote_time_ms = _number(quote.get("quoteTime"))
         if quote_time_ms is None:
             quote_time_ms = _number(quote.get("quoteTimeInLong"))
+        trade_time_ms = _number(quote.get("tradeTime"))
+        if trade_time_ms is None:
+            trade_time_ms = _number(quote.get("tradeTimeInLong"))
         if last is not None and last <= 0:
             last = None
         if previous_close is not None and previous_close <= 0:
@@ -97,6 +100,7 @@ def normalize_schwab_quotes(payload: dict[str, Any]) -> list[dict[str, Any]]:
             "sector": fundamental.get("sector"),
             "exchange": reference.get("exchangeName"),
             "quote_time_ms": quote_time_ms,
+            "trade_time_ms": trade_time_ms,
             "quote_age_seconds": round(quote_age_seconds, 3) if quote_age_seconds is not None else None,
             "quote_is_fresh": quote_is_fresh,
             "data_source": "schwab",
