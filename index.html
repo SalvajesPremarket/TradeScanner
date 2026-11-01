@@ -1278,6 +1278,8 @@
       const body = document.getElementById("chart-rows"); body.replaceChildren();
       document.getElementById("chart-message").textContent = "Cargando velas reales de " + symbol + "…";
       document.getElementById("integrated-chart").scrollIntoView({behavior:"smooth",block:"start"});
+      chartRows = [];
+      startChartQuoteUpdates(symbol);
       try {
         const payload = await readJson(await fetch("/api/candles/" + encodeURIComponent(symbol) + "?limit=" + limit + "&timeframe=" + encodeURIComponent(timeframe),{cache:"no-store"}));
         chartRows = payload.candles || [];
@@ -1292,7 +1294,6 @@
           body.appendChild(tr);
         }
         document.getElementById("chart-message").textContent = symbol + " · " + (payload.timeframe_label || timeframe) + ": " + chartRows.length + " velas recibidas de Schwab. " + (payload.source === "stored" ? "Datos guardados." : "Histórico solicitado al proveedor en vivo.") + " RVOL: " + (payload.rvol && payload.rvol.rvol != null ? payload.rvol.rvol : "sin datos suficientes");
-        startChartQuoteUpdates(symbol);
       } catch(error) { document.getElementById("chart-message").textContent = apiMessage(error); }
     }
     document.getElementById("chart-form").addEventListener("submit", event => {
