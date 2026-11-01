@@ -234,6 +234,7 @@ class AppEntrypointTests(unittest.TestCase):
         self.assertIn('VOL. ACUM. DESDE 04:00 ET', html)
         self.assertIn('item.premarket_volume', html)
         self.assertIn('["volume-max", maxVolume, item.premarket_volume, "max"]', html)
+        self.assertIn('id === "volume-max" && Number(actual) >= threshold', html)
         self.assertNotIn('["volume-min", minVolume, item.volume, "min"]', html)
 
     def test_chart_is_integrated_into_scanner_and_standalone_tab_is_removed(self):
