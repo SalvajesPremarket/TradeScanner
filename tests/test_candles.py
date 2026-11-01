@@ -99,6 +99,15 @@ class CandleTests(unittest.TestCase):
             ])
             self.assertEqual(store.premarket_volume("AAPL", as_of_ms=ms(14, 4, 1)), 300)
 
+    def test_premarket_volume_rejects_partial_sum_when_last_trade_candle_is_stale(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = CandleStore(Path(directory) / "candles.sqlite3")
+            store.save([{
+                "symbol": "AAPL", "candle_time_ms": ms(14, 4, 0),
+                "open": 10.0, "high": 10.5, "low": 9.5, "close": 10.2, "volume": 100,
+            }])
+            self.assertIsNone(store.premarket_volume("AAPL", as_of_ms=ms(14, 4, 3)))
+
     def test_premarket_volume_is_unavailable_before_0400_or_without_current_session_candles(self):
         with tempfile.TemporaryDirectory() as directory:
             store = CandleStore(Path(directory) / "candles.sqlite3")
