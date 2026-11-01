@@ -1164,13 +1164,14 @@
       }
       const fast=emaSeries(closes,12),slow=emaSeries(closes,26),macd=fast.map((v,i)=>v-slow[i]),signal=emaSeries(macd,9),hist=macd.map((v,i)=>v-signal[i]);
       const volumes=valid.map(c=>Math.max(0,Number(c.volume)||0));
-      const left=65,right=980,step=(right-left)/valid.length,xAt=i=>left+step*(i+.5);
+      const left=65,right=910,step=(right-left)/valid.length,xAt=i=>left+step*(i+.5);
       const priceTop=24,priceBottom=280,macdTop=310,macdBottom=395,volTop=422,volBottom=480;
       const allPrice=[...valid.map(c=>Number(c.low)),...valid.map(c=>Number(c.high)),...ema3,...ema9,...ema20,...ema50,...ema200,...bbUpper.filter(v=>v!==null),...bbLower.filter(v=>v!==null)];
       const min=Math.min(...allPrice),max=Math.max(...allPrice),span=max-min||1;
       const yPrice=v=>priceBottom-(v-min)/span*(priceBottom-priceTop);
       const grid="#d7dee5";
-      for(let k=0;k<=4;k++){const y=priceTop+k*(priceBottom-priceTop)/4,val=max-k*span/4;add("line",{x1:left,y1:y,x2:right,y2:y,stroke:grid,"stroke-width":1});label(left-8,y+3,val.toFixed(2),"end");}
+      for(let k=0;k<=4;k++){const y=priceTop+k*(priceBottom-priceTop)/4,val=max-k*span/4;add("line",{x1:left,y1:y,x2:right,y2:y,stroke:grid,"stroke-width":1});label(right+9,y+3,val.toFixed(2),"start");}
+      add("line",{x1:right,y1:priceTop,x2:right,y2:priceBottom,stroke:"#aab5bf","stroke-width":1});
       const bw=Math.max(1.5,Math.min(9,step*.58));
       valid.forEach((c,i)=>{
         const x=xAt(i),open=yPrice(Number(c.open)),close=yPrice(Number(c.close)),high=yPrice(Number(c.high)),low=yPrice(Number(c.low));
@@ -1202,9 +1203,12 @@
       const maxVol=Math.max(1,...volumes);
       volumes.forEach((v,i)=>{const h=v/maxVol*(volBottom-volTop);add("rect",{x:xAt(i)-bw/2,y:volBottom-h,width:bw,height:h,fill:"#5b91ad",opacity:.8});});
       label(left,414,"VOLUMEN","start","#344454");
-      const first=valid[0].candle_time_ms?new Date(valid[0].candle_time_ms).toLocaleString():"Más antiguas";
-      const last=valid[valid.length-1].candle_time_ms?new Date(valid[valid.length-1].candle_time_ms).toLocaleString():"Más recientes";
-      label(left,496,first);label(right,496,last,"end");
+      const chartTimeframe=document.getElementById("chart-timeframe").value;
+      const timeOptions=chartTimeframe==="day" ? {month:"short",day:"numeric",timeZone:"America/New_York"} : chartTimeframe==="week" ? {month:"short",year:"2-digit",timeZone:"America/New_York"} : {hour:"2-digit",minute:"2-digit",hour12:false,timeZone:"America/New_York"};
+      const formatCandleTime=c=>c.candle_time_ms?new Intl.DateTimeFormat("es",timeOptions).format(new Date(Number(c.candle_time_ms))):"—";
+      const tickCount=Math.min(6,valid.length);
+      for(let t=0;t<tickCount;t++){const i=Math.round(t*(valid.length-1)/Math.max(1,tickCount-1));const x=xAt(i);add("line",{x1:x,y1:volBottom+2,x2:x,y2:volBottom+6,stroke:"#7b8792","stroke-width":1});label(x,496,formatCandleTime(valid[i]),"middle");}
+      label(right+9,14,"PRECIO","start","#344454");
     }
 
     async function loadChartForSymbol(rawSymbol) {
