@@ -21,6 +21,15 @@ class SnapshotStoreTests(unittest.TestCase):
             self.assertEqual(store.stats()["symbols_seen"], 1)
             self.assertEqual(store.latest()[0]["price"], 100.0)
 
+    def test_latest_radar_index_is_created_for_global_time_order(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = SnapshotStore(Path(directory) / "snapshots.sqlite3")
+            with store._connect() as connection:
+                indexes = {
+                    row[1] for row in connection.execute("PRAGMA index_list(quote_snapshots)")
+                }
+        self.assertIn("idx_quote_snapshots_captured_symbol", indexes)
+
     def test_collection_batches_deduplicates_and_does_not_invent_missing_quotes(self):
         calls = []
         def fetch(batch):
