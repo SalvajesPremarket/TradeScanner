@@ -164,9 +164,9 @@ class CandleStore:
     def premarket_volume(self, symbol: str, *, as_of_ms: int | float | None = None) -> int | None:
         """Sum today's one-minute candle volume from 04:00 ET through the quote time.
 
-        Returns None when the quote timestamp is invalid, belongs to no stored
-        04:00+ candle session, or the stored history cannot establish a value.
-        It never falls back to Schwab's generic totalVolume field.
+        Returns None when the quote timestamp is invalid or no current-session
+        candles are stored. It never falls back to Schwab's generic totalVolume.
+        The primary key (symbol, candle_time_ms) makes this a bounded range query.
         """
         if (
             isinstance(as_of_ms, bool)
@@ -176,21 +176,19 @@ class CandleStore:
         ):
             return None
         as_of = datetime.fromtimestamp(float(as_of_ms) / 1000, MARKET_TZ)
-        session_start = 4 * 60
-        cutoff = as_of.hour * 60 + as_of.minute
-        if cutoff < session_start:
+        if as_of.hour < 4:
             return None
-        candles = self.latest(symbol)
-        total = 0
-        found = False
-        for candle in candles:
-            local = datetime.fromtimestamp(candle["candle_time_ms"] / 1000, MARKET_TZ)
-            minute = local.hour * 60 + local.minute
-            if local.date() != as_of.date() or minute < session_start or minute > cutoff:
-                continue
-            total += int(candle["volume"])
-            found = True
-        return total if found else None
+        session_start_ms = int(as_of.replace(hour=4, minute=0, second=0, microsecond=0).timestamp() * 1000)
+        with self._connect() as connection:
+            row = connection.execute(
+                """SELECT COALESCE(SUM(volume), 0), COUNT(*)
+                   FROM intraday_candles
+                   WHERE symbol = ? AND candle_time_ms >= ? AND candle_time_ms <= ?""",
+                (symbol.strip().upper(), session_start_ms, int(float(as_of_ms))),
+            ).fetchone()
+        if not row or int(row[1]) == 0:
+            return None
+        return int(row[0])
 
     def rvol(self, symbol: str, *, as_of_ms: int | float | None = None) -> dict[str, Any]:
         """Calculate cumulative intraday RVOL against prior sessions at the same ET minute.
