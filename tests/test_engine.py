@@ -149,6 +149,47 @@ class AutomaticEngineTests(unittest.TestCase):
                 )
             self.assertEqual(requested_history, ["AAPL"])
 
+    def test_inactive_strategy_still_refreshes_stale_candles_for_volume_filter(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = SnapshotStore(Path(directory) / "engine.sqlite3")
+            from tradescanner.candles import CandleStore
+            ny = ZoneInfo("America/New_York")
+            old_stamp = int(datetime(2026, 10, 29, 9, 30, tzinfo=ny).timestamp() * 1000)
+            CandleStore(store.path).save([
+                {
+                    "symbol": "VOLUMEONLY", "candle_time_ms": old_stamp + index * 60_000,
+                    "open": 10.0, "high": 10.5, "low": 9.5, "close": 10.2,
+                    "volume": 100,
+                }
+                for index in range(40)
+            ])
+            requested_history = []
+            def fetch_quotes(batch):
+                return {symbol: {
+                    "quote": {
+                        "lastPrice": 11.0, "closePrice": 10.0,
+                        "quoteTime": int(time.time() * 1000),
+                    },
+                    "reference": { "description": symbol },
+                } for symbol in batch}
+            def fetch_history(symbol):
+                requested_history.append(symbol)
+                return {"candles": []}
+            with patch.dict(os.environ, {
+                "SCHWAB_CLIENT_ID": "test-id",
+                "SCHWAB_CLIENT_SECRET": "test-secret",
+                "SCHWAB_REFRESH_TOKEN": "test-refresh",
+            }), patch("tradescanner.engine.refresh_float_cache", return_value={
+                "status": "cached", "provider": "Massive", "rows_saved": 0,
+            }):
+                run_scan_cycle(
+                    store,
+                    universe_loader=lambda: {"symbols": ["VOLUMEONLY"]},
+                    quote_fetcher=fetch_quotes,
+                    candle_fetcher=fetch_history,
+                )
+            self.assertEqual(requested_history, ["VOLUMEONLY"])
+
     def test_scan_status_reports_cached_float_value(self):
         with tempfile.TemporaryDirectory() as directory:
             store = SnapshotStore(Path(directory) / "engine.sqlite3")
