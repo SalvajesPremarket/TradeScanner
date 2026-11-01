@@ -413,10 +413,11 @@ def snapshots_latest(
                 row["rvol_as_of"] = metrics.get("as_of")
                 # This is the session volume accumulated from 04:00 ET, not
                 # Schwab quote.totalVolume and not the volume of one candle.
+                volume_as_of_ms = row.get("trade_time_ms") or row.get("quote_time_ms")
                 row["premarket_volume"] = candle_store.premarket_volume(
-                    row["symbol"], as_of_ms=row.get("quote_time_ms")
+                    row["symbol"], as_of_ms=volume_as_of_ms
                 )
-                row["premarket_volume_as_of"] = row.get("quote_time_ms") if row.get("premarket_volume") is not None else None
+                row["premarket_volume_as_of"] = volume_as_of_ms if row.get("premarket_volume") is not None else None
             else:
                 row["rvol"] = None
                 row["rvol_sessions_used"] = 0
