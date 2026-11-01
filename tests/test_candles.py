@@ -80,6 +80,35 @@ class CandleTests(unittest.TestCase):
             counts = store.counts_by_symbols(["aapl", "MSFT", "UNKNOWN", "AAPL"])
             self.assertEqual(counts, {"AAPL": 40, "MSFT": 34})
 
+    def test_premarket_volume_sums_only_current_session_from_0400_et_through_quote_time(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = CandleStore(Path(directory) / "candles.sqlite3")
+            store.save([
+                # Previous session and today's pre-04:00 candles are excluded.
+                {"symbol": "AAPL", "candle_time_ms": ms(13, 16, 0),
+                 "open": 10.0, "high": 10.5, "low": 9.5, "close": 10.2, "volume": 9000},
+                {"symbol": "AAPL", "candle_time_ms": ms(14, 3, 59),
+                 "open": 10.0, "high": 10.5, "low": 9.5, "close": 10.2, "volume": 8000},
+                {"symbol": "AAPL", "candle_time_ms": ms(14, 4, 0),
+                 "open": 10.0, "high": 10.5, "low": 9.5, "close": 10.2, "volume": 100},
+                {"symbol": "AAPL", "candle_time_ms": ms(14, 4, 1),
+                 "open": 10.0, "high": 10.5, "low": 9.5, "close": 10.2, "volume": 200},
+                # A candle after the quote timestamp must not be counted.
+                {"symbol": "AAPL", "candle_time_ms": ms(14, 4, 2),
+                 "open": 10.0, "high": 10.5, "low": 9.5, "close": 10.2, "volume": 400},
+            ])
+            self.assertEqual(store.premarket_volume("AAPL", as_of_ms=ms(14, 4, 1)), 300)
+
+    def test_premarket_volume_is_unavailable_before_0400_or_without_current_session_candles(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = CandleStore(Path(directory) / "candles.sqlite3")
+            store.save([{
+                "symbol": "AAPL", "candle_time_ms": ms(13, 9, 30),
+                "open": 10.0, "high": 10.5, "low": 9.5, "close": 10.2, "volume": 100,
+            }])
+            self.assertIsNone(store.premarket_volume("AAPL", as_of_ms=ms(14, 3, 59)))
+            self.assertIsNone(store.premarket_volume("AAPL", as_of_ms=ms(14, 4, 0)))
+
     def test_rvol_requires_two_comparable_historical_sessions(self):
         with tempfile.TemporaryDirectory() as directory:
             store = CandleStore(Path(directory) / "candles.sqlite3")
