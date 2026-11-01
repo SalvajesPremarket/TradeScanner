@@ -38,8 +38,8 @@ _universe_cache: dict[str, Any] | None = None
 _universe_cached_at = 0.0
 _universe_lock = threading.Lock()
 _cycle_lock = threading.Lock()
-_HISTORY_MAX_INFLIGHT = 8
-_history_fetch_semaphore = threading.BoundedSemaphore(8)
+_HISTORY_MAX_INFLIGHT = 12
+_history_fetch_semaphore = threading.BoundedSemaphore(12)
 _history_inflight_symbols: set[str] = set()
 _history_inflight_lock = threading.Lock()
 _history_last_attempt_at: dict[str, float] = {}
@@ -947,10 +947,7 @@ def run_scan_cycle(
                         status = history_status.get(row["symbol"], {})
                         count = int(status.get("count", 0))
                         latest_candle_time_ms = status.get("latest_candle_time_ms")
-                        if count < 35 or (
-                            enabled_strategies
-                            and _history_lags_quote(row, latest_candle_time_ms)
-                        ):
+                        if count < 35 or _history_lags_quote(row, latest_candle_time_ms):
                             missing_history.append(row)
                         elif count >= 35:
                             candle_state["history_symbols_skipped_with_cache"] += 1
@@ -967,8 +964,11 @@ def run_scan_cycle(
                             for cfg in scan_configs
                         )
                     volume = row.get("volume") if isinstance(row.get("volume"), (int, float)) else -1
+                    # With no strategy active, prioritize low-volume symbols so
+                    # the interface's cumulative-volume filter gets current bars.
+                    volume_priority = volume if enabled_strategies else -volume
                     abs_gap = abs(gap) if isinstance(gap, (int, float)) else -1
-                    return (fresh, strategy_fit, volume, abs_gap)
+                    return (fresh, strategy_fit, volume_priority, abs_gap)
 
                 # JeanLong evaluates every fresh candidate with 1-minute OHLCV.
                 # Backfill up to the in-flight ceiling each cycle; otherwise the
@@ -984,9 +984,9 @@ def run_scan_cycle(
                             if row["symbol"] not in _history_inflight_symbols
                             and now_monotonic - _history_last_attempt_at.get(row["symbol"], 0.0)
                             >= _HISTORY_REFRESH_INTERVAL_SECONDS
-                        ][:8]
+                        ][:12]
                 else:
-                    candidates = ordered_candidates[:8]
+                    candidates = ordered_candidates[:12]
                 candle_state["history_candidates_eligible"] = len(missing_history)
                 candle_state["history_candidates_deferred"] = max(0, len(missing_history) - len(candidates))
                 if history_fetch in {get_price_history, _get_multi_session_minute_history}:
