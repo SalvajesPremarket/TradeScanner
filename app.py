@@ -625,7 +625,7 @@ def quote_status(symbol: str):
         quote = next((row for row in rows if str(row.get("symbol", "")).upper() == normalized), None)
         if not isinstance(quote, dict) or not isinstance(quote.get("price"), (int, float)) or quote["price"] <= 0:
             raise HTTPException(status_code=503, detail="Schwab no devolvió una cotización válida para este símbolo.")
-        stamp = quote.get("trade_time_ms") or quote.get("quote_time_ms")
+        stamp = quote.get("quote_time_ms") or quote.get("trade_time_ms")
         if not isinstance(stamp, (int, float)) or isinstance(stamp, bool) or stamp <= 0:
             raise HTTPException(status_code=503, detail="Schwab no proporcionó la hora de la cotización.")
         age = time.time() - float(stamp) / 1000.0
