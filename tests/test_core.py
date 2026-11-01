@@ -36,6 +36,17 @@ class NormalizeSchwabQuotesTests(unittest.TestCase):
         self.assertIsNone(rows[0]["float_shares"])
         self.assertIsNone(rows[0]["rvol"])
 
+    def test_normalizes_last_trade_timestamp_for_session_volume(self):
+        import time
+        now_ms = int(time.time() * 1000)
+        rows = normalize_schwab_quotes({
+            "AAPL": {"quote": {
+                "lastPrice": 10, "quoteTime": now_ms, "tradeTime": now_ms - 30_000,
+            }, "reference": {}},
+        })
+        self.assertEqual(rows[0]["quote_time_ms"], now_ms)
+        self.assertEqual(rows[0]["trade_time_ms"], now_ms - 30_000)
+
     def test_quote_freshness_requires_recent_provider_timestamp(self):
         import time
         now_ms = int(time.time() * 1000)
