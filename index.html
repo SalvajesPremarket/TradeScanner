@@ -135,7 +135,10 @@
     .simple-table{color:#c9deea}
     .simple-table td,.simple-table th{padding:10px;border-bottom:1px solid #1b3447;font-size:11px}
     .simple-table th{color:#83b1c7;background:#102334;letter-spacing:.6px}
-    #chart-svg{border:1px solid #24465b!important;border-radius:9px;background:linear-gradient(180deg,#081724,#06101a)!important}
+    #chart-svg{border:1px solid #24465b!important;border-radius:9px;background:linear-gradient(180deg,#081724,#06101a)!important}    .chart-live-strip{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin:0 0 12px;padding:11px 13px;border:1px solid #24465b;border-radius:8px;background:#071522}
+    .chart-live-price{font-size:23px;font-weight:850;font-variant-numeric:tabular-nums;color:#e5faff}
+    .chart-live-state{font-size:10px;font-weight:800;letter-spacing:.7px;color:#ffd479}
+    .chart-live-state.is-live{color:#35e6b1}
 
     /* Área interior del gráfico: blanco hueso; la tabla OHLC conserva el tema general. */
     #integrated-chart #chart-svg{background:#f5f1e8!important;border-color:#d5cbbb!important}
@@ -240,6 +243,7 @@
       <div class="panel-head"><h2>GRÁFICOS · VELAS REALES DE SCHWAB</h2><span class="muted">Indicadores técnicos</span></div>
       <div class="tab-body">
         <form id="chart-form" class="tools"><label class="field" style="min-width:150px;flex:1">Ticker<input id="chart-symbol" maxlength="15" value="AAPL" required></label><label class="field" style="width:150px">Timeframe<select id="chart-timeframe"><option value="1m">1 minuto</option><option value="5m">5 minutos</option><option value="15m">15 minutos</option><option value="30m">30 minutos</option><option value="1h">1 hora</option><option value="day">1D · Día</option><option value="week">1W · Semana</option></select></label><label class="field" style="width:130px">N.º de velas<input id="chart-limit" type="number" min="10" max="500" value="100"></label><button class="action" type="submit">Cargar velas</button></form>
+        <div class="chart-live-strip" aria-live="polite"><div><div class="muted">ÚLTIMO PRECIO DE SCHWAB</div><div id="chart-live-price" class="chart-live-price">—</div></div><div id="chart-live-state" class="chart-live-state">SIN COTIZACIÓN EN VIVO</div></div>
         <div id="chart-message" class="tab-message">El gráfico mostrará únicamente velas que estén guardadas. No se inventarán precios.</div>
         <svg id="chart-svg" viewBox="0 0 1000 500" width="100%" role="img" aria-label="Gráfico de velas de Schwab" style="display:block;min-height:260px;border:1px solid #24465b;background:#eef2f5;margin-bottom:14px"><text x="500" y="160" text-anchor="middle" fill="#718096" font-size="14">Carga velas guardadas para mostrar el gráfico</text></svg>
         <div class="table-wrap"><table class="simple-table"><thead><tr><th>FECHA</th><th>OPEN</th><th>HIGH</th><th>LOW</th><th>CLOSE</th><th>VOLUMEN</th></tr></thead><tbody id="chart-rows"><tr><td colspan="6">Introduce un ticker y carga sus velas.</td></tr></tbody></table></div>      </div>
@@ -1142,7 +1146,7 @@
       }
       return result;
     }
-    function drawCandles(candles) {
+    function drawCandles(candles, liveQuote = null) {
       const svg = document.getElementById("chart-svg");
       const ns = "http://www.w3.org/2000/svg";
       svg.replaceChildren();
@@ -1169,7 +1173,8 @@
       const volumes=valid.map(c=>Math.max(0,Number(c.volume)||0));
       const left=65,right=910,step=(right-left)/valid.length,xAt=i=>left+step*(i+.5);
       const priceTop=24,priceBottom=280,macdTop=310,macdBottom=395,volTop=422,volBottom=480;
-      const allPrice=[...valid.map(c=>Number(c.low)),...valid.map(c=>Number(c.high)),...ema3,...ema9,...ema20,...ema50,...ema200,...bbUpper.filter(v=>v!==null),...bbLower.filter(v=>v!==null)];
+      const allPrice=[...valid.map(c=>Number(c.low)),...valid.map(c=>Number(c.high)),...ema3,...ema9,...ema20,...ema50,...ema200,...bbUpper.filter(v=>v!==null),...bbLower.filter(v=>v!==null)];      const livePrice = liveQuote && Number.isFinite(Number(liveQuote.price)) && Number(liveQuote.price) > 0 ? Number(liveQuote.price) : null;
+      if (livePrice !== null) allPrice.push(livePrice);
       const min=Math.min(...allPrice),max=Math.max(...allPrice),span=max-min||1;
       const yPrice=v=>priceBottom-(v-min)/span*(priceBottom-priceTop);
       const grid="#d7dee5";
@@ -1211,7 +1216,57 @@
       const formatCandleTime=c=>c.candle_time_ms?new Intl.DateTimeFormat("es",timeOptions).format(new Date(Number(c.candle_time_ms))):"—";
       const tickCount=Math.min(6,valid.length);
       for(let t=0;t<tickCount;t++){const i=Math.round(t*(valid.length-1)/Math.max(1,tickCount-1));const x=xAt(i);add("line",{x1:x,y1:volBottom+2,x2:x,y2:volBottom+6,stroke:"#7b8792","stroke-width":1});label(x,496,formatCandleTime(valid[i]),"middle");}
-      label(right+9,14,"PRECIO","start","#344454");
+      label(right+9,14,"PRECIO","start","#344454");      if (livePrice !== null) {
+        const liveY = yPrice(livePrice);
+        add("line",{x1:left,y1:liveY,x2:right,y2:liveY,stroke:"#0891b2","stroke-width":1.8,"stroke-dasharray":"6 4",opacity:.95});
+        add("circle",{cx:right,cy:liveY,r:4,fill:"#0891b2",stroke:"#ffffff","stroke-width":1.5});
+        label(right+9,Math.max(priceTop+10,Math.min(priceBottom-3,liveY-5)),"$"+livePrice.toFixed(2),"start","#087e9c");
+      }
+    }
+
+    let chartQuoteTimer = null;
+    let chartQuoteSequence = 0;
+    let chartQuoteInFlight = false;
+    let chartLiveQuote = null;
+
+    function stopChartQuoteUpdates() {
+      if (chartQuoteTimer !== null) window.clearInterval(chartQuoteTimer);
+      chartQuoteTimer = null;
+      chartQuoteSequence += 1;
+      chartQuoteInFlight = false;
+      chartLiveQuote = null;
+    }
+    async function refreshChartQuote(symbol, sequence) {
+      if (chartQuoteInFlight || sequence !== chartQuoteSequence) return;
+      chartQuoteInFlight = true;
+      try {
+        const quote = await readJson(await fetch("/api/quote/" + encodeURIComponent(symbol), {cache:"no-store"}));
+        if (sequence !== chartQuoteSequence) return;
+        chartLiveQuote = quote;
+        document.getElementById("chart-live-price").textContent = "$" + Number(quote.price).toFixed(2);
+        const stateNode = document.getElementById("chart-live-state");
+        const age = Math.max(0, Number(quote.quote_age_seconds) || 0);
+        stateNode.classList.toggle("is-live", quote.is_live === true);
+        stateNode.textContent = quote.is_live === true
+          ? "LIVE · SCHWAB · " + age.toFixed(1) + " s"
+          : "ÚLTIMA COTIZACIÓN · " + age.toFixed(0) + " s · NO CONFIRMADA EN VIVO";
+        stateNode.title = "Hora del proveedor: " + new Date(Number(quote.quote_time_ms)).toLocaleString("es", {timeZone:"America/New_York"}) + " ET";
+        drawCandles(chartRows, chartLiveQuote);
+      } catch (error) {
+        if (sequence !== chartQuoteSequence) return;
+        const stateNode = document.getElementById("chart-live-state");
+        stateNode.classList.remove("is-live");
+        stateNode.textContent = "SIN COTIZACIÓN EN VIVO · " + apiMessage(error);
+        stateNode.title = "No se muestra un precio antiguo como si fuera actual.";
+      } finally {
+        if (sequence === chartQuoteSequence) chartQuoteInFlight = false;
+      }
+    }
+    function startChartQuoteUpdates(symbol) {
+      stopChartQuoteUpdates();
+      const sequence = chartQuoteSequence;
+      void refreshChartQuote(symbol, sequence);
+      chartQuoteTimer = window.setInterval(() => void refreshChartQuote(symbol, sequence), 2000);
     }
 
     async function loadChartForSymbol(rawSymbol) {
@@ -1226,7 +1281,7 @@
       try {
         const payload = await readJson(await fetch("/api/candles/" + encodeURIComponent(symbol) + "?limit=" + limit + "&timeframe=" + encodeURIComponent(timeframe),{cache:"no-store"}));
         chartRows = payload.candles || [];
-        drawCandles(chartRows);
+        drawCandles(chartRows, chartLiveQuote);
         if (!chartRows.length) {
           const tr = document.createElement("tr"), td = document.createElement("td"); td.colSpan=6; td.textContent="No hay velas guardadas para "+symbol+". No se muestran datos inventados."; tr.appendChild(td); body.appendChild(tr);
         } else for (const candle of chartRows) {
@@ -1237,11 +1292,18 @@
           body.appendChild(tr);
         }
         document.getElementById("chart-message").textContent = symbol + " · " + (payload.timeframe_label || timeframe) + ": " + chartRows.length + " velas recibidas de Schwab. " + (payload.source === "stored" ? "Datos guardados." : "Histórico solicitado al proveedor en vivo.") + " RVOL: " + (payload.rvol && payload.rvol.rvol != null ? payload.rvol.rvol : "sin datos suficientes");
+        startChartQuoteUpdates(symbol);
       } catch(error) { document.getElementById("chart-message").textContent = apiMessage(error); }
     }
     document.getElementById("chart-form").addEventListener("submit", event => {
       event.preventDefault();
       loadChartForSymbol(document.getElementById("chart-symbol").value);
+    });
+    document.getElementById("result-rows").addEventListener("click", event => {
+      const ticker = event.target.closest(".chart-ticker-link");
+      if (!ticker) return;
+      event.preventDefault();
+      loadChartForSymbol(ticker.textContent);
     });
 
     function readWatchlist() {
