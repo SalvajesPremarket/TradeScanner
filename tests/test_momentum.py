@@ -73,7 +73,7 @@ class MomentumScanTests(unittest.TestCase):
             result = scan(store.latest("TEST", limit=6000), {
                 "symbol": "TEST",
                 "quote_time_ms": quote_time_ms,
-                "quote_price": 10.5,
+                "quote_price": ema_before * 1.005,
                 "current_volume": 1_000_000,
                 "prev_close": 10.0,
                 "rvol": rvol["rvol"],
@@ -88,7 +88,32 @@ class MomentumScanTests(unittest.TestCase):
             self.assertGreater(result["metrics"]["macd_histogram"], 0)
             self.assertGreater(result["metrics"]["apertura_sobre_ema20"], 0)
 
-    def test_rejects_previous_session_candles_for_fresh_quote(self):
+    def test_premarket_uses_completed_prior_session_candles_with_live_quote(self):
+        candles = []
+        start = datetime(2026, 10, 29, 4, 0, tzinfo=ET)
+        closes = [10.0 + index * 0.01 for index in range(40)]
+        for index, close in enumerate(closes):
+            candles.append({
+                "candle_time_ms": int((start + timedelta(minutes=index)).timestamp() * 1000),
+                "open": close - 0.005, "high": close + 0.01,
+                "low": close - 0.01, "close": close, "volume": 1000,
+            })
+        ema20 = _ema(closes[:-1], 20)[-1]
+        result = scan(candles, {
+            "symbol": "TEST",
+            "quote_time_ms": candle_stamp(30, 4, 39),
+            "quote_price": ema20 * 1.005,
+            "current_volume": 1_000_000,
+            "prev_close": 10.0,
+            "rvol": 3.0,
+            "float_shares": 10_000_000,
+            "news": [],
+        }, {"news_required": False, "macd_require_positive_histogram": True, "timeframe": "1m"})
+        self.assertTrue(result["passed"], result["reasons"])
+        self.assertTrue(result["metrics"]["premarket_history_mode"])
+        self.assertGreater(result["metrics"]["apertura_sobre_ema20"], 0)
+
+    def test_regular_session_still_requires_quote_minute_candle(self):
         candles = []
         start = datetime(2026, 10, 29, 4, 0, tzinfo=ET)
         for index in range(40):
@@ -100,21 +125,21 @@ class MomentumScanTests(unittest.TestCase):
             })
         result = scan(candles, {
             "symbol": "TEST",
-            "quote_time_ms": candle_stamp(30, 4, 39),
+            "quote_time_ms": candle_stamp(30, 9, 30),
             "quote_price": 10.5,
             "current_volume": 1_000_000,
             "prev_close": 10.0,
             "rvol": 3.0,
             "float_shares": 10_000_000,
             "news": [],
-        })
+        }, {"news_required": False})
         self.assertFalse(result["passed"])
         self.assertIn(
             "velas: falta la vela de 1 minuto correspondiente a la cotización actual",
             result["reasons"],
         )
 
-    def test_uses_current_quote_minute_for_ema_and_macd(self):
+    def test_premarket_uses_live_quote_with_completed_candles_for_ema_macd(self):
         start = datetime(2026, 10, 30, 4, 0, tzinfo=ET)
         candles = []
         closes = [10.0 + index * 0.01 for index in range(49)]
