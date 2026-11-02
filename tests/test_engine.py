@@ -13,10 +13,10 @@ from tradescanner.snapshots import SnapshotStore
 
 
 class AutomaticEngineTests(unittest.TestCase):
-    def test_multi_session_strategy_history_requests_five_sessions(self):
+    def test_multi_session_strategy_history_requests_ten_days_for_rvol_coverage(self):
         with patch("tradescanner.engine.get_price_history", return_value={"candles": []}) as fetch:
             _get_multi_session_minute_history("AAPL")
-        fetch.assert_called_once_with("AAPL", period=5, frequency=1)
+        fetch.assert_called_once_with("AAPL", period=10, frequency=1)
 
     def test_scan_cycles_advance_persisted_cursor_in_batches(self):
         with tempfile.TemporaryDirectory() as directory:
