@@ -207,6 +207,24 @@ class CandleTests(unittest.TestCase):
             self.assertEqual(result["sessions_used"], 2)
             self.assertEqual(result["rvol"], 2.6667)
 
+    def test_rvol_uses_observed_quote_volume_before_first_current_session_candle(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = CandleStore(Path(directory) / "candles.sqlite3")
+            rows = []
+            for day, volumes in ((12, (50, 50)), (13, (100, 100))):
+                for minute, volume in zip((0, 1), volumes):
+                    rows.append({
+                        "symbol": "AAPL",
+                        "candle_time_ms": ms(day, 4, minute),
+                        "open": 10.0, "high": 10.5, "low": 9.5, "close": 10.2,
+                        "volume": volume,
+                    })
+            store.save(rows)
+            result = store.rvol("AAPL", as_of_ms=ms(14, 4, 1), current_volume=400)
+            self.assertEqual(result["current_volume"], 400)
+            self.assertEqual(result["sessions_used"], 2)
+            self.assertEqual(result["rvol"], 2.6667)
+
     def test_rvol_is_unavailable_without_prior_sessions(self):
         with tempfile.TemporaryDirectory() as directory:
             store = CandleStore(Path(directory) / "candles.sqlite3")
