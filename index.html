@@ -1078,11 +1078,23 @@
             + " · señales: " + ((state.matches || []).length)
             + (state.evaluated_at ? " · " + state.evaluated_at : "");
           monitor.appendChild(summary);
+          const basicCandidates = evaluations.filter(result => result.basic_filter_passed);
+          const basicSummary = document.createElement("p");
+          basicSummary.textContent = "BÚSQUEDA BÁSICA · " + basicCandidates.length + "/" + evaluations.length
+            + " cumplen precio/GAP/volumen/FLOAT"
+            + (basicCandidates.length ? " · " + basicCandidates.slice(0, 8).map(result => result.symbol).join(", ") : "");
+          monitor.appendChild(basicSummary);
+          const strategySummary = document.createElement("p");
+          strategySummary.textContent = "JEANLONG · " + evaluations.filter(result => result.passed).length
+            + " señales aprobadas · " + basicCandidates.filter(result => !result.passed).length
+            + " candidatos básicos rechazados por condiciones adicionales";
+          monitor.appendChild(strategySummary);
           for (const result of evaluations.slice(0, 3)) {
             const item = document.createElement("p");
             const reasons = (result.reasons || []).slice(0, 4).join(" | ");
             const metrics = result.metrics || {};
-            item.textContent = result.symbol + (result.passed ? " · CUMPLE" : " · descartada")
+            const layer = result.basic_filter_passed ? "FILTROS BÁSICOS OK" : "FUERA DE FILTROS BÁSICOS";
+            item.textContent = result.symbol + " · " + layer + (result.passed ? " · JEANLONG OK" : " · JEANLONG DESCARTA")
               + " · gap " + (metrics.gap_pct == null ? "—" : metrics.gap_pct + "%")
               + " · RVol " + (metrics.rvol == null ? "—" : metrics.rvol + "x")
               + (reasons ? " · " + reasons : "");
