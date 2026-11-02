@@ -261,7 +261,7 @@ class CandleStore:
         if len(historical_totals) < 2:
             return {
                 "rvol": None,
-                "current_volume": current_volume,
+                "current_volume": current_total,
                 "average_volume": None,
                 "sessions_used": 0,
                 "as_of": as_of.isoformat(),
