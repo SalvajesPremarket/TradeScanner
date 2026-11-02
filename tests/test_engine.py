@@ -7,7 +7,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 from unittest.mock import patch
 
-from tradescanner.engine import _get_multi_session_minute_history, run_scan_cycle
+from tradescanner.engine import _get_multi_session_minute_history, _history_lags_quote, run_scan_cycle
 from tradescanner.schwab import SchwabAPIError
 from tradescanner.snapshots import SnapshotStore
 
@@ -17,6 +17,14 @@ class AutomaticEngineTests(unittest.TestCase):
         with patch("tradescanner.engine.get_price_history", return_value={"candles": []}) as fetch:
             _get_multi_session_minute_history("AAPL")
         fetch.assert_called_once_with("AAPL", period=10, frequency=1)
+
+    def test_premarket_prior_session_history_is_not_marked_stale(self):
+        ny = ZoneInfo("America/New_York")
+        quote_ms = int(datetime(2026, 11, 2, 8, 15, tzinfo=ny).timestamp() * 1000)
+        last_candle_ms = int(datetime(2026, 10, 30, 15, 59, tzinfo=ny).timestamp() * 1000)
+        self.assertFalse(_history_lags_quote({
+            "quote_is_fresh": True, "quote_time_ms": quote_ms,
+        }, last_candle_ms))
 
     def test_scan_cycles_advance_persisted_cursor_in_batches(self):
         with tempfile.TemporaryDirectory() as directory:
