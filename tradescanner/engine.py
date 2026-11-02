@@ -50,7 +50,7 @@ def _now() -> str:
 
 
 def _history_lags_quote(row: dict[str, Any], latest_candle_time_ms: int | None) -> bool:
-    """True when a fresh quote is more than two minutes ahead of stored OHLCV."""
+    """True when stored OHLCV is stale for the quote's market session."""
     quote_time_ms = row.get("quote_time_ms")
     if (
         row.get("quote_is_fresh") is not True
