@@ -162,7 +162,7 @@ class MomentumScanTests(unittest.TestCase):
         result = scan(candles, {
             "symbol": "TEST",
             "quote_time_ms": int((quote_minute + timedelta(seconds=30)).timestamp() * 1000),
-            "quote_price": 10.5,
+            "quote_price": ema_before * 1.005,
             "current_volume": 1_000_000,
             "prev_close": 10.0,
             "rvol": 3.0,
