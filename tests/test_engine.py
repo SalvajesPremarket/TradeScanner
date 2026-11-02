@@ -38,6 +38,7 @@ class AutomaticEngineTests(unittest.TestCase):
                 "SCHWAB_CLIENT_ID": "test-id",
                 "SCHWAB_CLIENT_SECRET": "test-secret",
                 "SCHWAB_REFRESH_TOKEN": "test-refresh",
+                "TRADESCANNER_BATCHES_PER_CYCLE": "1",
             }):
                 first = run_scan_cycle(
                     store, universe_loader=lambda: {"symbols": symbols}, quote_fetcher=fetch
@@ -53,6 +54,41 @@ class AutomaticEngineTests(unittest.TestCase):
             self.assertEqual(requested_batches[1], symbols[100:200])
             self.assertEqual(store.stats()["snapshot_count"], 200)
             self.assertEqual(store.get_state("cycles_completed"), 2)
+
+    def test_default_scan_cycle_sweeps_eight_quote_batches(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = SnapshotStore(Path(directory) / "engine.sqlite3")
+            symbols = [f"SYM{i:04d}" for i in range(900)]
+            requested_batches = []
+            from threading import Lock
+            calls_lock = Lock()
+
+            def fetch(batch):
+                with calls_lock:
+                    requested_batches.append(list(batch))
+                return {
+                    symbol: {
+                        "quote": {"lastPrice": 10.0, "closePrice": 9.0},
+                        "reference": {"description": symbol},
+                    }
+                    for symbol in batch
+                }
+
+            with patch.dict(os.environ, {
+                "SCHWAB_CLIENT_ID": "test-id",
+                "SCHWAB_CLIENT_SECRET": "test-secret",
+                "SCHWAB_REFRESH_TOKEN": "test-refresh",
+                "TRADESCANNER_BATCHES_PER_CYCLE": "8",
+            }):
+                result = run_scan_cycle(
+                    store, universe_loader=lambda: {"symbols": symbols}, quote_fetcher=fetch
+                )
+
+            self.assertEqual(result["cursor"], 800)
+            self.assertEqual(result["requested_count"], 800)
+            self.assertEqual(result["received_count"], 800)
+            self.assertEqual(store.stats()["snapshot_count"], 800)
+            self.assertEqual(sorted(len(batch) for batch in requested_batches), [100] * 8)
 
     def test_stale_quotes_do_not_refresh_market_data_connectivity(self):
         with tempfile.TemporaryDirectory() as directory:
