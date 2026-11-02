@@ -265,6 +265,27 @@ def _evaluate_original_scan_strategy(store: SnapshotStore, batch: list[str], str
             "news": [],
         }
         quote_checks = quote_only_checks(context, cfg)
+        # Keep the Finviz-like discovery layer separate from the full JeanLong
+        # signal. Basic discovery means price, GAP, volume and FLOAT only;
+        # session/EMA/MACD/RVOL/news remain strategy-level requirements.
+        basic_filter_names = ("precio", "gap_pct", "volumen_minimo", "float")
+        basic_filter_checks = {
+            name: quote_checks[name]
+            for name in basic_filter_names
+            if name in quote_checks
+        }
+        basic_filter_passed = (
+            len(basic_filter_checks) == len(basic_filter_names)
+            and all(check[0] for check in basic_filter_checks.values())
+        )
+        basic_filter_reasons = [
+            f"{name}: {reason}"
+            for name, (passed, _value, reason) in basic_filter_checks.items()
+            if not passed
+        ]
+        basic_filter_metrics = {
+            name: value for name, (_passed, value, _reason) in basic_filter_checks.items()
+        }
         quote_reasons = [
             f"{name}: {reason}"
             for name, (passed, _value, reason) in quote_checks.items()
@@ -324,6 +345,9 @@ def _evaluate_original_scan_strategy(store: SnapshotStore, batch: list[str], str
             "timeframe": timeframe,
             "data_source": "schwab_quotes_and_historical_candles",
             "quote_price": row.get("price"),
+            "basic_filter_passed": basic_filter_passed,
+            "basic_filter_reasons": basic_filter_reasons,
+            "basic_filter_metrics": basic_filter_metrics,
             "candles_available": len(candles),
             "rvol_sessions_used": rvol_data.get("sessions_used", 0),
             "rvol_as_of": rvol_data.get("as_of"),
@@ -339,6 +363,9 @@ def _evaluate_original_scan_strategy(store: SnapshotStore, batch: list[str], str
         "processed_quotes": len(evaluations),
         "evaluations": evaluations,
         "matches": [item["symbol"] for item in evaluations if item.get("passed")],
+        "basic_filter_matches": [item["symbol"] for item in evaluations if item.get("basic_filter_passed")],
+        "basic_filter_count": sum(1 for item in evaluations if item.get("basic_filter_passed")),
+        "strategy_signal_count": sum(1 for item in evaluations if item.get("passed")),
         "skipped": skipped,
         "note": "Programa original scan(df, ctx) evaluado con OHLCV histórico de Schwab y contexto real; no ejecuta el código subido ni coloca órdenes.",
     }
