@@ -724,22 +724,10 @@
       let sourceRows = [];
       let scopeLabel = "Sin filtros ni estrategia activa · tabla vacía";
       if (activeStrategies.length) {
-        const passedSymbols = new Set();
-        for (const strategy of activeStrategies) {
-          const scan = activeStrategyStates[strategy.id] || {};
-          const evaluations = Array.isArray(scan.evaluations) ? scan.evaluations : [];
-          for (const evaluation of evaluations) {
-            if (evaluation && evaluation.passed && evaluation.symbol) {
-              passedSymbols.add(String(evaluation.symbol).toUpperCase());
-            }
-          }
-        }
-        if (!passedSymbols.size && activeStrategies.length === 1 && activeStrategyId === activeStrategies[0].id &&
-            activeStrategySymbols instanceof Set && activeStrategySymbols.size) {
-          for (const symbol of activeStrategySymbols) passedSymbols.add(String(symbol).toUpperCase());
-        }
-        sourceRows = allResults.filter(item => passedSymbols.has(String(item.symbol || "").toUpperCase()));
-        scopeLabel = "Estrategias activas: " + activeStrategies.length + " · " + passedSymbols.size + " símbolos aprobados";
+        // The radar is an independent quote/snapshot view. Never hide all market
+        // observations just because an active strategy has zero approved signals.
+        sourceRows = allResults;
+        scopeLabel = "Radar independiente · " + activeStrategies.length + " estrategia(s) activa(s)";
       } else if (filtersActive) {
         sourceRows = allResults;
         scopeLabel = "Filtros de interfaz activos";
@@ -1081,7 +1069,7 @@
           const basicCandidates = evaluations.filter(result => result.basic_filter_passed);
           const basicSummary = document.createElement("p");
           basicSummary.textContent = "BÚSQUEDA BÁSICA · " + basicCandidates.length + "/" + evaluations.length
-            + " cumplen precio/GAP/volumen/FLOAT"
+            + " del lote evaluado cumplen precio/GAP/volumen/FLOAT · muestra parcial del universo"
             + (basicCandidates.length ? " · " + basicCandidates.slice(0, 8).map(result => result.symbol).join(", ") : "");
           monitor.appendChild(basicSummary);
           const strategySummary = document.createElement("p");
