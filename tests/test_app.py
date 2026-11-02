@@ -253,6 +253,10 @@ class AppEntrypointTests(unittest.TestCase):
         self.assertGreater(strategies_position, chart_position)
         self.assertIn('button.addEventListener("click", () => showTab(button.dataset.tab))', html)
         self.assertIn("function showTab(name)", html)
+        self.assertIn('BÚSQUEDA BÁSICA · ', html)
+        self.assertIn('JEANLONG · ', html)
+        self.assertIn('FILTROS BÁSICOS OK', html)
+        self.assertIn('basic_filter_passed', html)
 
     def test_secondary_tabs_have_real_controls_and_data_endpoints(self):
         html = (app_module.ROOT / "index.html").read_text(encoding="utf-8")
