@@ -239,7 +239,7 @@ class CandleStore:
             current_total = sum(volume for minute, volume in current_bars if minute <= cutoff)
         else:
             return {
-                "rvol": None, "current_volume": None, "average_volume": None,
+                "rvol": None, "current_volume": 0, "average_volume": None,
                 "sessions_used": 0, "as_of": as_of.isoformat(),
             }
 
