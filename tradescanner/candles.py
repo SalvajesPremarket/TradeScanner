@@ -195,11 +195,18 @@ class CandleStore:
             return None
         return int(row[0])
 
-    def rvol(self, symbol: str, *, as_of_ms: int | float | None = None) -> dict[str, Any]:
+    def rvol(
+        self,
+        symbol: str,
+        *,
+        as_of_ms: int | float | None = None,
+        current_volume: int | float | None = None,
+    ) -> dict[str, Any]:
         """Calculate cumulative intraday RVOL against prior sessions at the same ET minute.
 
-        When as_of_ms is supplied, never treat an old candle session as the current
-        session. This matters when today's extended-hours candles have not arrived.
+        A live Schwab quote may arrive before Schwab publishes today's first 1m candle.
+        In that case, use its observed cumulative volume as the numerator while keeping
+        the historical same-time-of-day baseline entirely candle-derived.
         """
         candles = self.latest(symbol)
         if not candles:
@@ -218,12 +225,23 @@ class CandleStore:
             cutoff = max(minute for minute, _ in sessions[current_day])
             as_of = datetime.fromtimestamp(candles[-1]["candle_time_ms"] / 1000, MARKET_TZ)
         current_bars = sessions.get(current_day, [])
-        if not current_bars:
+        observed_volume = (
+            float(current_volume)
+            if isinstance(current_volume, (int, float))
+            and not isinstance(current_volume, bool)
+            and math.isfinite(float(current_volume))
+            and float(current_volume) >= 0
+            else None
+        )
+        if observed_volume is not None:
+            current_total = observed_volume
+        elif current_bars:
+            current_total = sum(volume for minute, volume in current_bars if minute <= cutoff)
+        else:
             return {
-                "rvol": None, "current_volume": 0, "average_volume": None,
+                "rvol": None, "current_volume": None, "average_volume": None,
                 "sessions_used": 0, "as_of": as_of.isoformat(),
             }
-        current_volume = sum(volume for minute, volume in current_bars if minute <= cutoff)
 
         previous_days = sorted((day for day in sessions if day < current_day), reverse=True)[:5]
         historical_totals: list[int] = []
@@ -249,10 +267,10 @@ class CandleStore:
                 "as_of": as_of.isoformat(),
             }
         average = sum(historical_totals) / len(historical_totals)
-        value = current_volume / average if average > 0 else None
+        value = current_total / average if average > 0 else None
         return {
             "rvol": round(value, 4) if value is not None else None,
-            "current_volume": current_volume,
+            "current_volume": current_total,
             "average_volume": round(average, 2),
             "sessions_used": len(historical_totals),
             "as_of": as_of.isoformat(),
