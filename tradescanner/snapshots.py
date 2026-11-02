@@ -8,6 +8,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
+from concurrent.futures import ThreadPoolExecutor
 
 from tradescanner.core import normalize_schwab_quotes
 from tradescanner.db import connect as db_connect, is_postgres
@@ -204,12 +205,26 @@ def collect_snapshots(
     if not normalized:
         raise ValueError("Provide at least one ticker symbol.")
     fetch = quote_fetcher or get_quotes
-    all_rows: list[dict[str, Any]] = []
-    for start in range(0, len(normalized), BATCH_SIZE):
-        payload = fetch(normalized[start:start + BATCH_SIZE])
+    batches = [
+        normalized[start:start + BATCH_SIZE]
+        for start in range(0, len(normalized), BATCH_SIZE)
+    ]
+
+    def fetch_and_normalize(batch: list[str]) -> list[dict[str, Any]]:
+        payload = fetch(batch)
         if not isinstance(payload, dict):
             raise ValueError("Quote provider returned an invalid payload.")
-        all_rows.extend(normalize_schwab_quotes(payload))
+        return normalize_schwab_quotes(payload)
+
+    # A bounded worker pool overlaps Schwab network latency without exceeding
+    # the provider's 100-symbol request limit or creating unbounded concurrency.
+    workers = min(4, len(batches))
+    with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="schwab-quotes") as pool:
+        all_rows = [
+            row
+            for batch_rows in pool.map(fetch_and_normalize, batches)
+            for row in batch_rows
+        ]
     saved = store.save(all_rows)
     return {
         "requested_count": len(normalized),
