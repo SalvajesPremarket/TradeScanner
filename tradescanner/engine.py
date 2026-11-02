@@ -786,12 +786,20 @@ def run_scan_cycle(
 
         saved_cursor = target_store.get_state("universe_cursor", 0)
         cursor = int(saved_cursor) % len(symbols)
-        batch = symbols[cursor:cursor + BATCH_SIZE]
+        # Schwab limits each quote request to 100 symbols. Sweep eight requests
+        # per cycle so the complete 7k-symbol universe is refreshed in minutes,
+        # not dozens of 30-second cycles. Keep the cap configurable and bounded.
+        try:
+            batches_per_cycle = max(1, min(8, int(os.getenv("TRADESCANNER_BATCHES_PER_CYCLE", "8"))))
+        except ValueError:
+            batches_per_cycle = 8
+        cycle_batch_size = BATCH_SIZE * batches_per_cycle
+        batch = symbols[cursor:cursor + cycle_batch_size]
         if len(batch) < BATCH_SIZE and cursor + len(batch) < len(symbols):
             batch.extend(symbols[:BATCH_SIZE - len(batch)])
         started = time.monotonic()
         cycle_started_at = _now()
-        logger.warning("Scan cycle stage=schwab_quotes_started batch_size=%s", len(batch))
+        logger.warning("Scan cycle stage=schwab_quotes_started batch_size=%s provider_requests=%s", len(batch), (len(batch) + BATCH_SIZE - 1) // BATCH_SIZE)
         result = collect_snapshots(batch, target_store, quote_fetcher or get_quotes)
         logger.warning("Scan cycle stage=schwab_quotes_finished received=%s saved=%s", result.get("received_count", 0), result.get("snapshots_saved", 0))
         if result["received_count"] <= 0 or result["snapshots_saved"] <= 0:
