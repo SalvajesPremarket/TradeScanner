@@ -62,6 +62,14 @@ def _history_lags_quote(row: dict[str, Any], latest_candle_time_ms: int | None) 
         return False
     if latest_candle_time_ms is None:
         return True
+    quote_local = datetime.fromtimestamp(float(quote_time_ms) / 1000, ZoneInfo("America/New_York"))
+    latest_local = datetime.fromtimestamp(float(latest_candle_time_ms) / 1000, ZoneInfo("America/New_York"))
+    # Before 09:30 ET, no same-minute regular-session candle is expected. The
+    # last completed prior-session bar remains a valid EMA/MACD reference.
+    if quote_local.hour * 60 + quote_local.minute < 9 * 60 + 30:
+        if latest_local > quote_local:
+            return True
+        return (quote_local.date() - latest_local.date()).days > 4
     return float(quote_time_ms) - latest_candle_time_ms > _HISTORY_MAX_QUOTE_LAG_MS
 
 
@@ -276,7 +284,11 @@ def _evaluate_original_scan_strategy(store: SnapshotStore, batch: list[str], str
             # Only quote-qualified symbols need indicator history and time-of-day RVOL.
             enough_candles = len(candles) >= int(cfg.get("min_bars", 35))
             rvol_data = (
-                candle_store.rvol(symbol, as_of_ms=row.get("quote_time_ms"))
+                candle_store.rvol(
+                    symbol,
+                    as_of_ms=row.get("quote_time_ms"),
+                    current_volume=row.get("volume"),
+                )
                 if enough_candles else {"rvol": None, "sessions_used": 0}
             )
             context["rvol"] = rvol_data.get("rvol")
@@ -959,7 +971,9 @@ def run_scan_cycle(
                             try:
                                 rvol_sessions = int(
                                     candle_store.rvol(
-                                        row["symbol"], as_of_ms=quote_stamp
+                                        row["symbol"],
+                                        as_of_ms=quote_stamp,
+                                        current_volume=volume,
                                     ).get("sessions_used", 0) or 0
                                 )
                             except Exception:
