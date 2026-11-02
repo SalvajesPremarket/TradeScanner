@@ -257,6 +257,10 @@ class AppEntrypointTests(unittest.TestCase):
         self.assertIn('JEANLONG · ', html)
         self.assertIn('FILTROS BÁSICOS OK', html)
         self.assertIn('basic_filter_passed', html)
+        self.assertIn('sourceRows = allResults;', html)
+        self.assertIn('Radar independiente · ', html)
+        self.assertNotIn('allResults.filter(item => passedSymbols.has', html)
+        self.assertIn('del lote evaluado cumplen precio/GAP/volumen/FLOAT · muestra parcial del universo', html)
 
     def test_secondary_tabs_have_real_controls_and_data_endpoints(self):
         html = (app_module.ROOT / "index.html").read_text(encoding="utf-8")
