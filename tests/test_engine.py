@@ -403,7 +403,7 @@ class AutomaticEngineTests(unittest.TestCase):
             ]
             candle_rows = [
                 {"symbol": "AAPL", "price": 11.0, "volume": 100, "float_shares": None},
-                {"symbol": "MSFT", "price": 21.0, "volume": 200, "float_shares": 999999.0},
+                {"symbol": "MSFT", "price": 21.0, "volume": 50, "float_shares": 999999.0},
             ]
             fresh_rows = [
                 {"symbol": "AAPL", "quote_is_fresh": True},
