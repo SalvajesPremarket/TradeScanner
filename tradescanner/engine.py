@@ -26,8 +26,8 @@ logger.setLevel(logging.INFO)
 
 
 def _get_multi_session_minute_history(symbol: str) -> dict[str, Any]:
-    """Five sessions of one-minute extended-hours candles for indicators and RVOL."""
-    return get_price_history(symbol, period=5, frequency=1)
+    """Ten calendar days of one-minute extended-hours candles for indicators and RVOL."""
+    return get_price_history(symbol, period=10, frequency=1)
 
 
 _HISTORY_REFRESH_INTERVAL_SECONDS = 60.0
@@ -949,7 +949,29 @@ def run_scan_cycle(
                             < jeanlong_cfg.get("session_end", datetime.max.time())
                         ):
                             continue
-                        missing_history.append(row)
+                        status = history_status.get(row["symbol"], {})
+                        count = int(status.get("count", 0))
+                        latest_candle_time_ms = status.get("latest_candle_time_ms")
+                        # JeanLong needs at least two comparable prior sessions for
+                        # time-of-day RVOL. A merely non-empty 1m cache is not enough.
+                        rvol_sessions = 0
+                        if count >= 35 and not _history_lags_quote(row, latest_candle_time_ms):
+                            try:
+                                rvol_sessions = int(
+                                    candle_store.rvol(
+                                        row["symbol"], as_of_ms=quote_stamp
+                                    ).get("sessions_used", 0) or 0
+                                )
+                            except Exception:
+                                rvol_sessions = 0
+                        if (
+                            count < 35
+                            or _history_lags_quote(row, latest_candle_time_ms)
+                            or rvol_sessions < 2
+                        ):
+                            missing_history.append(row)
+                        else:
+                            candle_state["history_symbols_skipped_with_cache"] += 1
                 else:
                     for row in eligible:
                         status = history_status.get(row["symbol"], {})
