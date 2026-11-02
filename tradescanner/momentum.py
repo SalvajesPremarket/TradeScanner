@@ -145,15 +145,32 @@ def scan(candles: list[dict[str, Any]] | None, ctx: dict[str, Any], cfg: dict[st
         # yesterday's last candle or from a candle later than the observed quote.
         quote_time_ms = ctx.get("quote_time_ms")
         quote_time = valid[-1][0]
+        premarket_quote = False
         if isinstance(quote_time_ms, (int, float)) and not isinstance(quote_time_ms, bool) and isfinite(float(quote_time_ms)) and quote_time_ms > 0:
             quote_time = datetime.fromtimestamp(float(quote_time_ms) / 1000, ET)
             quote_minute = int(float(quote_time_ms) // 60000)
-            valid = [item for item in valid if int(item[0].timestamp() * 1000 // 60000) <= quote_minute]
-            if not valid or int(valid[-1][0].timestamp() * 1000 // 60000) != quote_minute:
-                out["metrics"]["vela_ultimo_timestamp"] = valid[-1][0].isoformat() if valid else None
-                out["metrics"]["quote_time"] = quote_time.isoformat()
-                out["reasons"].append("velas: falta la vela de 1 minuto correspondiente a la cotización actual")
-                return out
+            premarket_quote = quote_time.hour * 60 + quote_time.minute < 9 * 60 + 30
+            # Only use completed candles. Before the opening bell, the live Schwab
+            # quote is the current observation; a same-minute OHLCV candle may not
+            # exist yet and must not be fabricated.
+            if premarket_quote:
+                valid = [item for item in valid if int(item[0].timestamp() * 1000 // 60000) < quote_minute]
+                if not valid:
+                    out["metrics"]["quote_time"] = quote_time.isoformat()
+                    out["reasons"].append("velas: no hay histórico completo anterior a la cotización premarket")
+                    return out
+                if quote_time - valid[-1][0] > timedelta(days=4):
+                    out["metrics"]["vela_ultimo_timestamp"] = valid[-1][0].isoformat()
+                    out["metrics"]["quote_time"] = quote_time.isoformat()
+                    out["reasons"].append("velas: histórico intradía demasiado antiguo para evaluar premarket")
+                    return out
+            else:
+                valid = [item for item in valid if int(item[0].timestamp() * 1000 // 60000) <= quote_minute]
+                if not valid or int(valid[-1][0].timestamp() * 1000 // 60000) != quote_minute:
+                    out["metrics"]["vela_ultimo_timestamp"] = valid[-1][0].isoformat() if valid else None
+                    out["metrics"]["quote_time"] = quote_time.isoformat()
+                    out["reasons"].append("velas: falta la vela de 1 minuto correspondiente a la cotización actual")
+                    return out
         if len(valid) < int(config["min_bars"]):
             out["reasons"].append("velas: historial válido insuficiente")
             return out
@@ -196,16 +213,33 @@ def scan(candles: list[dict[str, Any]] | None, ctx: dict[str, Any], cfg: dict[st
             "sin sesiones intradía comparables para calcular RVol"
             if rvol is None else f"RVol < {config['rvol_min']}x",
         )
-        # Evaluate the latest candle's OPEN against EMA20 as it stood before that candle.
-        # This avoids requiring prior closes above EMA20 and avoids using the current candle close
-        # to move the reference EMA after the opening price was established.
-        ema20_at_open = ema20[-2]
-        open_distance_pct = (candle_open - ema20_at_open) / ema20_at_open * 100
-        ema_open_ok = 0 < open_distance_pct <= float(config["ema_open_max_distance_pct"])
+        # During premarket, evaluate the observed live quote against EMA20 from
+        # completed historical candles. During regular hours, preserve the original
+        # current-candle OPEN vs prior EMA20 rule.
+        if premarket_quote:
+            ema20_reference = ema20[-1]
+            reference_price = price
+            open_distance_pct = (reference_price - ema20_reference) / ema20_reference * 100
+            ema_open_ok = 0 < open_distance_pct <= float(config["ema_open_max_distance_pct"])
+            ema_reject_reason = (
+                "precio actual en o debajo de EMA20"
+                if open_distance_pct <= 0
+                else f"precio actual a más de {config['ema_open_max_distance_pct']}% sobre EMA20"
+            )
+        else:
+            ema20_reference = ema20[-2]
+            reference_price = candle_open
+            open_distance_pct = (reference_price - ema20_reference) / ema20_reference * 100
+            ema_open_ok = 0 < open_distance_pct <= float(config["ema_open_max_distance_pct"])
+            ema_reject_reason = (
+                "apertura en o debajo de EMA20"
+                if open_distance_pct <= 0
+                else f"apertura a más de {config['ema_open_max_distance_pct']}% sobre EMA20"
+            )
         checks["apertura_sobre_ema20"] = (
             ema_open_ok,
             round(open_distance_pct, 4),
-            "apertura en o debajo de EMA20" if open_distance_pct <= 0 else f"apertura a más de {config['ema_open_max_distance_pct']}% sobre EMA20"
+            ema_reject_reason,
         )
         macd = macd_line[-1]
         macd_histogram = macd - macd_signal[-1]
@@ -243,6 +277,8 @@ def scan(candles: list[dict[str, Any]] | None, ctx: dict[str, Any], cfg: dict[st
             out["metrics"][name] = value
             if not passed: out["reasons"].append(f"{name}: {reason}")
         out["metrics"]["ema20"] = round(ema20[-1], 4)
+        out["metrics"]["premarket_history_mode"] = premarket_quote
+        out["metrics"]["ema20_reference_price"] = round(reference_price, 4)
         out["metrics"]["macd_histogram"] = round(macd_histogram, 6)
         out["metrics"]["timeframe"] = str(config.get("timeframe", "1m"))
         out["metrics"]["volumen_hoy"] = int(today_volume)
