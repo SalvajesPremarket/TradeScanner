@@ -23,6 +23,7 @@ from tradescanner.float_provider import apply_cached_float, refresh_symbol_float
 from tradescanner.infisical_vault import is_configured as infisical_is_configured
 from tradescanner.engine import get_engine_status, record_engine_status, run_scan_cycle
 from tradescanner.snapshots import SnapshotStore, collect_snapshots
+from tradescanner.retention import prune_expired_market_data
 from tradescanner.strategies import (active_strategy, active_strategies, delete_strategy, strategy_matches, list_strategies, save_strategy, set_strategy_enabled)
 from tradescanner.universe import UniverseUnavailableError, load_symbol_universe
 from tradescanner.schwab_stream import start_schwab_stream, stop_schwab_stream
@@ -60,6 +61,10 @@ async def _automatic_scan_loop(stop: asyncio.Event, worker_id: str | None = None
         interval = 30
     worker_id = worker_id or uuid.uuid4().hex
     logger.warning("Automatic scan loop coroutine entered; interval_seconds=%s", interval)
+    consecutive_failures = 0
+    retry_delay = 0.0
+    last_maintenance = 0.0
+    maintenance_interval = 15 * 60
 
     while not stop.is_set():
         started = time.monotonic()
@@ -73,6 +78,15 @@ async def _automatic_scan_loop(stop: asyncio.Event, worker_id: str | None = None
             if not lease_acquired:
                 logger.info("Automatic scan skipped; another instance owns the scanner lease")
             else:
+                if time.monotonic() - last_maintenance >= maintenance_interval:
+                    retention = await asyncio.to_thread(prune_expired_market_data, lease_store)
+                    last_maintenance = time.monotonic()
+                    logger.info(
+                        "Market data retention finished; quote_rows_deleted=%s candle_rows_deleted=%s expired_remaining=%s",
+                        retention["quote_snapshots_deleted"],
+                        retention["intraday_candles_deleted"],
+                        retention["expired_quote_snapshots_remaining"] + retention["expired_intraday_candles_remaining"],
+                    )
                 result = await asyncio.to_thread(run_scan_cycle)
                 logger.info(
                     "Automatic scan cycle finished; status=%s cycles_completed=%s snapshots_saved=%s duration_seconds=%.3f",
@@ -81,17 +95,38 @@ async def _automatic_scan_loop(stop: asyncio.Event, worker_id: str | None = None
                     result.get("snapshots_saved", 0),
                     time.monotonic() - started,
                 )
+                if result.get("status") == "completed":
+                    consecutive_failures = 0
+                    retry_delay = 0.0
+        except DB_ERRORS as exc:
+            # A full/unavailable database cannot reliably store its own error status.
+            # Stop retrying at the normal 30-second cadence and back off instead.
+            consecutive_failures += 1
+            retry_delay = min(600.0, 30.0 * (2 ** min(consecutive_failures - 1, 5)))
+            logger.error(
+                "Automatic scan paused after database error; error_type=%s retry_in_seconds=%.0f",
+                type(exc).__name__, retry_delay,
+            )
         except Exception as exc:
             # Store and log only the exception class; never leak provider responses or secrets.
             logger.error("Automatic scan cycle failed; error_type=%s", type(exc).__name__)
             try:
                 record_engine_status(SnapshotStore(), status="error", last_error=type(exc).__name__)
-            except (OSError, RuntimeError) + DB_ERRORS:
-                pass
-        # Treat the configured interval as start-to-start cadence, not an
-        # additional sleep after a slow scan. Otherwise history calls add the
-        # full interval on top of every cycle and needlessly slow universe coverage.
-        remaining = max(0.0, interval - (time.monotonic() - started))
+            except (OSError, RuntimeError) + DB_ERRORS as status_exc:
+                consecutive_failures += 1
+                retry_delay = min(600.0, 30.0 * (2 ** min(consecutive_failures - 1, 5)))
+                logger.error(
+                    "Could not persist engine error status; error_type=%s retry_in_seconds=%.0f",
+                    type(status_exc).__name__, retry_delay,
+                )
+            else:
+                consecutive_failures += 1
+                retry_delay = min(600.0, 30.0 * (2 ** min(consecutive_failures - 1, 5)))
+        # Keep the configured start-to-start cadence after healthy cycles. On
+        # database failures, wait progressively longer (up to ten minutes) to
+        # avoid hammering a full Neon branch with writes that cannot succeed.
+        minimum_delay = max(float(interval), retry_delay)
+        remaining = max(0.0, minimum_delay - (time.monotonic() - started))
         if remaining > 0:
             try:
                 await asyncio.wait_for(stop.wait(), timeout=remaining)

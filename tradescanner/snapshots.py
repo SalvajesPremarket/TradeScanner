@@ -65,6 +65,47 @@ class SnapshotStore:
                 "CREATE INDEX IF NOT EXISTS idx_quote_snapshots_captured_symbol "
                 "ON quote_snapshots(captured_at DESC, symbol)"
             )
+            # Keep one current quote per symbol for the live scanner. Historical
+            # snapshots are sampled separately so faster scan cadence cannot grow
+            # the time-series table without bound.
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS quote_latest (
+                    symbol TEXT PRIMARY KEY,
+                    captured_at TEXT NOT NULL,
+                    data_source TEXT NOT NULL,
+                    payload_json TEXT NOT NULL
+                )
+                """
+            )
+            # Backfill only once on upgrade. Avoid a full historical-table scan
+            # on every process restart after the current-quote table is populated.
+            current_quote_count = connection.execute(
+                "SELECT COUNT(*) FROM quote_latest"
+            ).fetchone()[0]
+            if not current_quote_count and is_postgres(self.path):
+                connection.execute(
+                    """
+                    INSERT INTO quote_latest (symbol, captured_at, data_source, payload_json)
+                    SELECT DISTINCT ON (symbol) symbol, captured_at, data_source, payload_json
+                    FROM quote_snapshots
+                    ORDER BY symbol, captured_at DESC, id DESC
+                    """
+                )
+            elif not current_quote_count:
+                connection.execute(
+                    """
+                    INSERT INTO quote_latest (symbol, captured_at, data_source, payload_json)
+                    SELECT q.symbol, q.captured_at, q.data_source, q.payload_json
+                    FROM quote_snapshots q
+                    WHERE q.id = (
+                        SELECT previous.id FROM quote_snapshots previous
+                        WHERE previous.symbol = q.symbol
+                        ORDER BY previous.captured_at DESC, previous.id DESC
+                        LIMIT 1
+                    )
+                    """
+                )
             connection.execute(
                 "CREATE TABLE IF NOT EXISTS scanner_state ("
                 "state_key TEXT PRIMARY KEY, state_json TEXT NOT NULL)"
@@ -120,24 +161,52 @@ class SnapshotStore:
         if not rows:
             return 0
         captured_at = datetime.now(timezone.utc).isoformat()
-        records = []
+        history_cutoff = datetime.fromtimestamp(
+            datetime.now(timezone.utc).timestamp() - 4 * 60 * 60,
+            timezone.utc,
+        ).isoformat()
+        latest_records = []
+        history_records = []
         for row in rows:
             symbol = row.get("symbol")
             if not isinstance(symbol, str) or not symbol.strip():
                 continue
-            records.append((
-                captured_at,
-                symbol.strip().upper(),
-                str(row.get("data_source") or "unknown"),
-                json.dumps(row, separators=(",", ":"), allow_nan=False),
+            normalized_symbol = symbol.strip().upper()
+            data_source = str(row.get("data_source") or "unknown")
+            payload = json.dumps(row, separators=(",", ":"), allow_nan=False)
+            latest_records.append((normalized_symbol, captured_at, data_source, payload))
+            history_records.append((
+                captured_at, normalized_symbol, data_source, payload,
+                normalized_symbol, history_cutoff,
             ))
         with self._connect() as connection:
             connection.executemany(
-                "INSERT INTO quote_snapshots "
-                "(captured_at, symbol, data_source, payload_json) VALUES (?, ?, ?, ?)",
-                records,
+                """
+                INSERT INTO quote_latest (symbol, captured_at, data_source, payload_json)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(symbol) DO UPDATE SET
+                    captured_at = excluded.captured_at,
+                    data_source = excluded.data_source,
+                    payload_json = excluded.payload_json
+                WHERE excluded.captured_at >= quote_latest.captured_at
+                """,
+                latest_records,
             )
-        return len(records)
+            # Keep at most one historical observation per symbol per four hours.
+            # The live quote table above is still refreshed on every scan cycle.
+            connection.executemany(
+                """
+                INSERT INTO quote_snapshots
+                    (captured_at, symbol, data_source, payload_json)
+                SELECT ?, ?, ?, ?
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM quote_snapshots
+                    WHERE symbol = ? AND captured_at >= ?
+                )
+                """,
+                history_records,
+            )
+        return len(latest_records)
 
     def stats(self) -> dict[str, int | str | None]:
         with self._connect() as connection:
@@ -145,10 +214,16 @@ class SnapshotStore:
                 "SELECT COUNT(*), COUNT(DISTINCT symbol), MAX(captured_at) "
                 "FROM quote_snapshots"
             ).fetchone()
+            current_count, current_latest = connection.execute(
+                "SELECT COUNT(*), MAX(captured_at) FROM quote_latest"
+            ).fetchone()
         return {
             "snapshot_count": int(total),
             "symbols_seen": int(symbols),
             "latest_snapshot_at": latest,
+            "current_quote_count": int(current_count),
+            "latest_current_quote_at": current_latest,
+            "historical_sample_interval_seconds": 14400,
         }
 
     def latest_for_symbols(self, symbols: list[str]) -> list[dict[str, Any]]:
@@ -161,16 +236,7 @@ class SnapshotStore:
         placeholders = ",".join("?" for _ in normalized)
         with self._connect() as connection:
             rows = connection.execute(
-                f"""
-                SELECT payload_json FROM quote_snapshots AS current
-                WHERE current.symbol IN ({placeholders})
-                  AND captured_at = (
-                    SELECT MAX(previous.captured_at)
-                    FROM quote_snapshots AS previous
-                    WHERE previous.symbol = current.symbol
-                  )
-                ORDER BY symbol
-                """,
+                f"SELECT payload_json FROM quote_latest WHERE symbol IN ({placeholders}) ORDER BY symbol",
                 normalized,
             ).fetchall()
         return [_refresh_quote_freshness(json.loads(row[0])) for row in rows]
@@ -180,13 +246,8 @@ class SnapshotStore:
         with self._connect() as connection:
             rows = connection.execute(
                 """
-                SELECT payload_json FROM quote_snapshots AS current
-                WHERE captured_at = (
-                    SELECT MAX(previous.captured_at)
-                    FROM quote_snapshots AS previous
-                    WHERE previous.symbol = current.symbol
-                )
-                ORDER BY current.captured_at DESC, current.symbol LIMIT ?
+                SELECT payload_json FROM quote_latest
+                ORDER BY captured_at DESC, symbol LIMIT ?
                 """,
                 (bounded_limit,),
             ).fetchall()

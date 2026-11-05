@@ -1194,7 +1194,12 @@ def run_scan_cycle(
         target_store.set_state("cycles_completed", state["cycles_completed"])
         logger.warning("Scan cycle stage=cycle_returning status=completed cycles_completed=%s snapshots_saved=%s", state.get("cycles_completed"), state.get("snapshots_saved"))
         return {"status": "completed", **state}
-    except (SchwabConfigurationError, SchwabAPIError, ValueError, OSError) + DB_ERRORS as exc:
+    except DB_ERRORS as exc:
+        # Do not issue another write after a storage failure (especially DiskFull).
+        # The outer worker records the failure in logs and applies progressive backoff.
+        logger.error("Scan cycle stopped by database error; error_type=%s", type(exc).__name__)
+        raise
+    except (SchwabConfigurationError, SchwabAPIError, ValueError, OSError) as exc:
         target_store = store or SnapshotStore()
         # SchwabAPIError messages are sanitized by tradescanner.schwab:
         # they contain stage/status details but never credentials or provider bodies.

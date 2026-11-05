@@ -30,6 +30,17 @@ class SnapshotStoreTests(unittest.TestCase):
                 }
         self.assertIn("idx_quote_snapshots_captured_symbol", indexes)
 
+    def test_latest_quote_updates_every_cycle_but_history_is_sampled(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = SnapshotStore(Path(directory) / "snapshots.sqlite3")
+            self.assertEqual(store.save([{"symbol": "AAPL", "price": 10.0}]), 1)
+            self.assertEqual(store.save([{"symbol": "AAPL", "price": 11.0}]), 1)
+
+            self.assertEqual(store.stats()["snapshot_count"], 1)
+            self.assertEqual(store.stats()["current_quote_count"], 1)
+            self.assertEqual(store.latest()[0]["price"], 11.0)
+            self.assertEqual(store.latest_for_symbols(["AAPL"])[0]["price"], 11.0)
+
     def test_collection_batches_deduplicates_and_does_not_invent_missing_quotes(self):
         calls = []
         def fetch(batch):
