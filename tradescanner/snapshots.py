@@ -78,23 +78,34 @@ class SnapshotStore:
                 )
                 """
             )
-            # Backfill the current-quote table once when upgrading an existing DB.
-            connection.execute(
-                """
-                INSERT INTO quote_latest (symbol, captured_at, data_source, payload_json)
-                SELECT q.symbol, q.captured_at, q.data_source, q.payload_json
-                FROM quote_snapshots q
-                WHERE q.id = (
-                    SELECT previous.id FROM quote_snapshots previous
-                    WHERE previous.symbol = q.symbol
-                    ORDER BY previous.captured_at DESC, previous.id DESC
-                    LIMIT 1
+            # Backfill only once on upgrade. Avoid a full historical-table scan
+            # on every process restart after the current-quote table is populated.
+            current_quote_count = connection.execute(
+                "SELECT COUNT(*) FROM quote_latest"
+            ).fetchone()[0]
+            if not current_quote_count and is_postgres(self.path):
+                connection.execute(
+                    """
+                    INSERT INTO quote_latest (symbol, captured_at, data_source, payload_json)
+                    SELECT DISTINCT ON (symbol) symbol, captured_at, data_source, payload_json
+                    FROM quote_snapshots
+                    ORDER BY symbol, captured_at DESC, id DESC
+                    """
                 )
-                AND NOT EXISTS (
-                    SELECT 1 FROM quote_latest current WHERE current.symbol = q.symbol
+            elif not current_quote_count:
+                connection.execute(
+                    """
+                    INSERT INTO quote_latest (symbol, captured_at, data_source, payload_json)
+                    SELECT q.symbol, q.captured_at, q.data_source, q.payload_json
+                    FROM quote_snapshots q
+                    WHERE q.id = (
+                        SELECT previous.id FROM quote_snapshots previous
+                        WHERE previous.symbol = q.symbol
+                        ORDER BY previous.captured_at DESC, previous.id DESC
+                        LIMIT 1
+                    )
+                    """
                 )
-                """
-            )
             connection.execute(
                 "CREATE TABLE IF NOT EXISTS scanner_state ("
                 "state_key TEXT PRIMARY KEY, state_json TEXT NOT NULL)"
