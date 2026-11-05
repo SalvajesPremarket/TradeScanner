@@ -8,10 +8,8 @@ transaction or monopolize the database.
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 from typing import Any
 
-from tradescanner.db import is_postgres
 
 RETENTION_DAYS = 7
 DEFAULT_BATCH_SIZE = 10_000
@@ -45,10 +43,7 @@ def prune_expired_market_data(
     cutoff = current.astimezone(timezone.utc) - timedelta(days=RETENTION_DAYS)
     cutoff_text = cutoff.isoformat()
     cutoff_ms = int(cutoff.timestamp() * 1000)
-    postgres = is_postgres(store.path)
-
-    if postgres:
-        quote_delete = """
+    quote_delete = """
             DELETE FROM quote_snapshots
             WHERE id IN (
                 SELECT id FROM quote_snapshots
@@ -57,34 +52,15 @@ def prune_expired_market_data(
                 LIMIT ?
             )
         """
-        candle_delete = """
-            DELETE FROM intraday_candles
-            WHERE (symbol, candle_time_ms) IN (
-                SELECT symbol, candle_time_ms FROM intraday_candles
-                WHERE candle_time_ms < ?
-                ORDER BY candle_time_ms
-                LIMIT ?
-            )
-        """
-    else:
-        quote_delete = """
-            DELETE FROM quote_snapshots
-            WHERE id IN (
-                SELECT id FROM quote_snapshots
-                WHERE captured_at < ?
-                ORDER BY captured_at
-                LIMIT ?
-            )
-        """
-        candle_delete = """
-            DELETE FROM intraday_candles
-            WHERE (symbol, candle_time_ms) IN (
-                SELECT symbol, candle_time_ms FROM intraday_candles
-                WHERE candle_time_ms < ?
-                ORDER BY candle_time_ms
-                LIMIT ?
-            )
-        """
+    candle_delete = """
+        DELETE FROM intraday_candles
+        WHERE (symbol, candle_time_ms) IN (
+            SELECT symbol, candle_time_ms FROM intraday_candles
+            WHERE candle_time_ms < ?
+            ORDER BY candle_time_ms
+            LIMIT ?
+        )
+    """
 
     quote_deleted = _delete_in_batches(
         store, quote_delete, cutoff_text, batch_size, max_batches_per_table
