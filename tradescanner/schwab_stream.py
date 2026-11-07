@@ -1,4 +1,4 @@
-"""Schwab Level One equities websocket feed. Only provider-emitted updates become ticks."""
+"""Schwab Level One equities websocket feed with bounded rotating subscriptions."""
 from __future__ import annotations
 
 import json
@@ -14,6 +14,7 @@ import websocket
 from tradescanner.core import _number
 from tradescanner.float_provider import apply_cached_float
 from tradescanner.momentum_runtime import feed_quote_rows
+from tradescanner.notifications import enqueue_confirmed_entry
 from tradescanner.schwab import _access_token, get_streamer_info, SchwabAPIError
 from tradescanner.snapshots import SnapshotStore
 from tradescanner.strategies import active_strategies, is_momentum_trader_program
@@ -28,14 +29,22 @@ _THREAD: threading.Thread | None = None
 _ACTIVE_APP: websocket.WebSocketApp | None = None
 
 
-def _symbols() -> list[str]:
+def _symbol_batches() -> list[list[str]]:
+    """Split the full universe into Schwab-compliant Level One subscription batches."""
     payload = load_symbol_universe()
     raw = payload.get("symbols", []) if isinstance(payload, dict) else []
-    result = list(dict.fromkeys(s.strip().upper() for s in raw if isinstance(s, str) and s.strip()))
-    # Schwab Level One subscriptions have provider limits. Do not silently claim
-    # symbols outside the subscribed set are being streamed.
-    limit = max(1, min(500, int(os.getenv("TRADESCANNER_STREAM_MAX_SYMBOLS", "500"))))
-    return result[:limit]
+    symbols = list(dict.fromkeys(s.strip().upper() for s in raw if isinstance(s, str) and s.strip()))
+    try:
+        batch_size = max(1, min(500, int(os.getenv("TRADESCANNER_STREAM_MAX_SYMBOLS", "500"))))
+    except (TypeError, ValueError):
+        batch_size = 500
+    return [symbols[index:index + batch_size] for index in range(0, len(symbols), batch_size)]
+
+
+def _symbols() -> list[str]:
+    """Compatibility helper: first active-sized batch only."""
+    batches = _symbol_batches()
+    return batches[0] if batches else []
 
 
 def _normalise_stream_item(item: dict[str, Any]) -> dict[str, Any] | None:
@@ -69,9 +78,16 @@ def _run_stream() -> None:
     delay = 2.0
     while not _STOP.is_set():
         try:
-            symbols = _symbols()
-            if not symbols:
+            batches = _symbol_batches()
+            if not batches:
                 raise RuntimeError("Schwab stream has no symbols to subscribe")
+            try:
+                rotation_seconds = max(15, min(900, int(os.getenv("TRADESCANNER_STREAM_ROTATION_SECONDS", "60"))))
+            except (TypeError, ValueError):
+                rotation_seconds = 60
+            current_batch_index = 0
+            symbols = batches[current_batch_index]
+            last_rotation = time.monotonic()
             info = get_streamer_info()
             url = info.get("streamerSocketUrl")
             required = ("schwabClientCustomerId", "schwabClientCorrelId", "schwabClientChannel", "schwabClientFunctionId")
@@ -79,6 +95,23 @@ def _run_stream() -> None:
                 raise SchwabAPIError("Schwab streamer session metadata is incomplete")
             subscribed = False
             request_id = 0
+
+            def send_request(ws, service: str, command: str, selected_symbols: list[str] | None = None):
+                nonlocal request_id
+                request_id += 1
+                parameters: dict[str, Any] = {}
+                if selected_symbols is not None:
+                    parameters["keys"] = ",".join(selected_symbols)
+                    parameters["fields"] = ",".join(str(n) for n in _FIELDS)
+                request = {
+                    "service": service, "command": command, "requestid": str(request_id),
+                    "SchwabClientCustomerId": info["schwabClientCustomerId"],
+                    "SchwabClientCorrelId": info["schwabClientCorrelId"],
+                    "SchwabClientChannel": info["schwabClientChannel"],
+                    "SchwabClientFunctionId": info["schwabClientFunctionId"],
+                    "parameters": parameters,
+                }
+                ws.send(json.dumps({"requests": [request]}))
 
             def send_login(ws):
                 nonlocal request_id
@@ -89,17 +122,20 @@ def _run_stream() -> None:
                     "SchwabClientCorrelId": info["schwabClientCorrelId"],
                     "SchwabClientChannel": info["schwabClientChannel"],
                     "SchwabClientFunctionId": info["schwabClientFunctionId"],
-                    "parameters": {"Authorization": _access_token(), "SchwabClientCustomerId": info["schwabClientCustomerId"],
-                                   "SchwabClientCorrelId": info["schwabClientCorrelId"],
-                                   "SchwabClientChannel": info["schwabClientChannel"],
-                                   "SchwabClientFunctionId": info["schwabClientFunctionId"]},
+                    "parameters": {
+                        "Authorization": _access_token(),
+                        "SchwabClientCustomerId": info["schwabClientCustomerId"],
+                        "SchwabClientCorrelId": info["schwabClientCorrelId"],
+                        "SchwabClientChannel": info["schwabClientChannel"],
+                        "SchwabClientFunctionId": info["schwabClientFunctionId"],
+                    },
                 }]}))
 
             def on_open(ws):
                 send_login(ws)
 
             def on_message(ws, message):
-                nonlocal subscribed, request_id
+                nonlocal subscribed, request_id, current_batch_index, last_rotation, symbols
                 try:
                     payload = json.loads(message)
                 except (TypeError, ValueError):
@@ -111,17 +147,12 @@ def _run_stream() -> None:
                             ws.close()
                             return
                         if not subscribed:
-                            request_id += 1
-                            ws.send(json.dumps({"requests": [{
-                                "service": "LEVELONE_EQUITIES", "command": "SUBS", "requestid": str(request_id),
-                                "SchwabClientCustomerId": info["schwabClientCustomerId"],
-                                "SchwabClientCorrelId": info["schwabClientCorrelId"],
-                                "SchwabClientChannel": info["schwabClientChannel"],
-                                "SchwabClientFunctionId": info["schwabClientFunctionId"],
-                                "parameters": {"keys": ",".join(symbols), "fields": ",".join(str(n) for n in _FIELDS)},
-                            }]}))
+                            send_request(ws, "LEVELONE_EQUITIES", "SUBS", symbols)
                             subscribed = True
-                            logger.warning("Schwab Level One stream subscription requested; symbols=%s", len(symbols))
+                            logger.warning(
+                                "Schwab Level One stream subscription requested; symbols=%s batch=1/%s universe=%s",
+                                len(symbols), len(batches), sum(len(batch) for batch in batches),
+                            )
                 for block in payload.get("data", []) if isinstance(payload, dict) else []:
                     if block.get("service") != "LEVELONE_EQUITIES":
                         continue
@@ -142,9 +173,7 @@ def _run_stream() -> None:
                     ]
                     runtime_status = "no_active_momentum_strategy"
                     for strategy in enabled:
-                        # Every uploaded strategy gets its own MomentumTrader state.
-                        # This preserves LONG/SHORT side and prevents one strategy's
-                        # position/actions from leaking into another strategy's monitor.
+                        # Each original MomentumTrader has isolated LONG/SHORT state.
                         runtime = feed_quote_rows(store, rows, strategy)
                         runtime_status = runtime.get("status", "waiting_for_new_quotes")
                         runtime_evaluations = runtime.get("evaluations", [])
@@ -171,19 +200,37 @@ def _run_stream() -> None:
                             "matches": list(dict.fromkeys(str(a.get("symbol")) for a in runtime_actions if a.get("action") == "ENTER")),
                             "note": runtime.get("note"),
                         })
-                    runtime = {"status": runtime_status}
+                        for action in runtime_actions:
+                            if action.get("action") == "ENTER":
+                                enqueue_confirmed_entry(action, strategy)
                     store.set_state("schwab_stream_status", {
                         "status": "connected", "provider": "Schwab Level One websocket",
-                        "subscribed_symbols": len(symbols), "last_message_at": time.time(),
-                        "received_quotes": len(rows), "runtime_status": runtime.get("status"),
-                        "active_momentum_strategies": len(enabled),
-                        "note": "Solo ticks emitidos por Schwab; no se interpolan ni fabrican precios.",
+                        "subscribed_symbols": len(symbols), "universe_symbols": sum(len(batch) for batch in batches),
+                        "subscription_batch": current_batch_index + 1, "subscription_batches": len(batches),
+                        "last_message_at": time.time(), "received_quotes": len(rows),
+                        "runtime_status": runtime_status, "active_momentum_strategies": len(enabled),
+                        "note": "Ticks reales de Schwab; universo recorrido en lotes rotativos. No se interpolan ni fabrican precios.",
                     })
                     store.set_state("engine_status", {
                         **(store.get_state("engine_status", {}) if isinstance(store.get_state("engine_status", {}), dict) else {}),
                         "status": "streaming", "last_quote_received_at": datetime.now(timezone.utc).isoformat(),
                         "received_count": len(rows), "provider": "schwab_stream",
                     })
+
+                # Rotate only after the current subscription has had its full window.
+                # Rotation is driven by inbound messages, so no extra timer thread can
+                # race the websocket callback or keep a disconnected socket alive.
+                if subscribed and len(batches) > 1 and time.monotonic() - last_rotation >= rotation_seconds:
+                    old_symbols = symbols
+                    current_batch_index = (current_batch_index + 1) % len(batches)
+                    symbols = batches[current_batch_index]
+                    send_request(ws, "LEVELONE_EQUITIES", "UNSUBS", old_symbols)
+                    send_request(ws, "LEVELONE_EQUITIES", "SUBS", symbols)
+                    last_rotation = time.monotonic()
+                    logger.warning(
+                        "Schwab Level One subscription rotated; batch=%s/%s symbols=%s rotation_seconds=%s",
+                        current_batch_index + 1, len(batches), len(symbols), rotation_seconds,
+                    )
 
             def on_error(ws, error):
                 logger.warning("Schwab streamer socket error type=%s", type(error).__name__)
