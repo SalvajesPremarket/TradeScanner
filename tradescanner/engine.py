@@ -11,6 +11,7 @@ from zoneinfo import ZoneInfo
 from typing import Any, Callable
 
 from tradescanner.candles import CandleStore, normalize_price_history
+from tradescanner.analyzer import analyze_candles
 from tradescanner.db import DB_ERRORS
 from tradescanner.float_provider import apply_cached_float, refresh_float_cache
 from tradescanner.infisical_vault import is_configured as infisical_is_configured
@@ -326,6 +327,9 @@ def _evaluate_original_scan_strategy(store: SnapshotStore, batch: list[str], str
             if item is not None
         ]
         news_headlines.sort(key=lambda item: item["published_at"], reverse=True)
+        technical = analyze_candles(candles, quote_time_ms=row.get("quote_time_ms"))
+        # Diagnostic only: this new pattern never overrides user strategy conditions.
+        result_metrics = {**result.get("metrics", {}), "technical": technical}
         timeframe = result.get("metrics", {}).get("timeframe") or cfg.get("timeframe") or cfg.get("interval")
         evaluations.append({
             "symbol": symbol,
@@ -333,7 +337,9 @@ def _evaluate_original_scan_strategy(store: SnapshotStore, batch: list[str], str
             "action": "ENTER" if result.get("passed") else None,
             "strategy": strategy.get("name", "Momentum"),
             "strategy_id": strategy.get("id"),
-            "metrics": result.get("metrics", {}),
+            "metrics": result_metrics,
+            "technical_signal": bool(technical.get("signal")),
+            "technical_signal_reason": technical.get("reason"),
             "ema20": result.get("metrics", {}).get("ema20") or _ema20_from_candles(candles),
             "trend_zone": (
                 "bearish" if isinstance(row.get("price"), (int, float)) and isinstance(result.get("metrics", {}).get("ema20") or _ema20_from_candles(candles), (int, float)) and row.get("price") < (result.get("metrics", {}).get("ema20") or _ema20_from_candles(candles))
