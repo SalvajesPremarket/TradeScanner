@@ -44,6 +44,28 @@ _history_fetch_semaphore = threading.BoundedSemaphore(12)
 _history_inflight_symbols: set[str] = set()
 _history_inflight_lock = threading.Lock()
 _history_last_attempt_at: dict[str, float] = {}
+_engine_shutdown_event = threading.Event()
+_history_worker_threads: set[threading.Thread] = set()
+
+
+def reset_engine_shutdown() -> None:
+    """Allow background work when a new application lifespan starts."""
+    _engine_shutdown_event.clear()
+
+
+def request_engine_shutdown(timeout_seconds: float = 8.0) -> dict[str, Any]:
+    """Stop admitting OHLCV workers and wait only for a bounded grace period."""
+    _engine_shutdown_event.set()
+    deadline = time.monotonic() + max(0.0, float(timeout_seconds))
+    with _history_inflight_lock:
+        workers = list(_history_worker_threads)
+    for worker in workers:
+        if worker is threading.current_thread():
+            continue
+        worker.join(max(0.0, deadline - time.monotonic()))
+    with _history_inflight_lock:
+        pending = sorted(worker.name for worker in _history_worker_threads if worker.is_alive())
+    return {"completed": len(workers) - len(pending), "pending": pending}
 
 
 def _now() -> str:
@@ -171,6 +193,7 @@ def _fetch_history_in_background(
     finally:
         with _history_inflight_lock:
             _history_inflight_symbols.discard(symbol)
+            _history_worker_threads.discard(threading.current_thread())
         result["done"].set()
 
 
@@ -857,6 +880,8 @@ def run_scan_cycle(
     candle_fetcher: Callable[[str], dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Scan one provider-sized batch; cursor advances only after successful persistence."""
+    if _engine_shutdown_event.is_set():
+        return {"status": "skipped", "reason": "engine_shutting_down"}
     if not _cycle_lock.acquire(blocking=False):
         return {"status": "skipped", "reason": "cycle_already_running"}
     try:
@@ -1132,23 +1157,30 @@ def run_scan_cycle(
                     jobs = []
                     for candidate in candidates:
                         symbol = candidate["symbol"]
+                        job = {"done": threading.Event()}
                         with _history_inflight_lock:
+                            # Shutdown sets the event before taking this lock, so
+                            # no new provider request can slip in after shutdown begins.
+                            if _engine_shutdown_event.is_set():
+                                break
                             if symbol in _history_inflight_symbols:
                                 continue
                             if len(_history_inflight_symbols) >= _HISTORY_MAX_INFLIGHT:
                                 break
                             _history_inflight_symbols.add(symbol)
                             _history_last_attempt_at[symbol] = time.monotonic()
-                        job = {"done": threading.Event()}
-                        thread = threading.Thread(
-                            target=_fetch_history_in_background,
-                            args=(symbol, history_fetch, target_store.path, job),
-                            name="history-" + symbol,
-                            daemon=True,
-                        )
-                        candle_state["history_requests"] += 1
-                        jobs.append((symbol, job))
-                        thread.start()
+                            thread = threading.Thread(
+                                target=_fetch_history_in_background,
+                                args=(symbol, history_fetch, target_store.path, job),
+                                name="history-" + symbol,
+                                daemon=True,
+                            )
+                            _history_worker_threads.add(thread)
+                            candle_state["history_requests"] += 1
+                            jobs.append((symbol, job))
+                            # Start while holding the registry lock so shutdown
+                            # never attempts to join a thread that has not started.
+                            thread.start()
 
                     # Preserve each symbol's own quote timestamp when calculating
                     # time-of-day RVOL after its asynchronous history job completes.
