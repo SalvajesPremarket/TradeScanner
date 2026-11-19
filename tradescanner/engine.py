@@ -74,6 +74,11 @@ def _history_lags_quote(row: dict[str, Any], latest_candle_time_ms: int | None) 
     return float(quote_time_ms) - latest_candle_time_ms > _HISTORY_MAX_QUOTE_LAG_MS
 
 
+def _history_attempt_priority(symbol: str, last_attempt_at: dict[str, float]) -> float:
+    """Prefer never-attempted and least-recently-attempted symbols to prevent starvation."""
+    return -float(last_attempt_at.get(symbol, 0.0))
+
+
 def _ema20_from_candles(candles: list[dict[str, Any]]) -> float | None:
     """Calculate EMA20 from chronologically ordered OHLCV candles."""
     closes: list[float] = []
@@ -105,6 +110,7 @@ def _fetch_history_in_background(
     provider_seconds = 0.0
     normalize_seconds = 0.0
     persist_seconds = 0.0
+    provider_candles_count: int | None = None
     try:
         semaphore_started = time.monotonic()
         with _history_fetch_semaphore:
@@ -118,6 +124,9 @@ def _fetch_history_in_background(
                 # (especially important for diagnosing Schwab timeouts).
                 provider_seconds = time.monotonic() - provider_started
 
+        raw_candles = payload.get("candles") if isinstance(payload, dict) else None
+        provider_candles_count = len(raw_candles) if isinstance(raw_candles, list) else None
+
         stage = "normalize"
         normalize_started = time.monotonic()
         candles = normalize_price_history(symbol, payload)
@@ -128,6 +137,7 @@ def _fetch_history_in_background(
         saved = CandleStore(store_path).save(candles)
         persist_seconds = time.monotonic() - persist_started
         result.update({
+            "provider_candles_count": provider_candles_count,
             "candles_count": len(candles),
             "saved": saved,
             "semaphore_wait_seconds": round(semaphore_wait_seconds, 3),
@@ -136,15 +146,16 @@ def _fetch_history_in_background(
             "persist_seconds": round(persist_seconds, 3),
         })
         logger.info(
-            "Scan cycle history_symbol=%s returned=%s saved=%s semaphore_wait_seconds=%.3f "
+            "Scan cycle history_symbol=%s provider_candles=%s normalized=%s saved=%s semaphore_wait_seconds=%.3f "
             "provider_seconds=%.3f normalize_seconds=%.3f persist_seconds=%.3f total_seconds=%.3f",
-            symbol, len(candles), saved, semaphore_wait_seconds, provider_seconds,
+            symbol, provider_candles_count, len(candles), saved, semaphore_wait_seconds, provider_seconds,
             normalize_seconds, persist_seconds, time.monotonic() - started,
         )
     except Exception as exc:
         result.update({
             "error_type": type(exc).__name__,
             "error_stage": stage,
+            "provider_candles_count": provider_candles_count,
             "semaphore_wait_seconds": round(semaphore_wait_seconds, 3),
             "provider_seconds": round(provider_seconds, 3),
             "normalize_seconds": round(normalize_seconds, 3),
@@ -1070,6 +1081,12 @@ def run_scan_cycle(
                         elif count >= 35:
                             candle_state["history_symbols_skipped_with_cache"] += 1
 
+                # Snapshot the attempt history once per selection pass. Among
+                # equally fresh and strategy-relevant symbols, work on never-tried
+                # symbols first, then the least-recently-tried ones.
+                with _history_inflight_lock:
+                    history_attempt_snapshot = dict(_history_last_attempt_at)
+
                 def history_priority(row: dict[str, Any]) -> tuple[Any, ...]:
                     price = row.get("price")
                     gap = row.get("gap_pct")
@@ -1086,7 +1103,8 @@ def run_scan_cycle(
                     # the interface's cumulative-volume filter gets current bars.
                     volume_priority = volume if enabled_strategies else -volume
                     abs_gap = abs(gap) if isinstance(gap, (int, float)) else -1
-                    return (fresh, strategy_fit, volume_priority, abs_gap)
+                    attempt_priority = _history_attempt_priority(row["symbol"], history_attempt_snapshot)
+                    return (fresh, strategy_fit, attempt_priority, volume_priority, abs_gap)
 
                 # JeanLong evaluates every fresh candidate with 1-minute OHLCV.
                 # Backfill up to the in-flight ceiling each cycle; otherwise the
@@ -1163,12 +1181,31 @@ def run_scan_cycle(
                     candle_state["history_failed_count"] = failed_count
                     candle_state["history_pending_count"] = len(pending_symbols)
                     candle_state["history_pending_symbols"] = pending_symbols
-                    if pending_symbols or failed_count:
+                    empty_symbols = [
+                        symbol for symbol, job in jobs
+                        if job.get("done").is_set()
+                        and not job.get("error_type")
+                        and job.get("provider_candles_count") == 0
+                    ]
+                    invalid_symbols = [
+                        symbol for symbol, job in jobs
+                        if job.get("done").is_set()
+                        and not job.get("error_type")
+                        and job.get("candles_count", 0) == 0
+                        and job.get("provider_candles_count") != 0
+                    ]
+                    candle_state["history_empty_count"] = len(empty_symbols)
+                    candle_state["history_empty_symbols"] = empty_symbols
+                    candle_state["history_invalid_count"] = len(invalid_symbols)
+                    candle_state["history_invalid_symbols"] = invalid_symbols
+                    if pending_symbols or failed_count or empty_symbols or invalid_symbols:
                         logger.info(
                             "Scan cycle history_batch_result requested=%s completed=%s failed=%s "
-                            "pending=%s pending_symbols=%s deadline_seconds=15 inflight=%s",
+                            "pending=%s pending_symbols=%s empty=%s empty_symbols=%s invalid=%s invalid_symbols=%s "
+                            "deadline_seconds=15 inflight=%s",
                             len(jobs), completed_count, failed_count, len(pending_symbols),
-                            ",".join(pending_symbols), len(_history_inflight_symbols),
+                            ",".join(pending_symbols), len(empty_symbols), ",".join(empty_symbols),
+                            len(invalid_symbols), ",".join(invalid_symbols), len(_history_inflight_symbols),
                         )
                 else:
                     for candidate in candidates:
