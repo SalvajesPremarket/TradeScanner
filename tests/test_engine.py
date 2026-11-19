@@ -6,13 +6,51 @@ from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 from unittest.mock import patch
+from threading import Event
 
-from tradescanner.engine import _get_multi_session_minute_history, _history_lags_quote, run_scan_cycle
+from tradescanner.engine import _fetch_history_in_background, _get_multi_session_minute_history, _history_lags_quote, run_scan_cycle
 from tradescanner.schwab import SchwabAPIError
 from tradescanner.snapshots import SnapshotStore
 
 
 class AutomaticEngineTests(unittest.TestCase):
+    def test_background_history_worker_persists_candles_and_records_stage_timings(self):
+        with tempfile.TemporaryDirectory() as directory:
+            result = {"done": Event()}
+            timestamp = int(time.time() * 1000) - 60_000
+            payload = {"candles": [{
+                "datetime": timestamp, "open": 10.0, "high": 10.5,
+                "low": 9.8, "close": 10.2, "volume": 1200,
+            }]}
+
+            _fetch_history_in_background(
+                "AAPL", lambda _symbol: payload,
+                Path(directory) / "history.sqlite3", result,
+            )
+
+            self.assertTrue(result["done"].is_set())
+            self.assertEqual(result["candles_count"], 1)
+            self.assertEqual(result["saved"], 1)
+            self.assertGreaterEqual(result["provider_seconds"], 0)
+            self.assertGreaterEqual(result["normalize_seconds"], 0)
+            self.assertGreaterEqual(result["persist_seconds"], 0)
+
+    def test_background_history_worker_identifies_provider_failure_stage(self):
+        with tempfile.TemporaryDirectory() as directory:
+            result = {"done": Event()}
+
+            def fail_fetch(_symbol):
+                raise TimeoutError("simulated timeout")
+
+            _fetch_history_in_background(
+                "AAPL", fail_fetch, Path(directory) / "history.sqlite3", result,
+            )
+
+            self.assertTrue(result["done"].is_set())
+            self.assertEqual(result["error_type"], "TimeoutError")
+            self.assertEqual(result["error_stage"], "provider_fetch")
+
+
     def test_multi_session_strategy_history_requests_ten_days_for_rvol_coverage(self):
         with patch("tradescanner.engine.get_price_history", return_value={"candles": []}) as fetch:
             _get_multi_session_minute_history("AAPL")
