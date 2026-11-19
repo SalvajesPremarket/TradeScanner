@@ -6,14 +6,50 @@ from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 from unittest.mock import patch
-from threading import Event
-
-from tradescanner.engine import _fetch_history_in_background, _get_multi_session_minute_history, _history_attempt_priority, _history_lags_quote, run_scan_cycle
+from threading import Event, Thread
+import tradescanner.engine as engine_module
+from tradescanner.engine import (
+    _fetch_history_in_background, _get_multi_session_minute_history,
+    _history_attempt_priority, _history_lags_quote, reset_engine_shutdown,
+    request_engine_shutdown, run_scan_cycle,
+)
 from tradescanner.schwab import SchwabAPIError
 from tradescanner.snapshots import SnapshotStore
 
 
 class AutomaticEngineTests(unittest.TestCase):
+    def test_shutdown_prevents_a_new_scan_cycle(self):
+        reset_engine_shutdown()
+        try:
+            result = request_engine_shutdown(timeout_seconds=0)
+            self.assertEqual(result["pending"], [])
+            skipped = run_scan_cycle()
+            self.assertEqual(skipped, {
+                "status": "skipped", "reason": "engine_shutting_down",
+            })
+        finally:
+            reset_engine_shutdown()
+
+    def test_shutdown_wait_is_bounded_and_reports_unfinished_workers(self):
+        release = Event()
+        worker = Thread(target=release.wait, name="history-test-blocked", daemon=True)
+        worker.start()
+        with engine_module._history_inflight_lock:
+            engine_module._history_worker_threads.add(worker)
+        started = time.monotonic()
+        try:
+            result = request_engine_shutdown(timeout_seconds=0.02)
+            elapsed = time.monotonic() - started
+            self.assertLess(elapsed, 0.5)
+            self.assertEqual(result["pending"], ["history-test-blocked"])
+        finally:
+            release.set()
+            worker.join(timeout=1)
+            with engine_module._history_inflight_lock:
+                engine_module._history_worker_threads.discard(worker)
+            reset_engine_shutdown()
+        self.assertFalse(worker.is_alive())
+
     def test_history_selection_prioritizes_untried_and_least_recent_symbols(self):
         attempts = {"OLD": 100.0, "RECENT": 250.0}
         self.assertGreater(_history_attempt_priority("NEW", attempts), _history_attempt_priority("OLD", attempts))
