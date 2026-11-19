@@ -1128,6 +1128,9 @@ def run_scan_cycle(
                         jobs.append((symbol, job))
                         thread.start()
 
+                    # Preserve each symbol's own quote timestamp when calculating
+                    # time-of-day RVOL after its asynchronous history job completes.
+                    candidate_by_symbol = {row["symbol"]: row for row in candidates}
                     deadline = time.monotonic() + 15.0
                     pending_symbols = []
                     completed_count = 0
@@ -1148,7 +1151,8 @@ def run_scan_cycle(
                         candle_state["candles_saved"] += int(job.get("saved", 0))
                         if candle_state["candle_symbol"] is None:
                             candle_state["candle_symbol"] = symbol
-                            rvol = candle_store.rvol(symbol, as_of_ms=candidate.get("quote_time_ms"))
+                            quote_row = candidate_by_symbol.get(symbol, {})
+                            rvol = candle_store.rvol(symbol, as_of_ms=quote_row.get("quote_time_ms"))
                             candle_state["rvol"] = rvol.get("rvol")
                             candle_state["rvol_sessions_used"] = rvol.get("sessions_used", 0)
                     candle_state["history_completed_count"] = completed_count
