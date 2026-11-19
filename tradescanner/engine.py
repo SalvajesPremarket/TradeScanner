@@ -100,21 +100,58 @@ def _fetch_history_in_background(
 ) -> None:
     """Fetch and persist history without allowing a slow provider call to block scans."""
     started = time.monotonic()
+    stage = "semaphore_wait"
+    semaphore_wait_seconds = 0.0
+    provider_seconds = 0.0
+    normalize_seconds = 0.0
+    persist_seconds = 0.0
     try:
+        semaphore_started = time.monotonic()
         with _history_fetch_semaphore:
+            semaphore_wait_seconds = time.monotonic() - semaphore_started
+            stage = "provider_fetch"
+            provider_started = time.monotonic()
             payload = fetcher(symbol)
+            provider_seconds = time.monotonic() - provider_started
+
+        stage = "normalize"
+        normalize_started = time.monotonic()
         candles = normalize_price_history(symbol, payload)
+        normalize_seconds = time.monotonic() - normalize_started
+
+        stage = "database_save"
+        persist_started = time.monotonic()
         saved = CandleStore(store_path).save(candles)
-        result.update({"candles_count": len(candles), "saved": saved})
+        persist_seconds = time.monotonic() - persist_started
+        result.update({
+            "candles_count": len(candles),
+            "saved": saved,
+            "semaphore_wait_seconds": round(semaphore_wait_seconds, 3),
+            "provider_seconds": round(provider_seconds, 3),
+            "normalize_seconds": round(normalize_seconds, 3),
+            "persist_seconds": round(persist_seconds, 3),
+        })
         logger.info(
-            "Scan cycle history_symbol=%s returned=%s saved=%s duration_seconds=%.3f",
-            symbol, len(candles), saved, time.monotonic() - started,
+            "Scan cycle history_symbol=%s returned=%s saved=%s semaphore_wait_seconds=%.3f "
+            "provider_seconds=%.3f normalize_seconds=%.3f persist_seconds=%.3f total_seconds=%.3f",
+            symbol, len(candles), saved, semaphore_wait_seconds, provider_seconds,
+            normalize_seconds, persist_seconds, time.monotonic() - started,
         )
     except Exception as exc:
-        result["error_type"] = type(exc).__name__
+        result.update({
+            "error_type": type(exc).__name__,
+            "error_stage": stage,
+            "semaphore_wait_seconds": round(semaphore_wait_seconds, 3),
+            "provider_seconds": round(provider_seconds, 3),
+            "normalize_seconds": round(normalize_seconds, 3),
+            "persist_seconds": round(persist_seconds, 3),
+        })
         logger.warning(
-            "Scan cycle history_fetch_failed symbol=%s error_type=%s duration_seconds=%.3f",
-            symbol, type(exc).__name__, time.monotonic() - started,
+            "Scan cycle history_fetch_failed symbol=%s stage=%s error_type=%s "
+            "semaphore_wait_seconds=%.3f provider_seconds=%.3f normalize_seconds=%.3f "
+            "persist_seconds=%.3f total_seconds=%.3f",
+            symbol, stage, type(exc).__name__, semaphore_wait_seconds, provider_seconds,
+            normalize_seconds, persist_seconds, time.monotonic() - started,
         )
     finally:
         with _history_inflight_lock:
@@ -1092,17 +1129,21 @@ def run_scan_cycle(
                         thread.start()
 
                     deadline = time.monotonic() + 15.0
-                    pending_count = 0
+                    pending_symbols = []
+                    completed_count = 0
+                    failed_count = 0
                     for symbol, job in jobs:
                         remaining = max(0.0, deadline - time.monotonic())
                         if remaining > 0:
                             job["done"].wait(remaining)
                         if not job["done"].is_set():
-                            pending_count += 1
+                            pending_symbols.append(symbol)
                             continue
                         if job.get("error_type"):
+                            failed_count += 1
                             candle_state["candle_error"] = job["error_type"]
                             continue
+                        completed_count += 1
                         candle_state["candle_symbols"].append(symbol)
                         candle_state["candles_saved"] += int(job.get("saved", 0))
                         if candle_state["candle_symbol"] is None:
@@ -1110,11 +1151,16 @@ def run_scan_cycle(
                             rvol = candle_store.rvol(symbol, as_of_ms=candidate.get("quote_time_ms"))
                             candle_state["rvol"] = rvol.get("rvol")
                             candle_state["rvol_sessions_used"] = rvol.get("sessions_used", 0)
-                    candle_state["history_pending_count"] = pending_count
-                    if pending_count:
+                    candle_state["history_completed_count"] = completed_count
+                    candle_state["history_failed_count"] = failed_count
+                    candle_state["history_pending_count"] = len(pending_symbols)
+                    candle_state["history_pending_symbols"] = pending_symbols
+                    if pending_symbols or failed_count:
                         logger.info(
-                            "Scan cycle history_pending=%s deadline_seconds=15 inflight=%s",
-                            pending_count, len(_history_inflight_symbols),
+                            "Scan cycle history_batch_result requested=%s completed=%s failed=%s "
+                            "pending=%s pending_symbols=%s deadline_seconds=15 inflight=%s",
+                            len(jobs), completed_count, failed_count, len(pending_symbols),
+                            ",".join(pending_symbols), len(_history_inflight_symbols),
                         )
                 else:
                     for candidate in candidates:
@@ -1144,9 +1190,14 @@ def run_scan_cycle(
             except (SchwabAPIError, SchwabConfigurationError, ValueError, OSError, RuntimeError) + DB_ERRORS as exc:
                 candle_state["candle_error"] = type(exc).__name__
         logger.warning(
-            "Scan cycle stage=price_history_finished requests=%s symbols=%s candles_saved=%s",
+            "Scan cycle stage=price_history_finished requests=%s completed=%s failed=%s pending=%s "
+            "symbols=%s pending_symbols=%s candles_saved=%s",
             candle_state.get("history_requests", 0),
+            candle_state.get("history_completed_count", 0),
+            candle_state.get("history_failed_count", 0),
+            candle_state.get("history_pending_count", 0),
             ",".join(candle_state.get("candle_symbols", [])),
+            ",".join(candle_state.get("history_pending_symbols", [])),
             candle_state.get("candles_saved", 0),
         )
         next_cursor = (cursor + len(batch)) % len(symbols)
