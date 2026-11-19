@@ -8,12 +8,42 @@ from zoneinfo import ZoneInfo
 from unittest.mock import patch
 from threading import Event
 
-from tradescanner.engine import _fetch_history_in_background, _get_multi_session_minute_history, _history_lags_quote, run_scan_cycle
+from tradescanner.engine import _fetch_history_in_background, _get_multi_session_minute_history, _history_attempt_priority, _history_lags_quote, run_scan_cycle
 from tradescanner.schwab import SchwabAPIError
 from tradescanner.snapshots import SnapshotStore
 
 
 class AutomaticEngineTests(unittest.TestCase):
+    def test_history_selection_prioritizes_untried_and_least_recent_symbols(self):
+        attempts = {"OLD": 100.0, "RECENT": 250.0}
+        self.assertGreater(_history_attempt_priority("NEW", attempts), _history_attempt_priority("OLD", attempts))
+        self.assertGreater(_history_attempt_priority("OLD", attempts), _history_attempt_priority("RECENT", attempts))
+
+    def test_background_history_worker_identifies_empty_provider_response(self):
+        with tempfile.TemporaryDirectory() as directory:
+            result = {"done": Event()}
+            _fetch_history_in_background(
+                "AAPL", lambda _symbol: {"candles": []},
+                Path(directory) / "history.sqlite3", result,
+            )
+            self.assertTrue(result["done"].is_set())
+            self.assertEqual(result["provider_candles_count"], 0)
+            self.assertEqual(result["candles_count"], 0)
+            self.assertEqual(result["saved"], 0)
+
+    def test_background_history_worker_identifies_unusable_provider_candles(self):
+        with tempfile.TemporaryDirectory() as directory:
+            result = {"done": Event()}
+            payload = {"candles": [{"datetime": 1, "open": None, "high": 2, "low": 1, "close": 1, "volume": 10}]}
+            _fetch_history_in_background(
+                "AAPL", lambda _symbol: payload,
+                Path(directory) / "history.sqlite3", result,
+            )
+            self.assertTrue(result["done"].is_set())
+            self.assertEqual(result["provider_candles_count"], 1)
+            self.assertEqual(result["candles_count"], 0)
+            self.assertEqual(result["saved"], 0)
+
     def test_background_history_worker_persists_candles_and_records_stage_timings(self):
         with tempfile.TemporaryDirectory() as directory:
             result = {"done": Event()}
