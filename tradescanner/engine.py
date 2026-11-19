@@ -111,8 +111,12 @@ def _fetch_history_in_background(
             semaphore_wait_seconds = time.monotonic() - semaphore_started
             stage = "provider_fetch"
             provider_started = time.monotonic()
-            payload = fetcher(symbol)
-            provider_seconds = time.monotonic() - provider_started
+            try:
+                payload = fetcher(symbol)
+            finally:
+                # Preserve elapsed provider time even when the request raises
+                # (especially important for diagnosing Schwab timeouts).
+                provider_seconds = time.monotonic() - provider_started
 
         stage = "normalize"
         normalize_started = time.monotonic()
