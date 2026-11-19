@@ -40,6 +40,7 @@ class AutomaticEngineTests(unittest.TestCase):
             result = {"done": Event()}
 
             def fail_fetch(_symbol):
+                time.sleep(0.02)
                 raise TimeoutError("simulated timeout")
 
             _fetch_history_in_background(
@@ -49,6 +50,7 @@ class AutomaticEngineTests(unittest.TestCase):
             self.assertTrue(result["done"].is_set())
             self.assertEqual(result["error_type"], "TimeoutError")
             self.assertEqual(result["error_stage"], "provider_fetch")
+            self.assertGreaterEqual(result["provider_seconds"], 0.015)
 
 
     def test_multi_session_strategy_history_requests_ten_days_for_rvol_coverage(self):
