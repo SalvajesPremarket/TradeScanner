@@ -119,6 +119,44 @@ class AutomaticEngineTests(unittest.TestCase):
             self.assertGreaterEqual(result["provider_seconds"], 0.015)
 
 
+    def test_background_history_worker_records_normalize_time_when_normalization_fails(self):
+        with tempfile.TemporaryDirectory() as directory:
+            result = {"done": Event()}
+
+            def fail_normalize(_symbol, _payload):
+                time.sleep(0.02)
+                raise ValueError("simulated invalid candle")
+
+            with patch("tradescanner.engine.normalize_price_history", side_effect=fail_normalize):
+                _fetch_history_in_background(
+                    "AAPL", lambda _symbol: {"candles": [{"close": 1}]},
+                    Path(directory) / "history.sqlite3", result,
+                )
+
+            self.assertTrue(result["done"].is_set())
+            self.assertEqual(result["error_type"], "ValueError")
+            self.assertEqual(result["error_stage"], "normalize")
+            self.assertGreaterEqual(result["normalize_seconds"], 0.015)
+
+    def test_background_history_worker_records_persist_time_when_database_save_fails(self):
+        with tempfile.TemporaryDirectory() as directory:
+            result = {"done": Event()}
+
+            def fail_save(_store, _candles):
+                time.sleep(0.02)
+                raise OSError("simulated database write failure")
+
+            with patch("tradescanner.engine.CandleStore.save", new=fail_save):
+                _fetch_history_in_background(
+                    "AAPL", lambda _symbol: {"candles": []},
+                    Path(directory) / "history.sqlite3", result,
+                )
+
+            self.assertTrue(result["done"].is_set())
+            self.assertEqual(result["error_type"], "OSError")
+            self.assertEqual(result["error_stage"], "database_save")
+            self.assertGreaterEqual(result["persist_seconds"], 0.015)
+
     def test_multi_session_strategy_history_requests_ten_days_for_rvol_coverage(self):
         with patch("tradescanner.engine.get_price_history", return_value={"candles": []}) as fetch:
             _get_multi_session_minute_history("AAPL")
