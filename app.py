@@ -21,7 +21,7 @@ import urllib.error
 
 from tradescanner.float_provider import apply_cached_float, refresh_symbol_float
 from tradescanner.infisical_vault import is_configured as infisical_is_configured
-from tradescanner.engine import get_engine_status, record_engine_status, run_scan_cycle
+from tradescanner.engine import (get_engine_status, record_engine_status, run_scan_cycle, reset_engine_shutdown, request_engine_shutdown)
 from tradescanner.snapshots import SnapshotStore, collect_snapshots
 from tradescanner.retention import prune_expired_market_data
 from tradescanner.strategies import (active_strategy, active_strategies, delete_strategy, strategy_matches, list_strategies, save_strategy, set_strategy_enabled)
@@ -136,6 +136,7 @@ async def _automatic_scan_loop(stop: asyncio.Event, worker_id: str | None = None
 
 @asynccontextmanager
 async def lifespan(application: FastAPI):
+    reset_engine_shutdown()
     stop = asyncio.Event()
     worker_id = uuid.uuid4().hex
     application.state.scan_worker_id = worker_id
@@ -151,16 +152,63 @@ async def lifespan(application: FastAPI):
     try:
         yield
     finally:
+        # Stop the scan loop first, then prevent new OHLCV requests and give
+        # already-running provider calls a strictly bounded completion window.
         stop.set()
         stop_schwab_stream()
-        task.cancel()
-        await asyncio.gather(task, return_exceptions=True)
-        # Release our lease during orderly shutdown; a crashed instance is
-        # recovered automatically after the lease TTL.
         try:
-            await asyncio.to_thread(SnapshotStore().release_lease, SCAN_LEASE_KEY, worker_id)
-        except Exception as lease_error:
-            logger.warning("Automatic scan shutdown lease release failed; error_type=%s", type(lease_error).__name__)
+            history_grace = max(0.0, min(30.0, float(
+                os.getenv("TRADESCANNER_SHUTDOWN_HISTORY_GRACE_SECONDS", "8")
+            )))
+        except (TypeError, ValueError):
+            history_grace = 8.0
+        try:
+            history_shutdown = await asyncio.to_thread(
+                request_engine_shutdown, history_grace
+            )
+            logger.warning(
+                "TradeScanner OHLCV shutdown completed=%s pending=%s grace_seconds=%.1f",
+                history_shutdown.get("completed", 0),
+                len(history_shutdown.get("pending", [])),
+                history_grace,
+            )
+        except Exception as shutdown_error:
+            logger.warning(
+                "TradeScanner OHLCV shutdown coordination failed; error_type=%s",
+                type(shutdown_error).__name__,
+            )
+
+        # asyncio.wait does not cancel the task on timeout. In particular, it
+        # does not pretend that cancelling asyncio.to_thread stopped its
+        # underlying scan thread.
+        try:
+            scan_grace = max(0.0, min(60.0, float(
+                os.getenv("TRADESCANNER_SHUTDOWN_SCAN_GRACE_SECONDS", "20")
+            )))
+        except (TypeError, ValueError):
+            scan_grace = 20.0
+        done, _pending = await asyncio.wait({task}, timeout=scan_grace)
+        if task in done:
+            await asyncio.gather(task, return_exceptions=True)
+            # The scan coroutine and its to_thread call have actually ended;
+            # only now is it safe to release this worker's lease.
+            try:
+                await asyncio.to_thread(
+                    SnapshotStore().release_lease, SCAN_LEASE_KEY, worker_id
+                )
+            except Exception as lease_error:
+                logger.warning(
+                    "Automatic scan shutdown lease release failed; error_type=%s",
+                    type(lease_error).__name__,
+                )
+        else:
+            # Keep the lease until its TTL if the scan is still running. This
+            # prevents another instance from overlapping a still-live worker.
+            logger.error(
+                "TradeScanner scan shutdown grace expired; scan task still running; "
+                "lease retained until TTL worker_id=%s grace_seconds=%.1f",
+                worker_id, scan_grace,
+            )
 
 
 app = FastAPI(title="TradeScanner", version="0.3.1", lifespan=lifespan)

@@ -6,13 +6,157 @@ from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 from unittest.mock import patch
-
-from tradescanner.engine import _get_multi_session_minute_history, _history_lags_quote, run_scan_cycle
+from threading import Event, Thread
+import tradescanner.engine as engine_module
+from tradescanner.engine import (
+    _fetch_history_in_background, _get_multi_session_minute_history,
+    _history_attempt_priority, _history_lags_quote, reset_engine_shutdown,
+    request_engine_shutdown, run_scan_cycle,
+)
 from tradescanner.schwab import SchwabAPIError
 from tradescanner.snapshots import SnapshotStore
 
 
 class AutomaticEngineTests(unittest.TestCase):
+    def test_shutdown_prevents_a_new_scan_cycle(self):
+        reset_engine_shutdown()
+        try:
+            result = request_engine_shutdown(timeout_seconds=0)
+            self.assertEqual(result["pending"], [])
+            skipped = run_scan_cycle()
+            self.assertEqual(skipped, {
+                "status": "skipped", "reason": "engine_shutting_down",
+            })
+        finally:
+            reset_engine_shutdown()
+
+    def test_shutdown_wait_is_bounded_and_reports_unfinished_workers(self):
+        release = Event()
+        worker = Thread(target=release.wait, name="history-test-blocked", daemon=True)
+        worker.start()
+        with engine_module._history_inflight_lock:
+            engine_module._history_worker_threads.add(worker)
+        started = time.monotonic()
+        try:
+            result = request_engine_shutdown(timeout_seconds=0.02)
+            elapsed = time.monotonic() - started
+            self.assertLess(elapsed, 0.5)
+            self.assertEqual(result["pending"], ["history-test-blocked"])
+        finally:
+            release.set()
+            worker.join(timeout=1)
+            with engine_module._history_inflight_lock:
+                engine_module._history_worker_threads.discard(worker)
+            reset_engine_shutdown()
+        self.assertFalse(worker.is_alive())
+
+    def test_history_selection_prioritizes_untried_and_least_recent_symbols(self):
+        attempts = {"OLD": 100.0, "RECENT": 250.0}
+        self.assertGreater(_history_attempt_priority("NEW", attempts), _history_attempt_priority("OLD", attempts))
+        self.assertGreater(_history_attempt_priority("OLD", attempts), _history_attempt_priority("RECENT", attempts))
+
+    def test_background_history_worker_identifies_empty_provider_response(self):
+        with tempfile.TemporaryDirectory() as directory:
+            result = {"done": Event()}
+            _fetch_history_in_background(
+                "AAPL", lambda _symbol: {"candles": []},
+                Path(directory) / "history.sqlite3", result,
+            )
+            self.assertTrue(result["done"].is_set())
+            self.assertEqual(result["provider_candles_count"], 0)
+            self.assertEqual(result["candles_count"], 0)
+            self.assertEqual(result["saved"], 0)
+
+    def test_background_history_worker_identifies_unusable_provider_candles(self):
+        with tempfile.TemporaryDirectory() as directory:
+            result = {"done": Event()}
+            payload = {"candles": [{"datetime": 1, "open": None, "high": 2, "low": 1, "close": 1, "volume": 10}]}
+            _fetch_history_in_background(
+                "AAPL", lambda _symbol: payload,
+                Path(directory) / "history.sqlite3", result,
+            )
+            self.assertTrue(result["done"].is_set())
+            self.assertEqual(result["provider_candles_count"], 1)
+            self.assertEqual(result["candles_count"], 0)
+            self.assertEqual(result["saved"], 0)
+
+    def test_background_history_worker_persists_candles_and_records_stage_timings(self):
+        with tempfile.TemporaryDirectory() as directory:
+            result = {"done": Event()}
+            timestamp = int(time.time() * 1000) - 60_000
+            payload = {"candles": [{
+                "datetime": timestamp, "open": 10.0, "high": 10.5,
+                "low": 9.8, "close": 10.2, "volume": 1200,
+            }]}
+
+            _fetch_history_in_background(
+                "AAPL", lambda _symbol: payload,
+                Path(directory) / "history.sqlite3", result,
+            )
+
+            self.assertTrue(result["done"].is_set())
+            self.assertEqual(result["candles_count"], 1)
+            self.assertEqual(result["saved"], 1)
+            self.assertGreaterEqual(result["provider_seconds"], 0)
+            self.assertGreaterEqual(result["normalize_seconds"], 0)
+            self.assertGreaterEqual(result["persist_seconds"], 0)
+
+    def test_background_history_worker_identifies_provider_failure_stage(self):
+        with tempfile.TemporaryDirectory() as directory:
+            result = {"done": Event()}
+
+            def fail_fetch(_symbol):
+                time.sleep(0.02)
+                raise TimeoutError("simulated timeout")
+
+            _fetch_history_in_background(
+                "AAPL", fail_fetch, Path(directory) / "history.sqlite3", result,
+            )
+
+            self.assertTrue(result["done"].is_set())
+            self.assertEqual(result["error_type"], "TimeoutError")
+            self.assertEqual(result["error_stage"], "provider_fetch")
+            self.assertGreaterEqual(result["provider_seconds"], 0.015)
+
+
+    def test_background_history_worker_records_normalize_time_when_normalization_fails(self):
+        with tempfile.TemporaryDirectory() as directory:
+            result = {"done": Event()}
+
+            def fail_normalize(_symbol, _payload):
+                time.sleep(0.02)
+                raise ValueError("simulated invalid candle")
+
+            with patch("tradescanner.engine.normalize_price_history", side_effect=fail_normalize):
+                _fetch_history_in_background(
+                    "AAPL", lambda _symbol: {"candles": [{"close": 1}]},
+                    Path(directory) / "history.sqlite3", result,
+                )
+
+            self.assertTrue(result["done"].is_set())
+            self.assertEqual(result["error_type"], "ValueError")
+            self.assertEqual(result["error_stage"], "normalize")
+            self.assertGreaterEqual(result["normalize_seconds"], 0.015)
+
+    def test_background_history_worker_records_persist_time_when_database_save_fails(self):
+        with tempfile.TemporaryDirectory() as directory:
+            result = {"done": Event()}
+
+            def fail_save(_store, _candles):
+                time.sleep(0.02)
+                raise OSError("simulated database write failure")
+
+            with patch("tradescanner.engine.CandleStore.save", new=fail_save):
+                _fetch_history_in_background(
+                    "AAPL", lambda _symbol: {"candles": []},
+                    Path(directory) / "history.sqlite3", result,
+                )
+
+            self.assertTrue(result["done"].is_set())
+            self.assertEqual(result["error_type"], "OSError")
+            self.assertEqual(result["error_stage"], "database_save")
+            self.assertGreaterEqual(result["persist_seconds"], 0.015)
+
     def test_multi_session_strategy_history_requests_ten_days_for_rvol_coverage(self):
         with patch("tradescanner.engine.get_price_history", return_value={"candles": []}) as fetch:
             _get_multi_session_minute_history("AAPL")

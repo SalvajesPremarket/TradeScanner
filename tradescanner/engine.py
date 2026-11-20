@@ -44,6 +44,28 @@ _history_fetch_semaphore = threading.BoundedSemaphore(12)
 _history_inflight_symbols: set[str] = set()
 _history_inflight_lock = threading.Lock()
 _history_last_attempt_at: dict[str, float] = {}
+_engine_shutdown_event = threading.Event()
+_history_worker_threads: set[threading.Thread] = set()
+
+
+def reset_engine_shutdown() -> None:
+    """Allow background work when a new application lifespan starts."""
+    _engine_shutdown_event.clear()
+
+
+def request_engine_shutdown(timeout_seconds: float = 8.0) -> dict[str, Any]:
+    """Stop admitting OHLCV workers and wait only for a bounded grace period."""
+    _engine_shutdown_event.set()
+    deadline = time.monotonic() + max(0.0, float(timeout_seconds))
+    with _history_inflight_lock:
+        workers = list(_history_worker_threads)
+    for worker in workers:
+        if worker is threading.current_thread():
+            continue
+        worker.join(max(0.0, deadline - time.monotonic()))
+    with _history_inflight_lock:
+        pending = sorted(worker.name for worker in _history_worker_threads if worker.is_alive())
+    return {"completed": len(workers) - len(pending), "pending": pending}
 
 
 def _now() -> str:
@@ -74,6 +96,11 @@ def _history_lags_quote(row: dict[str, Any], latest_candle_time_ms: int | None) 
     return float(quote_time_ms) - latest_candle_time_ms > _HISTORY_MAX_QUOTE_LAG_MS
 
 
+def _history_attempt_priority(symbol: str, last_attempt_at: dict[str, float]) -> float:
+    """Prefer never-attempted and least-recently-attempted symbols to prevent starvation."""
+    return -float(last_attempt_at.get(symbol, 0.0))
+
+
 def _ema20_from_candles(candles: list[dict[str, Any]]) -> float | None:
     """Calculate EMA20 from chronologically ordered OHLCV candles."""
     closes: list[float] = []
@@ -100,25 +127,79 @@ def _fetch_history_in_background(
 ) -> None:
     """Fetch and persist history without allowing a slow provider call to block scans."""
     started = time.monotonic()
+    stage = "semaphore_wait"
+    semaphore_wait_seconds = 0.0
+    provider_seconds = 0.0
+    normalize_seconds = 0.0
+    persist_seconds = 0.0
+    provider_candles_count: int | None = None
     try:
+        semaphore_started = time.monotonic()
         with _history_fetch_semaphore:
-            payload = fetcher(symbol)
-        candles = normalize_price_history(symbol, payload)
-        saved = CandleStore(store_path).save(candles)
-        result.update({"candles_count": len(candles), "saved": saved})
+            semaphore_wait_seconds = time.monotonic() - semaphore_started
+            stage = "provider_fetch"
+            provider_started = time.monotonic()
+            try:
+                payload = fetcher(symbol)
+            finally:
+                # Preserve elapsed provider time even when the request raises
+                # (especially important for diagnosing Schwab timeouts).
+                provider_seconds = time.monotonic() - provider_started
+
+        raw_candles = payload.get("candles") if isinstance(payload, dict) else None
+        provider_candles_count = len(raw_candles) if isinstance(raw_candles, list) else None
+
+        stage = "normalize"
+        normalize_started = time.monotonic()
+        try:
+            candles = normalize_price_history(symbol, payload)
+        finally:
+            # Capture elapsed normalization time even when malformed data raises.
+            normalize_seconds = time.monotonic() - normalize_started
+
+        stage = "database_save"
+        persist_started = time.monotonic()
+        try:
+            saved = CandleStore(store_path).save(candles)
+        finally:
+            # Capture elapsed persistence time even when the database write fails.
+            persist_seconds = time.monotonic() - persist_started
+        result.update({
+            "provider_candles_count": provider_candles_count,
+            "candles_count": len(candles),
+            "saved": saved,
+            "semaphore_wait_seconds": round(semaphore_wait_seconds, 3),
+            "provider_seconds": round(provider_seconds, 3),
+            "normalize_seconds": round(normalize_seconds, 3),
+            "persist_seconds": round(persist_seconds, 3),
+        })
         logger.info(
-            "Scan cycle history_symbol=%s returned=%s saved=%s duration_seconds=%.3f",
-            symbol, len(candles), saved, time.monotonic() - started,
+            "Scan cycle history_symbol=%s provider_candles=%s normalized=%s saved=%s semaphore_wait_seconds=%.3f "
+            "provider_seconds=%.3f normalize_seconds=%.3f persist_seconds=%.3f total_seconds=%.3f",
+            symbol, provider_candles_count, len(candles), saved, semaphore_wait_seconds, provider_seconds,
+            normalize_seconds, persist_seconds, time.monotonic() - started,
         )
     except Exception as exc:
-        result["error_type"] = type(exc).__name__
+        result.update({
+            "error_type": type(exc).__name__,
+            "error_stage": stage,
+            "provider_candles_count": provider_candles_count,
+            "semaphore_wait_seconds": round(semaphore_wait_seconds, 3),
+            "provider_seconds": round(provider_seconds, 3),
+            "normalize_seconds": round(normalize_seconds, 3),
+            "persist_seconds": round(persist_seconds, 3),
+        })
         logger.warning(
-            "Scan cycle history_fetch_failed symbol=%s error_type=%s duration_seconds=%.3f",
-            symbol, type(exc).__name__, time.monotonic() - started,
+            "Scan cycle history_fetch_failed symbol=%s stage=%s error_type=%s "
+            "semaphore_wait_seconds=%.3f provider_seconds=%.3f normalize_seconds=%.3f "
+            "persist_seconds=%.3f total_seconds=%.3f",
+            symbol, stage, type(exc).__name__, semaphore_wait_seconds, provider_seconds,
+            normalize_seconds, persist_seconds, time.monotonic() - started,
         )
     finally:
         with _history_inflight_lock:
             _history_inflight_symbols.discard(symbol)
+            _history_worker_threads.discard(threading.current_thread())
         result["done"].set()
 
 
@@ -805,6 +886,8 @@ def run_scan_cycle(
     candle_fetcher: Callable[[str], dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Scan one provider-sized batch; cursor advances only after successful persistence."""
+    if _engine_shutdown_event.is_set():
+        return {"status": "skipped", "reason": "engine_shutting_down"}
     if not _cycle_lock.acquire(blocking=False):
         return {"status": "skipped", "reason": "cycle_already_running"}
     try:
@@ -1029,6 +1112,12 @@ def run_scan_cycle(
                         elif count >= 35:
                             candle_state["history_symbols_skipped_with_cache"] += 1
 
+                # Snapshot the attempt history once per selection pass. Among
+                # equally fresh and strategy-relevant symbols, work on never-tried
+                # symbols first, then the least-recently-tried ones.
+                with _history_inflight_lock:
+                    history_attempt_snapshot = dict(_history_last_attempt_at)
+
                 def history_priority(row: dict[str, Any]) -> tuple[Any, ...]:
                     price = row.get("price")
                     gap = row.get("gap_pct")
@@ -1045,7 +1134,8 @@ def run_scan_cycle(
                     # the interface's cumulative-volume filter gets current bars.
                     volume_priority = volume if enabled_strategies else -volume
                     abs_gap = abs(gap) if isinstance(gap, (int, float)) else -1
-                    return (fresh, strategy_fit, volume_priority, abs_gap)
+                    attempt_priority = _history_attempt_priority(row["symbol"], history_attempt_snapshot)
+                    return (fresh, strategy_fit, attempt_priority, volume_priority, abs_gap)
 
                 # JeanLong evaluates every fresh candidate with 1-minute OHLCV.
                 # Backfill up to the in-flight ceiling each cycle; otherwise the
@@ -1073,48 +1163,87 @@ def run_scan_cycle(
                     jobs = []
                     for candidate in candidates:
                         symbol = candidate["symbol"]
+                        job = {"done": threading.Event()}
                         with _history_inflight_lock:
+                            # Shutdown sets the event before taking this lock, so
+                            # no new provider request can slip in after shutdown begins.
+                            if _engine_shutdown_event.is_set():
+                                break
                             if symbol in _history_inflight_symbols:
                                 continue
                             if len(_history_inflight_symbols) >= _HISTORY_MAX_INFLIGHT:
                                 break
                             _history_inflight_symbols.add(symbol)
                             _history_last_attempt_at[symbol] = time.monotonic()
-                        job = {"done": threading.Event()}
-                        thread = threading.Thread(
-                            target=_fetch_history_in_background,
-                            args=(symbol, history_fetch, target_store.path, job),
-                            name="history-" + symbol,
-                            daemon=True,
-                        )
-                        candle_state["history_requests"] += 1
-                        jobs.append((symbol, job))
-                        thread.start()
+                            thread = threading.Thread(
+                                target=_fetch_history_in_background,
+                                args=(symbol, history_fetch, target_store.path, job),
+                                name="history-" + symbol,
+                                daemon=True,
+                            )
+                            _history_worker_threads.add(thread)
+                            candle_state["history_requests"] += 1
+                            jobs.append((symbol, job))
+                            # Start while holding the registry lock so shutdown
+                            # never attempts to join a thread that has not started.
+                            thread.start()
 
+                    # Preserve each symbol's own quote timestamp when calculating
+                    # time-of-day RVOL after its asynchronous history job completes.
+                    candidate_by_symbol = {row["symbol"]: row for row in candidates}
                     deadline = time.monotonic() + 15.0
-                    pending_count = 0
+                    pending_symbols = []
+                    completed_count = 0
+                    failed_count = 0
                     for symbol, job in jobs:
                         remaining = max(0.0, deadline - time.monotonic())
                         if remaining > 0:
                             job["done"].wait(remaining)
                         if not job["done"].is_set():
-                            pending_count += 1
+                            pending_symbols.append(symbol)
                             continue
                         if job.get("error_type"):
+                            failed_count += 1
                             candle_state["candle_error"] = job["error_type"]
                             continue
+                        completed_count += 1
                         candle_state["candle_symbols"].append(symbol)
                         candle_state["candles_saved"] += int(job.get("saved", 0))
                         if candle_state["candle_symbol"] is None:
                             candle_state["candle_symbol"] = symbol
-                            rvol = candle_store.rvol(symbol, as_of_ms=candidate.get("quote_time_ms"))
+                            quote_row = candidate_by_symbol.get(symbol, {})
+                            rvol = candle_store.rvol(symbol, as_of_ms=quote_row.get("quote_time_ms"))
                             candle_state["rvol"] = rvol.get("rvol")
                             candle_state["rvol_sessions_used"] = rvol.get("sessions_used", 0)
-                    candle_state["history_pending_count"] = pending_count
-                    if pending_count:
+                    candle_state["history_completed_count"] = completed_count
+                    candle_state["history_failed_count"] = failed_count
+                    candle_state["history_pending_count"] = len(pending_symbols)
+                    candle_state["history_pending_symbols"] = pending_symbols
+                    empty_symbols = [
+                        symbol for symbol, job in jobs
+                        if job.get("done").is_set()
+                        and not job.get("error_type")
+                        and job.get("provider_candles_count") == 0
+                    ]
+                    invalid_symbols = [
+                        symbol for symbol, job in jobs
+                        if job.get("done").is_set()
+                        and not job.get("error_type")
+                        and job.get("candles_count", 0) == 0
+                        and job.get("provider_candles_count") != 0
+                    ]
+                    candle_state["history_empty_count"] = len(empty_symbols)
+                    candle_state["history_empty_symbols"] = empty_symbols
+                    candle_state["history_invalid_count"] = len(invalid_symbols)
+                    candle_state["history_invalid_symbols"] = invalid_symbols
+                    if pending_symbols or failed_count or empty_symbols or invalid_symbols:
                         logger.info(
-                            "Scan cycle history_pending=%s deadline_seconds=15 inflight=%s",
-                            pending_count, len(_history_inflight_symbols),
+                            "Scan cycle history_batch_result requested=%s completed=%s failed=%s "
+                            "pending=%s pending_symbols=%s empty=%s empty_symbols=%s invalid=%s invalid_symbols=%s "
+                            "deadline_seconds=15 inflight=%s",
+                            len(jobs), completed_count, failed_count, len(pending_symbols),
+                            ",".join(pending_symbols), len(empty_symbols), ",".join(empty_symbols),
+                            len(invalid_symbols), ",".join(invalid_symbols), len(_history_inflight_symbols),
                         )
                 else:
                     for candidate in candidates:
@@ -1144,9 +1273,14 @@ def run_scan_cycle(
             except (SchwabAPIError, SchwabConfigurationError, ValueError, OSError, RuntimeError) + DB_ERRORS as exc:
                 candle_state["candle_error"] = type(exc).__name__
         logger.warning(
-            "Scan cycle stage=price_history_finished requests=%s symbols=%s candles_saved=%s",
+            "Scan cycle stage=price_history_finished requests=%s completed=%s failed=%s pending=%s "
+            "symbols=%s pending_symbols=%s candles_saved=%s",
             candle_state.get("history_requests", 0),
+            candle_state.get("history_completed_count", 0),
+            candle_state.get("history_failed_count", 0),
+            candle_state.get("history_pending_count", 0),
             ",".join(candle_state.get("candle_symbols", [])),
+            ",".join(candle_state.get("history_pending_symbols", [])),
             candle_state.get("candles_saved", 0),
         )
         next_cursor = (cursor + len(batch)) % len(symbols)
