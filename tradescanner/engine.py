@@ -151,13 +151,19 @@ def _fetch_history_in_background(
 
         stage = "normalize"
         normalize_started = time.monotonic()
-        candles = normalize_price_history(symbol, payload)
-        normalize_seconds = time.monotonic() - normalize_started
+        try:
+            candles = normalize_price_history(symbol, payload)
+        finally:
+            # Capture elapsed normalization time even when malformed data raises.
+            normalize_seconds = time.monotonic() - normalize_started
 
         stage = "database_save"
         persist_started = time.monotonic()
-        saved = CandleStore(store_path).save(candles)
-        persist_seconds = time.monotonic() - persist_started
+        try:
+            saved = CandleStore(store_path).save(candles)
+        finally:
+            # Capture elapsed persistence time even when the database write fails.
+            persist_seconds = time.monotonic() - persist_started
         result.update({
             "provider_candles_count": provider_candles_count,
             "candles_count": len(candles),
