@@ -1205,7 +1205,7 @@
       return out;
     }
     function emuEvents(a,b,kind){
-      return a.map((v,i)=>i>0&&Number.isFinite(a[i-1])&&Number.isFinite(b[i-1])&&Number.isFinite(v)&&Number.isFinite(b[i])&&(kind==="up"?(a[i-1]<b[i-1]&&v>=b[i]):kind==="down"?(a[i-1]>b[i-1]&&v<=b[i]):((a[i-1]<b[i-1]&&v>=b[i])||(a[i-1]>b[i-1]&&v<=b[i]))));
+      return a.map((v,i)=>i>0&&Number.isFinite(a[i-1])&&Number.isFinite(b[i-1])&&Number.isFinite(v)&&Number.isFinite(b[i])&&(kind==="up"?(a[i-1]<=b[i-1]&&v>b[i]):kind==="down"?(a[i-1]>=b[i-1]&&v<b[i]):((a[i-1]<=b[i-1]&&v>b[i])||(a[i-1]>=b[i-1]&&v<b[i]))));
     }
     function emuRecent(flags,i,period){
       for(let j=i;j>=Math.max(0,i-period+1);j--)if(flags[j])return true;
