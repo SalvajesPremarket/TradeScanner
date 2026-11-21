@@ -281,7 +281,14 @@
 
         <div class="chart-live-strip" aria-live="polite"><div><div class="muted">ÚLTIMO PRECIO DE SCHWAB</div><div id="chart-live-price" class="chart-live-price">—</div></div><div id="chart-live-state" class="chart-live-state">SIN COTIZACIÓN EN VIVO</div></div>
         <div id="chart-message" class="tab-message">El gráfico mostrará únicamente velas que estén guardadas. No se inventarán precios.</div>
-        <svg id="chart-svg" viewBox="0 0 1000 500" width="100%" role="img" aria-label="Gráfico de velas de Schwab" style="display:block;min-height:260px;border:1px solid #24465b;background:#eef2f5;margin-bottom:14px"><text x="500" y="160" text-anchor="middle" fill="#718096" font-size="14">Carga velas guardadas para mostrar el gráfico</text></svg>
+        <div class="tools" id="chart-zoom-controls" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:8px 0">
+          <strong style="font-size:12px;color:#9bb2c1">AMPLIAR GRÁFICO</strong>
+          <button class="action" type="button" id="chart-zoom-x-in">Horizontal +</button><button class="action" type="button" id="chart-zoom-x-out">Horizontal −</button>
+          <button class="action" type="button" id="chart-zoom-y-in">Vertical +</button><button class="action" type="button" id="chart-zoom-y-out">Vertical −</button>
+          <button class="action" type="button" id="chart-zoom-reset">Restablecer</button>
+          <span id="chart-zoom-help" style="font-size:11px;color:#9bb2c1">Arrastra el gráfico para desplazarte.</span>
+        </div>
+        <svg id="chart-svg" viewBox="0 0 1000 500" width="100%" role="img" aria-label="Gráfico de velas de Schwab; usa los controles para ampliar y arrastra para desplazarte" style="display:block;min-height:260px;border:1px solid #24465b;background:#eef2f5;margin-bottom:14px;touch-action:none;cursor:grab"><text x="500" y="160" text-anchor="middle" fill="#718096" font-size="14">Carga velas guardadas para mostrar el gráfico</text></svg>
         <div class="table-wrap"><table class="simple-table"><thead><tr><th>FECHA</th><th>OPEN</th><th>HIGH</th><th>LOW</th><th>CLOSE</th><th>VOLUMEN</th></tr></thead><tbody id="chart-rows"><tr><td colspan="6">Introduce un ticker y carga sus velas.</td></tr></tbody></table></div>      </div>
     </section>
 
@@ -1322,6 +1329,31 @@
       }
       return out;
     }
+    const chartZoom={x:1,y:1,panX:0,panY:0,dragging:false,lastX:0,lastY:0};
+    function applyChartZoom(){
+      const svg=document.getElementById("chart-svg"),group=svg&&svg.querySelector("#chart-zoom-layer");if(!group)return;
+      group.setAttribute("transform","translate("+(500+chartZoom.panX)+" "+(250+chartZoom.panY)+") scale("+chartZoom.x+" "+chartZoom.y+") translate(-500 -250)");
+    }
+    function wrapChartZoomLayer(){
+      const svg=document.getElementById("chart-svg");if(!svg)return;
+      const ns="http://www.w3.org/2000/svg",g=document.createElementNS(ns,"g");g.setAttribute("id","chart-zoom-layer");
+      while(svg.firstChild)g.appendChild(svg.firstChild);svg.appendChild(g);applyChartZoom();
+    }
+    function changeChartZoom(axis,factor){
+      chartZoom[axis]=Math.max(1,Math.min(5,chartZoom[axis]*factor));if(chartZoom[axis]===1){if(axis==="x")chartZoom.panX=0;else chartZoom.panY=0;}applyChartZoom();
+    }
+    document.getElementById("chart-zoom-x-in").addEventListener("click",()=>changeChartZoom("x",1.25));
+    document.getElementById("chart-zoom-x-out").addEventListener("click",()=>changeChartZoom("x",.8));
+    document.getElementById("chart-zoom-y-in").addEventListener("click",()=>changeChartZoom("y",1.25));
+    document.getElementById("chart-zoom-y-out").addEventListener("click",()=>changeChartZoom("y",.8));
+    document.getElementById("chart-zoom-reset").addEventListener("click",()=>{chartZoom.x=1;chartZoom.y=1;chartZoom.panX=0;chartZoom.panY=0;applyChartZoom();});
+    const zoomSvg=document.getElementById("chart-svg");
+    zoomSvg.addEventListener("pointerdown",e=>{chartZoom.dragging=true;chartZoom.lastX=e.clientX;chartZoom.lastY=e.clientY;zoomSvg.setPointerCapture(e.pointerId);zoomSvg.style.cursor="grabbing";});
+    zoomSvg.addEventListener("pointermove",e=>{if(!chartZoom.dragging)return;const r=zoomSvg.getBoundingClientRect();chartZoom.panX=Math.max(-900,Math.min(900,chartZoom.panX+e.clientX-chartZoom.lastX));chartZoom.panY=Math.max(-450,Math.min(450,chartZoom.panY+e.clientY-chartZoom.lastY));chartZoom.lastX=e.clientX;chartZoom.lastY=e.clientY;applyChartZoom();});
+    const stopChartDrag=()=>{chartZoom.dragging=false;zoomSvg.style.cursor="grab";};
+    zoomSvg.addEventListener("pointerup",stopChartDrag);zoomSvg.addEventListener("pointercancel",stopChartDrag);zoomSvg.addEventListener("lostpointercapture",stopChartDrag);
+    zoomSvg.addEventListener("wheel",e=>{e.preventDefault();if(e.shiftKey)changeChartZoom("y",e.deltaY<0?1.1:.91);else changeChartZoom("x",e.deltaY<0?1.1:.91);},{passive:false});
+
     function drawCandles(candles, liveQuote = null) {
       const svg=document.getElementById("chart-svg"),ns="http://www.w3.org/2000/svg",settings=emuSettings();
       svg.replaceChildren();
@@ -1357,6 +1389,7 @@
       for(let t=0;t<tickCount;t++){const i=Math.round(t*(valid.length-1)/Math.max(1,tickCount-1)),x=xAt(i);add("line",{x1:x,y1:volBottom+2,x2:x,y2:volBottom+6,stroke:"#7b8792","stroke-width":1});label(x,496,formatTime(valid[i]),"middle");}
       label(right+9,14,"PRECIO","start","#344454");
       if(livePrice!==null){const y=yPrice(livePrice);add("line",{x1:left,y1:y,x2:right,y2:y,stroke:"#0891b2","stroke-width":1.8,"stroke-dasharray":"6 4"});add("circle",{cx:right,cy:y,r:4,fill:"#0891b2",stroke:"#fff","stroke-width":1.5});label(right+9,Math.max(priceTop+10,Math.min(priceBottom-3,y-5)),"$"+livePrice.toFixed(2),"start","#087e9c");}
+      wrapChartZoomLayer();
     }
     let chartQuoteTimer = null;
     let chartQuoteSequence = 0;
