@@ -134,7 +134,7 @@ def _indicators(rows: list[dict[str, Any]], cfg: dict[str, Any]) -> dict[str, An
     downs = [max(-x, 0.0) for x in changes]
     avg_up = _ema_wilder(ups, int(cfg["rsi_period"]))[-1]
     avg_down = _ema_wilder(downs, int(cfg["rsi_period"]))[-1]
-    rsi = 100.0 if avg_down == 0 else 100 - 100 / (1 + avg_up / avg_down)
+    rsi = None if avg_down == 0 else 100 - 100 / (1 + avg_up / avg_down)
     emas = {period: _ema(closes, int(period))[-1] for period in cfg["ema_periods"] if len(closes) >= int(period)}
     return {"mid": mid, "upper": upper, "lower": lower, "atr": atr, "rsi": rsi, "emas": emas}
 
@@ -201,7 +201,8 @@ def _scan_timeframe(rows: list[dict[str, Any]], ctx: dict[str, Any], timeframe: 
         else:
             wick, confirmed = None, True
         checks.append(("confirmacion", confirmed, round(wick, 2) if wick is not None else "off", "sin vela de confirmación"))
-        checks.append(("rsi", ind["rsi"] <= cfg["rsi_long_max"] if side == "long" else ind["rsi"] >= cfg["rsi_short_min"], round(ind["rsi"], 1), "RSI sin agotamiento a favor"))
+        rsi_ok = ind["rsi"] is not None and (ind["rsi"] <= cfg["rsi_long_max"] if side == "long" else ind["rsi"] >= cfg["rsi_short_min"])
+        checks.append(("rsi", rsi_ok, round(ind["rsi"], 1) if ind["rsi"] is not None else None, "RSI sin agotamiento a favor"))
         ema200 = ind["emas"].get(200)
         trend_ok = True if ema200 is None else (price >= ema200 * (1 - cfg["trend_guard_pct"] / 100) if side == "long" else price <= ema200 * (1 + cfg["trend_guard_pct"] / 100))
         checks.append(("tendencia_ema200", trend_ok, round((price / ema200 - 1) * 100, 2) if ema200 else "sin EMA200", "contra tendencia mayor (EMA200)"))
@@ -218,7 +219,7 @@ def _scan_timeframe(rows: list[dict[str, Any]], ctx: dict[str, Any], timeframe: 
         if not ok:
             out["reasons"].append(f"{name}: {reason}")
     out["metrics"].update({"bb_superior": round(ind["upper"], 4), "bb_inferior": round(ind["lower"], 4),
-                           "atr": round(atr, 4), "rsi": round(ind["rsi"], 1),
+                           "atr": round(atr, 4), "rsi": round(ind["rsi"], 1) if ind["rsi"] is not None else None,
                            "emas": {str(k): round(v, 4) for k, v in ind["emas"].items()},
                            "avg_volume": int(avg_vol)})
     out["passed"] = not out["reasons"]
