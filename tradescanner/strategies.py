@@ -278,7 +278,7 @@ def is_momentum_scan_program(strategy: dict[str, Any]) -> bool:
     source = strategy.get("source", "")
     return (
         isinstance(source, str)
-        and "STRATEGY_NAME" in source
+        and re.search(r"(?m)^\s*STRATEGY_NAME\s*=\s*['\"]Momentum['\"]", source) is not None
         and re.search(r"(?m)^\s*def\s+scan\s*\(", source) is not None
         and re.search(r"(?m)^\s*CONFIG(?:\s*:[^=]+)?\s*=", source) is not None
     )
