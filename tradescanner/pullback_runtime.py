@@ -133,8 +133,8 @@ def _indicators(rows: list[dict[str, Any]], cfg: dict[str, Any]) -> dict[str, An
     changes = [closes[i] - closes[i - 1] for i in range(1, len(closes))]
     ups = [max(x, 0.0) for x in changes]
     downs = [max(-x, 0.0) for x in changes]
-    avg_up = _ema_wilder([0.0] + ups, int(cfg["rsi_period"]))[-1]
-    avg_down = _ema_wilder([0.0] + downs, int(cfg["rsi_period"]))[-1]
+    avg_up = _ema_wilder(ups, int(cfg["rsi_period"]))[-1]
+    avg_down = _ema_wilder(downs, int(cfg["rsi_period"]))[-1]
     rsi = 100.0 if avg_down == 0 else 100 - 100 / (1 + avg_up / avg_down)
     emas = {period: _ema(closes, int(period))[-1] for period in cfg["ema_periods"] if len(closes) >= int(period)}
     return {"mid": mid, "upper": upper, "lower": lower, "atr": atr, "rsi": rsi, "emas": emas}
