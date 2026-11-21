@@ -288,10 +288,10 @@
 
     <section id="market-calculator" class="market-calculator" aria-label="Calculador de dirección del mercado">
       <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap"><h2>CALCULADOR DE DIRECCIÓN · PRÓXIMA HORA</h2><span class="mc-status" id="mc-updated">Sin análisis todavía</span></div>
-      <p class="mc-sub">Lectura combinada de SPY (30 %), QQQ (30 %) y el activo seleccionado (40 %), con velas reales de 1 minuto de Schwab.</p>
-      <div class="mc-actions"><button class="action" id="mc-analyze" type="button">Analizar SPY + QQQ + activo</button><label class="filter" style="display:flex;align-items:center;gap:6px"><input id="mc-auto" type="checkbox" checked> Actualizar cada 30 s</label><span class="mc-status" id="mc-symbol-label">Activo: —</span></div>
+      <p class="mc-sub">Analiza únicamente el activo seleccionado en el gráfico, con velas reales de 1 minuto de Schwab.</p>
+      <div class="mc-actions"><button class="action" id="mc-analyze" type="button">Analizar activo seleccionado</button><label class="filter" style="display:flex;align-items:center;gap:6px"><input id="mc-auto" type="checkbox" checked> Actualizar cada 30 s</label><span class="mc-status" id="mc-symbol-label">Activo: —</span></div>
       <div class="mc-grid">
-        <div class="mc-card"><small>DECISIÓN CONDICIONAL</small><strong class="mc-direction mc-wait" id="mc-direction">ESPERAR</strong><span id="mc-action-note">Analiza los tres activos para obtener la lectura.</span></div>
+        <div class="mc-card"><small>DECISIÓN CONDICIONAL</small><strong class="mc-direction mc-wait" id="mc-direction">ESPERAR</strong><span id="mc-action-note">Analiza el activo seleccionado para obtener la lectura.</span></div>
         <div class="mc-card"><small>SESGO ALCISTA · EVIDENCIA</small><strong id="mc-bull">—</strong><span>Índice técnico, no probabilidad garantizada.</span></div>
         <div class="mc-card"><small>SESGO BAJISTA · EVIDENCIA</small><strong id="mc-bear">—</strong><span>Índice técnico, no probabilidad garantizada.</span></div>
         <div class="mc-card"><small>PRECIO DEL ACTIVO</small><strong id="mc-price">—</strong><span id="mc-price-time">Esperando cotización.</span></div>
@@ -303,7 +303,7 @@
         <div class="mc-card"><small>OBJETIVO 1 · 1R</small><strong id="mc-target1">—</strong><span>Primer nivel de referencia.</span></div>
         <div class="mc-card"><small>OBJETIVO 2 · 2R</small><strong id="mc-target2">—</strong><span>Segundo nivel de referencia.</span></div>
       </div>
-      <div class="mc-evidence" id="mc-explanation">El análisis explicará por separado SPY, QQQ y el activo seleccionado. Si faltan velas, la lectura será incompleta y no se recomendará una entrada.</div>
+      <div class="mc-evidence" id="mc-explanation">El análisis explicará las señales técnicas del activo seleccionado. Si faltan velas, la lectura será incompleta y no se recomendará una entrada.</div>
       <div class="mc-warning">Importante: la dirección futura no puede conocerse con certeza. Los porcentajes representan la fuerza relativa de señales técnicas simples, no probabilidades calibradas ni promesas de rentabilidad. La flecha es un escenario, no una trayectoria segura. No se envían órdenes a TradeZero.</div>
     </section>
 
@@ -1493,20 +1493,20 @@
       if(!/^[A-Z0-9.\\-]{1,15}$/.test(symbol)){mcEl("mc-explanation").textContent="Selecciona primero un ticker válido en el gráfico.";return;}
       mcState.busy=true;mcEl("mc-analyze").disabled=true;mcEl("mc-updated").textContent="Consultando Schwab…";mcEl("mc-symbol-label").textContent="Activo: "+symbol;
       try{
-        const data=await Promise.all(["SPY","QQQ",symbol].map(async s=>{const p=await readJson(await fetch("/api/candles/"+encodeURIComponent(s)+"?limit=180&timeframe=1m",{cache:"no-store"}));return mcAnalyzeCandles(s,p.candles);}));
-        const [spy,qqq,asset]=data,combined=spy.score*.30+qqq.score*.30+asset.score*.40,bull=Math.round((combined+100)/2),bear=100-bull;
-        const aligned=(spy.score>0&&qqq.score>0&&asset.score>0)||(spy.score<0&&qqq.score<0&&asset.score<0),direction=aligned&&combined>=22?"LARGO":aligned&&combined<=-22?"CORTO":"ESPERAR";
+        const p=await readJson(await fetch("/api/candles/"+encodeURIComponent(symbol)+"?limit=180&timeframe=1m",{cache:"no-store"}));
+        const asset=mcAnalyzeCandles(symbol,p.candles),score=asset.score,bull=Math.round((score+100)/2),bear=100-bull;
+        const direction=score>=22?"LARGO":score<=-22?"CORTO":"ESPERAR";
         const price=asset.last,range=Number.isFinite(asset.atr)&&asset.atr>0?asset.atr*Math.sqrt(60):null;
         const entry=direction==="LARGO"?asset.triggerHigh+0.01:direction==="CORTO"?asset.triggerLow-0.01:null,risk=range!==null?Math.max(range*.65,asset.atr):null;
         const stop=direction==="LARGO"&&risk!==null?entry-risk:direction==="CORTO"&&risk!==null?entry+risk:null,t1=direction==="LARGO"&&risk!==null?entry+risk:direction==="CORTO"&&risk!==null?entry-risk:null,t2=direction==="LARGO"&&risk!==null?entry+2*risk:direction==="CORTO"&&risk!==null?entry-2*risk:null;
         mcEl("mc-direction").textContent=direction;mcEl("mc-direction").className="mc-direction "+(direction==="LARGO"?"mc-long":direction==="CORTO"?"mc-short":"mc-wait");
-        mcEl("mc-action-note").textContent=direction==="ESPERAR"?"Las tres lecturas no están alineadas. No forzar operación.":direction==="LARGO"?"Esperar ruptura y confirmación por encima de la entrada.":"Esperar ruptura y confirmación por debajo de la entrada.";
+        mcEl("mc-action-note").textContent=direction==="ESPERAR"?"La lectura del activo no muestra suficiente ventaja. Esperar.":direction==="LARGO"?"Esperar ruptura y confirmación por encima de la entrada.":"Esperar ruptura y confirmación por debajo de la entrada.";
         mcEl("mc-bull").textContent=bull+"%";mcEl("mc-bear").textContent=bear+"%";mcEl("mc-price").textContent=mcFmt(price);
         mcEl("mc-price-time").textContent=asset.asOf?"Última vela: "+new Date(asset.asOf).toLocaleTimeString("es",{timeZone:"America/New_York"})+" ET":"Hora de vela no disponible";
         mcEl("mc-entry").textContent=entry===null?"—":mcFmt(entry);mcEl("mc-entry-note").textContent=direction==="ESPERAR"?"Sin entrada: esperar alineación.":"Confirmar con cierre de vela de 1 minuto; no perseguir el precio.";
         mcEl("mc-stop").textContent=stop===null?"—":mcFmt(stop);mcEl("mc-target1").textContent=t1===null?"—":mcFmt(t1);mcEl("mc-target2").textContent=t2===null?"—":mcFmt(t2);mcRenderArrow(direction,price,stop,t2);
         const explain=x=>x.symbol+": "+(x.score>0?"sesgo alcista ":x.score<0?"sesgo bajista ":"neutral ")+Math.abs(Math.round(x.score))+"/100. "+x.notes.join("; ")+".";
-        mcEl("mc-explanation").textContent=explain(spy)+" "+explain(qqq)+" "+explain(asset)+" Combinación: SPY 30 % + QQQ 30 % + "+symbol+" 40 %. "+(aligned?"Las tres lecturas coinciden.":"Las lecturas no coinciden plenamente; se aplica cautela.");
+        mcEl("mc-explanation").textContent=explain(asset)+" Decisión basada únicamente en "+symbol+"; no se utilizan SPY ni QQQ.";
         mcEl("mc-updated").textContent="Actualizado "+new Date().toLocaleTimeString("es",{timeZone:"America/Costa_Rica"})+" · Schwab";mcState.lastSymbol=symbol;
       }catch(error){
         mcEl("mc-direction").textContent="ESPERAR";mcEl("mc-direction").className="mc-direction mc-wait";mcEl("mc-action-note").textContent="Datos insuficientes; no operar con esta lectura.";
