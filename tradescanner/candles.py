@@ -150,7 +150,7 @@ class CandleStore:
         }
 
     def latest(self, symbol: str, limit: int = 6000) -> list[dict[str, Any]]:
-        bounded_limit = max(1, min(int(limit), 10000))
+        bounded_limit = max(1, int(limit))
         with self._connect() as connection:
             rows = connection.execute(
                 """SELECT symbol, candle_time_ms, open, high, low, close, volume
