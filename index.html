@@ -279,18 +279,6 @@
           <label><input type="checkbox" data-emu-toggle="classicBB" checked> Condición Bollinger clásica</label>
         </div>
 
-        <div id="chart-message" class="tab-message">El gráfico mostrará únicamente velas que estén guardadas. No se inventarán precios.</div>
-        <div class="tools" id="chart-zoom-controls" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:8px 0">
-          <strong style="font-size:12px;color:#9bb2c1">AMPLIAR GRÁFICO</strong>
-          <button class="action" type="button" id="chart-zoom-x-in">Horizontal +</button><button class="action" type="button" id="chart-zoom-x-out">Horizontal −</button>
-          <button class="action" type="button" id="chart-zoom-y-in">Vertical +</button><button class="action" type="button" id="chart-zoom-y-out">Vertical −</button>
-          <button class="action" type="button" id="chart-zoom-reset">Restablecer</button>
-          <span id="chart-zoom-help" style="font-size:11px;color:#9bb2c1">Arrastra el gráfico para desplazarte.</span>
-        </div>
-        <svg id="chart-svg" viewBox="0 0 1000 500" width="100%" role="img" aria-label="Gráfico de velas de Schwab; usa los controles para ampliar y arrastra para desplazarte" style="display:block;min-height:260px;border:1px solid #24465b;background:#eef2f5;margin-bottom:14px;touch-action:none;cursor:grab"><text x="500" y="160" text-anchor="middle" fill="#718096" font-size="14">Carga velas guardadas para mostrar el gráfico</text></svg>      </div>
-    </section>
-
-
     <section id="market-calculator" class="market-calculator" aria-label="Calculador de dirección del mercado">
       <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap"><h2>CALCULADOR DE DIRECCIÓN · PRÓXIMA HORA</h2><span class="mc-status" id="mc-updated">Sin análisis todavía</span></div>
       <p class="mc-sub">Analiza únicamente el activo seleccionado en el gráfico, con velas reales de 1 minuto de Schwab.</p>
@@ -328,6 +316,20 @@
       </div>
       <div class="mc-warning">Importante: la dirección futura no puede conocerse con certeza. Los porcentajes representan la fuerza relativa de señales técnicas simples, no probabilidades calibradas ni promesas de rentabilidad. La flecha es un escenario, no una trayectoria segura. No se envían órdenes a TradeZero.</div>
     </section>
+
+        <div id="chart-message" class="tab-message">El gráfico mostrará únicamente velas que estén guardadas. No se inventarán precios.</div>
+        <div class="tools" id="chart-zoom-controls" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:8px 0">
+          <strong style="font-size:12px;color:#9bb2c1">AMPLIAR GRÁFICO</strong>
+          <button class="action" type="button" id="chart-zoom-x-in">Horizontal +</button><button class="action" type="button" id="chart-zoom-x-out">Horizontal −</button>
+          <button class="action" type="button" id="chart-zoom-y-in">Vertical +</button><button class="action" type="button" id="chart-zoom-y-out">Vertical −</button>
+          <button class="action" type="button" id="chart-zoom-reset">Restablecer</button>
+          <span id="chart-zoom-help" style="font-size:11px;color:#9bb2c1">Arrastra el gráfico para desplazarte.</span>
+        </div>
+        <svg id="chart-svg" viewBox="0 0 1000 500" width="100%" role="img" aria-label="Gráfico de velas de Schwab; usa los controles para ampliar y arrastra para desplazarte" style="display:block;min-height:260px;border:1px solid #24465b;background:#eef2f5;margin-bottom:14px;touch-action:none;cursor:grab"><text x="500" y="160" text-anchor="middle" fill="#718096" font-size="14">Carga velas guardadas para mostrar el gráfico</text></svg>      </div>
+    </section>
+
+
+
 
     </section>
 
@@ -1475,24 +1477,15 @@
       const requestedLimit = Number(document.getElementById("chart-limit").value);
       const limit = Number.isFinite(requestedLimit) ? Math.max(10,Math.floor(requestedLimit)) : 500;
       const timeframe = document.getElementById("chart-timeframe").value;
-      const body = document.getElementById("chart-rows"); body.replaceChildren();
       document.getElementById("chart-message").textContent = "Cargando velas reales de " + symbol + "…";
       document.getElementById("integrated-chart").scrollIntoView({behavior:"smooth",block:"start"});
       chartRows = [];
       startChartQuoteUpdates(symbol);
+      void runMarketCalculator();
       try {
         const payload = await readJson(await fetch("/api/candles/" + encodeURIComponent(symbol) + "?limit=" + limit + "&timeframe=" + encodeURIComponent(timeframe),{cache:"no-store"}));
         chartRows = payload.candles || [];
         drawCandles(getLiveChartCandles(), chartLiveQuote);
-        if (!chartRows.length) {
-          const tr = document.createElement("tr"), td = document.createElement("td"); td.colSpan=6; td.textContent="No hay velas guardadas para "+symbol+". No se muestran datos inventados."; tr.appendChild(td); body.appendChild(tr);
-        } else for (const candle of chartRows) {
-          const tr = document.createElement("tr");
-          for (const value of [candle.candle_time_ms ? new Date(candle.candle_time_ms).toLocaleString() : "—", candle.open, candle.high, candle.low, candle.close, candle.volume]) {
-            const td = document.createElement("td"); td.textContent = value == null ? "—" : String(value); tr.appendChild(td);
-          }
-          body.appendChild(tr);
-        }
         document.getElementById("chart-message").textContent = symbol + " · " + (payload.timeframe_label || timeframe) + ": " + chartRows.length + " velas recibidas de Schwab. " + (payload.source === "stored" ? "Datos guardados." : "Histórico solicitado al proveedor en vivo.") + " RVOL: " + (payload.rvol && payload.rvol.rvol != null ? payload.rvol.rvol : "sin datos suficientes");
       } catch(error) { document.getElementById("chart-message").textContent = apiMessage(error); }
     }
@@ -1508,7 +1501,7 @@
     });
 
 
-    const mcState = {timer:null,busy:false,lastSymbol:null};
+    const mcState = {timer:null,busy:false,pending:false,lastSymbol:null};
     const mcEl = id => document.getElementById(id);
     const mcFmt = value => Number.isFinite(value) ? "$"+value.toFixed(2) : "—";
     function mcEma(values,period){if(values.length<period)return null;const k=2/(period+1);let v=values.slice(0,period).reduce((a,b)=>a+b,0)/period;for(let i=period;i<values.length;i++)v=values[i]*k+v*(1-k);return v;}
@@ -1582,7 +1575,9 @@
       drawCandles(getLiveChartCandles(),chartLiveQuote);
     }
     async function runMarketCalculator(){
-      if(mcState.busy)return;const symbol=String(mcEl("chart-symbol").value||"").trim().toUpperCase();
+      const symbol=String(mcEl("chart-symbol").value||"").trim().toUpperCase();
+      if(mcState.busy){mcState.pending=true;return;}
+      mcHasRun=true;
       if(!/^[A-Z0-9.\\-]{1,15}$/.test(symbol)){mcEl("mc-explanation").textContent="Selecciona primero un ticker válido en el gráfico.";return;}
       mcState.busy=true;mcEl("mc-analyze").disabled=true;mcEl("mc-updated").textContent="Consultando Schwab…";mcEl("mc-symbol-label").textContent="Activo: "+symbol;
       try{
@@ -1624,7 +1619,7 @@
         mcEl("mc-direction").textContent="ESPERAR";mcEl("mc-direction").className="mc-direction mc-wait";mcEl("mc-action-note").textContent="Datos insuficientes; no operar con esta lectura.";
         mcEl("mc-explanation").textContent="Análisis detenido: "+apiMessage(error)+" No se sustituyen datos faltantes ni se inventan velas.";
         mcEl("mc-updated").textContent="No se pudo completar el análisis";mcEl("mc-levels-status").textContent="No se pudieron calcular los niveles";["mc-entry","mc-stop","mc-target1","mc-target2","mc-avg-overbought","mc-avg-oversold"].forEach(id=>mcEl(id).textContent="—");mcRenderArrow("ESPERAR",NaN,null,null);
-      }finally{mcState.busy=false;mcEl("mc-analyze").disabled=false;}
+      }finally{mcState.busy=false;mcEl("mc-analyze").disabled=false;if(mcState.pending){mcState.pending=false;void runMarketCalculator();}}
     }
     mcEl("mc-analyze").addEventListener("click",runMarketCalculator);
     mcEl("mc-auto").addEventListener("change",()=>{if(mcState.timer!==null)window.clearInterval(mcState.timer);mcState.timer=null;if(mcHasRun&&mcEl("mc-auto").checked)mcState.timer=window.setInterval(()=>{if(!document.hidden)void runMarketCalculator();},30000);});
