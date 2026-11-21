@@ -1484,7 +1484,8 @@
       const symbol = String(rawSymbol || "").trim().toUpperCase();
       if (!/^[A-Z0-9.\\-]{1,15}$/.test(symbol)) return;
       document.getElementById("chart-symbol").value = symbol;
-      const requestedLimit = Number(document.getElementById("chart-limit").value);\n      const limit = Number.isFinite(requestedLimit) ? Math.max(10,Math.floor(requestedLimit)) : 500;
+      const requestedLimit = Number(document.getElementById("chart-limit").value);
+      const limit = Number.isFinite(requestedLimit) ? Math.max(10,Math.floor(requestedLimit)) : 500;
       const timeframe = document.getElementById("chart-timeframe").value;
       const body = document.getElementById("chart-rows"); body.replaceChildren();
       document.getElementById("chart-message").textContent = "Cargando velas reales de " + symbol + "…";
