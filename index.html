@@ -1410,7 +1410,7 @@
         }
         if(!visible)add("text",{x:left+5,y:35,fill:"#7c4d12","font-size":10},"Niveles calculados fuera del rango vertical visible");
       }
-      const line=      const line=(values,colors,width,skipEvery3=false)=>{const paths=new Map();for(let i=1;i<values.length;i++){const a=values[i-1],b=values[i];if(!Number.isFinite(a)||!Number.isFinite(b)||(skipEvery3&&i%3===2))continue;const color=Array.isArray(colors)?colors[i]:colors;if(!color)continue;const segment="M"+xAt(i-1).toFixed(2)+" "+yPrice(a).toFixed(2)+" L"+xAt(i).toFixed(2)+" "+yPrice(b).toFixed(2);paths.set(color,(paths.get(color)||"")+segment);}for(const [color,path] of paths)add("path",{d:path,fill:"none",stroke:color,"stroke-width":width,"stroke-linejoin":"round","stroke-linecap":"round"});};
+      const line=(values,colors,width,skipEvery3=false)=>{const paths=new Map();for(let i=1;i<values.length;i++){const a=values[i-1],b=values[i];if(!Number.isFinite(a)||!Number.isFinite(b)||(skipEvery3&&i%3===2))continue;const color=Array.isArray(colors)?colors[i]:colors;if(!color)continue;const segment="M"+xAt(i-1).toFixed(2)+" "+yPrice(a).toFixed(2)+" L"+xAt(i).toFixed(2)+" "+yPrice(b).toFixed(2);paths.set(color,(paths.get(color)||"")+segment);}for(const [color,path] of paths)add("path",{d:path,fill:"none",stroke:color,"stroke-width":width,"stroke-linejoin":"round","stroke-linecap":"round"});};
       if(settings.bb){line(ind.bbTop,ind.bbC1,1.25);line(ind.bbBot,ind.bbC1,1.25);line(ind.bbTop,ind.bbC2,.9,true);line(ind.bbBot,ind.bbC2,.9,true);}
       if(settings.ema200){line(ind.e200,ind.dC1,1.65);line(ind.e200,ind.dC2,1.15,true);}
       if(settings.ema50){line(ind.e50,ind.fC2,1.0);line(ind.e50,ind.fC1,1.55);line(ind.e50,ind.fC3,1.0,true);}
