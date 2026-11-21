@@ -35,6 +35,7 @@ from tradescanner.schwab import (
     SchwabConfigurationError,
     get_quotes,
     get_chart_history,
+    get_price_history,
     get_all_time_daily_history,
 )
 
@@ -911,8 +912,11 @@ def _market_level_analyze(candles: list[dict], price: float, timeframe: str) -> 
         state = "sobreventa"
     else:
         state = "neutral"
+    missing = [f"EMA{period}" for period in (3, 9, 20, 50, 200) if f"EMA{period}" not in lines]
+    status = "partial" if missing else "ok"
     return {
-        "timeframe": timeframe, "candles": len(closes), "status": "ok",
+        "timeframe": timeframe, "candles": len(closes), "status": status,
+        "reason": "Faltan datos para " + ", ".join(missing) if missing else None,
         "overbought": overbought, "oversold": oversold, "state": state,
         "reference": reference, "reference_lines": reference_lines,
         "ema": {key: lines[key] for key in ("EMA3", "EMA9", "EMA20", "EMA50", "EMA200") if key in lines},
@@ -934,7 +938,7 @@ def market_levels_status(symbol: str):
         if not isinstance(quote, dict) or not isinstance(quote.get("price"), (int, float)) or quote["price"] <= 0:
             raise HTTPException(status_code=503, detail="Schwab no devolvió un precio actual válido.")
         price = float(quote["price"])
-        minute_payload = get_chart_history(normalized, "1m")
+        minute_payload = get_price_history(normalized, period=10, frequency=1)
         minute_candles = normalize_price_history(normalized, minute_payload)
         current_minute = now.replace(second=0, microsecond=0)
         minute_candles = [
