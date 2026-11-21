@@ -1324,6 +1324,12 @@
     let chartQuoteInFlight = false;
     let chartLiveQuote = null;
 
+    // Devuelve únicamente las velas históricas reales cargadas para el símbolo actual.
+    // La cotización en vivo se dibuja como una línea independiente y no inventa una vela OHLC.
+    function getLiveChartCandles() {
+      return Array.isArray(chartRows) ? chartRows : [];
+    }
+
     function stopChartQuoteUpdates() {
       if (chartQuoteTimer !== null) window.clearInterval(chartQuoteTimer);
       chartQuoteTimer = null;
