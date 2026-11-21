@@ -1384,7 +1384,8 @@
       const left=65,right=910,step=(right-left)/valid.length,xAt=i=>left+step*(i+.5),priceTop=24,priceBottom=395,volTop=425,volBottom=480;
       const livePrice=liveQuote&&Number.isFinite(Number(liveQuote.price))&&Number(liveQuote.price)>0?Number(liveQuote.price):null;
       const overlays=[ind.e3,ind.e9,ind.e20,ind.e50,ind.e200,ind.bbTop,ind.bbBot,ind.sar,ind.tp1,ind.tp2].flat().filter(Number.isFinite);
-      const allPrice=[...valid.map(c=>Number(c.low)),...valid.map(c=>Number(c.high)),...overlays];if(livePrice!==null)allPrice.push(livePrice);
+      const levelPrices=marketLevelOverlay&&marketLevelOverlay.symbol===String(document.getElementById("chart-symbol").value||"").toUpperCase()&&marketLevelOverlay.levels?Object.values(marketLevelOverlay.levels).filter(Number.isFinite):[];
+      const allPrice=[...valid.map(c=>Number(c.low)),...valid.map(c=>Number(c.high)),...overlays,...levelPrices];if(livePrice!==null)allPrice.push(livePrice);
       const min=Math.min(...allPrice),max=Math.max(...allPrice),span=max-min||1,yPrice=v=>priceBottom-(v-min)/span*(priceBottom-priceTop);
       for(let k=0;k<=5;k++){const y=priceTop+k*(priceBottom-priceTop)/5,val=max-k*span/5;add("line",{x1:left,y1:y,x2:right,y2:y,stroke:"#d7dee5","stroke-width":1});label(right+9,y+3,val.toFixed(2),"start");}
       add("line",{x1:right,y1:priceTop,x2:right,y2:priceBottom,stroke:"#aab5bf","stroke-width":1});
@@ -1401,7 +1402,7 @@
         let visible=0;
         for(const [key,name,color] of specs){
           const value=marketLevelOverlay.levels[key];
-          if(!Number.isFinite(Number(value))||Number(value)<min||Number(value)>max)continue;
+          if(!Number.isFinite(Number(value)))continue;
           const y=yPrice(Number(value));
           add("line",{x1:left,y1:y,x2:right,y2:y,stroke:color,"stroke-width":1.15,"stroke-dasharray":key==="BP"?"2 3":"6 4",opacity:.92});
           add("rect",{x:left+3,y:y-12,width:Math.max(68,name.length*6+10),height:14,rx:2,fill:"#f5f1e8",stroke:color,"stroke-width":.6,opacity:.94});
