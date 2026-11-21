@@ -1001,12 +1001,23 @@ def _evaluate_active_strategies(store: SnapshotStore, batch: list[str]) -> dict[
             rejection_counts[key] = rejection_counts.get(key, 0) + 1
     candles_ready = sum(
         1 for item in combined["evaluations"]
-        if int(item.get("candles_available", 0) or 0) >= 35
-        and item.get("timeframe") == "1m"
+        if (
+            (int(item.get("candles_available", 0) or 0) >= 35 and item.get("timeframe") == "1m")
+            or int(item.get("daily_bars", 0) or 0) >= 60
+        )
     )
     rvol_ready = sum(
         1 for item in combined["evaluations"]
-        if int(item.get("rvol_sessions_used", 0) or 0) >= 2
+        if (
+            int(item.get("rvol_sessions_used", 0) or 0) >= 2
+            or isinstance(item.get("metrics", {}).get("daily", {}).get("rvol"), (int, float))
+        )
+    )
+    daily_history_ready = sum(
+        1 for item in combined["evaluations"] if int(item.get("daily_bars", 0) or 0) >= 60
+    )
+    weekly_history_ready = sum(
+        1 for item in combined["evaluations"] if int(item.get("weekly_bars", 0) or 0) >= 55
     )
     macd_checked = sum(
         1 for item in combined["evaluations"]
@@ -1017,10 +1028,10 @@ def _evaluate_active_strategies(store: SnapshotStore, batch: list[str]) -> dict[
     ) or "none"
     logger.warning(
         "Scan cycle strategy evaluation active=%s evaluations=%s matches=%s statuses=%s "
-        "candles_ready=%s rvol_ready=%s macd_checked=%s rejection_counts=%s",
+        "candles_ready=%s rvol_ready=%s daily_history_ready=%s weekly_history_ready=%s macd_checked=%s rejection_counts=%s",
         len(strategies), len(combined["evaluations"]), len(combined["matches"]),
         ",".join(str(state.get("strategy", "unknown")) + ":" + str(state.get("status", "unknown")) for state in states),
-        candles_ready, rvol_ready, macd_checked, reason_summary,
+        candles_ready, rvol_ready, daily_history_ready, weekly_history_ready, macd_checked, reason_summary,
     )
     return combined
 
