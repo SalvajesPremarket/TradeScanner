@@ -1,5 +1,5 @@
 import unittest
-from datetime import datetime
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from tradescanner.candles import DailyCandleStore, CandleStore
@@ -13,7 +13,7 @@ ET = ZoneInfo("America/New_York")
 def daily_rows(count=70):
     rows = []
     for index in range(count):
-        stamp = int(datetime(2026, 1, 2 + index, 16, 0, tzinfo=ET).timestamp() * 1000)
+        stamp = int(datetime(2026, 1, 2, 16, 0, tzinfo=ET) + timedelta(days=index).timestamp() * 1000)
         close = 10.0 + index * 0.05
         rows.append({
             "symbol": "TEST", "candle_time_ms": stamp,
