@@ -1515,7 +1515,7 @@
       }finally{mcState.busy=false;mcEl("mc-analyze").disabled=false;}
     }
     mcEl("mc-analyze").addEventListener("click",runMarketCalculator);
-    mcEl("mc-auto").addEventListener("change",()=>{if(mcState.timer!==null)window.clearInterval(mcState.timer);mcState.timer=null;if(mcEl("mc-auto").checked)mcState.timer=window.setInterval(()=>{if(!document.hidden)void runMarketCalculator();},30000);});
+    mcEl("mc-auto").addEventListener("change",()=>{if(mcState.timer!==null)window.clearInterval(mcState.timer);mcState.timer=null;if(mcHasRun&&mcEl("mc-auto").checked)mcState.timer=window.setInterval(()=>{if(!document.hidden)void runMarketCalculator();},30000);});
     let mcHasRun=false;
     mcState.timer=window.setInterval(()=>{if(mcHasRun&&mcEl("mc-auto").checked&&!document.hidden)void runMarketCalculator();},30000);
     mcEl("mc-analyze").addEventListener("click",()=>{mcHasRun=true;});
