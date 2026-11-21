@@ -765,9 +765,22 @@ def _fetch_pullback_daily_history_background(symbol: str, store_path: Any) -> No
             if datetime.fromtimestamp(row["candle_time_ms"] / 1000, ZoneInfo("America/New_York")).date() < today_et
         ]
         saved = DailyCandleStore(store_path).save(completed)
+        SnapshotStore(store_path).set_state("pullback_daily_history:" + symbol, {
+            "status": "ready" if len(completed) >= 300 else "partial",
+            "attempted_at": time.time(),
+            "provider_candles": len(payload.get("candles", [])),
+            "completed_candles": len(completed),
+            "saved_candles": saved,
+        })
         logger.info("Pullback daily_history symbol=%s provider=%s completed=%s saved=%s",
                     symbol, len(payload.get("candles", [])), len(completed), saved)
     except Exception as exc:
+        try:
+            SnapshotStore(store_path).set_state("pullback_daily_history:" + symbol, {
+                "status": "error", "attempted_at": time.time(), "error_type": type(exc).__name__,
+            })
+        except Exception:
+            pass
         logger.warning("Pullback daily_history_failed symbol=%s error_type=%s", symbol, type(exc).__name__)
     finally:
         with _pullback_history_lock:
@@ -808,6 +821,10 @@ def _evaluate_pullback_strategy(store: SnapshotStore, batch: list[str], strategy
             quote_day = datetime.fromtimestamp(quote_ms / 1000, ZoneInfo("America/New_York")).date() if isinstance(quote_ms, (int, float)) and quote_ms > 0 else datetime.now(ZoneInfo("America/New_York")).date()
             stale = (quote_day - latest_day).days > 5
         if count >= 300 and not stale:
+            continue
+        prior_attempt = store.get_state("pullback_daily_history:" + symbol, {})
+        attempted_at = prior_attempt.get("attempted_at", 0) if isinstance(prior_attempt, dict) else 0
+        if isinstance(attempted_at, (int, float)) and time.time() - float(attempted_at) < 24 * 60 * 60:
             continue
         with _pullback_history_lock:
             if symbol in _pullback_history_inflight or len(_pullback_history_inflight) >= _PULLBACK_HISTORY_MAX_INFLIGHT:
