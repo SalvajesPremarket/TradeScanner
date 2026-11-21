@@ -279,7 +279,6 @@
           <label><input type="checkbox" data-emu-toggle="classicBB" checked> Condición Bollinger clásica</label>
         </div>
 
-        <div class="chart-live-strip" aria-live="polite"><div><div class="muted">ÚLTIMO PRECIO DE SCHWAB</div><div id="chart-live-price" class="chart-live-price">—</div></div><div id="chart-live-state" class="chart-live-state">SIN COTIZACIÓN EN VIVO</div></div>
         <div id="chart-message" class="tab-message">El gráfico mostrará únicamente velas que estén guardadas. No se inventarán precios.</div>
         <div class="tools" id="chart-zoom-controls" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:8px 0">
           <strong style="font-size:12px;color:#9bb2c1">AMPLIAR GRÁFICO</strong>
@@ -1454,21 +1453,11 @@
         const quote = await readJson(await fetch("/api/quote/" + encodeURIComponent(symbol), {cache:"no-store"}));
         if (sequence !== chartQuoteSequence) return;
         chartLiveQuote = quote;
-        document.getElementById("chart-live-price").textContent = "$" + Number(quote.price).toFixed(2);
-        const stateNode = document.getElementById("chart-live-state");
-        const age = Math.max(0, Number(quote.quote_age_seconds) || 0);
-        stateNode.classList.toggle("is-live", quote.is_live === true);
-        stateNode.textContent = quote.is_live === true
-          ? "LIVE · SCHWAB · " + age.toFixed(1) + " s"
-          : "ÚLTIMA COTIZACIÓN · " + age.toFixed(0) + " s · NO CONFIRMADA EN VIVO";
-        stateNode.title = "Hora del proveedor: " + new Date(Number(quote.quote_time_ms)).toLocaleString("es", {timeZone:"America/New_York"}) + " ET";
+        // La cotización en vivo actualiza el gráfico, sin mostrar un contador externo.
         drawCandles(getLiveChartCandles(), chartLiveQuote);
       } catch (error) {
         if (sequence !== chartQuoteSequence) return;
-        const stateNode = document.getElementById("chart-live-state");
-        stateNode.classList.remove("is-live");
-        stateNode.textContent = "SIN COTIZACIÓN EN VIVO · " + apiMessage(error);
-        stateNode.title = "No se muestra un precio antiguo como si fuera actual.";
+        // No se muestra el estado de actualización fuera del gráfico.
       } finally {
         if (sequence === chartQuoteSequence) chartQuoteInFlight = false;
       }
