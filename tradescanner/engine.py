@@ -767,7 +767,7 @@ def _fetch_pullback_daily_history_background(symbol: str, store_path: Any) -> No
 
 def _evaluate_pullback_strategy(store: SnapshotStore, batch: list[str], strategy: dict[str, Any]) -> dict[str, Any]:
     """Evaluate the stored PullBackArteaga contract on daily and derived weekly bars."""
-    from tradescanner.pullback_runtime import evaluate as evaluate_pullback
+    from tradescanner.pullback_runtime import evaluate as evaluate_pullback, to_weekly
 
     rows = store.latest_for_symbols(batch)
     apply_cached_float(rows, store)
@@ -832,7 +832,7 @@ def _evaluate_pullback_strategy(store: SnapshotStore, batch: list[str], strategy
         }
         result = evaluate_pullback(daily, context, str(strategy.get("source", "")))
         daily_bars = len(daily)
-        weekly_bars = len(__import__("tradescanner.pullback_runtime", fromlist=["to_weekly"]).to_weekly(daily))
+        weekly_bars = len(to_weekly(daily))
         evaluations.append({
             "symbol": symbol,
             "passed": bool(result.get("passed")),
