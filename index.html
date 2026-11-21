@@ -242,7 +242,26 @@
     <section id="integrated-chart" aria-label="Gráficos y velas reales de Schwab" style="margin-top:18px;border:1px solid #244256;border-radius:11px;background:linear-gradient(155deg,#0b1b29,#08131f);overflow:hidden">
       <div class="panel-head"><h2>GRÁFICOS · VELAS REALES DE SCHWAB</h2><span class="muted">Indicadores técnicos</span></div>
       <div class="tab-body">
-        <form id="chart-form" class="tools"><label class="field" style="min-width:150px;flex:1">Ticker<input id="chart-symbol" maxlength="15" value="AAPL" required></label><label class="field" style="width:150px">Timeframe<select id="chart-timeframe"><option value="1m">1 minuto</option><option value="5m">5 minutos</option><option value="15m">15 minutos</option><option value="30m">30 minutos</option><option value="1h">1 hora</option><option value="day">1D · Día</option><option value="week">1W · Semana</option></select></label><label class="field" style="width:130px">N.º de velas<input id="chart-limit" type="number" min="10" max="500" value="100"></label><button class="action" type="submit">Cargar velas</button></form>
+        <form id="chart-form" class="tools"><label class="field" style="min-width:150px;flex:1">Ticker<input id="chart-symbol" maxlength="15" value="AAPL" required></label><label class="field" style="width:150px">Timeframe<select id="chart-timeframe"><option value="1m">1 minuto</option><option value="5m">5 minutos</option><option value="15m">15 minutos</option><option value="30m">30 minutos</option><option value="1h">1 hora</option><option value="day">1D · Día</option><option value="week">1W · Semana</option></select></label><label class="field" style="width:130px">N.º de velas<input id="chart-limit" type="number" min="10" max="500" value="500"></label><button class="action" type="submit">Cargar velas</button></form>
+        
+        <div id="emu-controls" style="display:flex;flex-wrap:wrap;gap:8px 13px;align-items:center;padding:10px 12px;margin:0 0 10px;border:1px solid #24465b;border-radius:8px;background:#0a1b29;color:#c9deea;font-size:11px">
+          <strong style="color:#7fe4db">EMU · ESTUDIOS MILTON UNIFICADOS</strong>
+          <label><input type="checkbox" data-emu-toggle="bb" checked> Bollinger</label>
+          <label><input type="checkbox" data-emu-toggle="ema200" checked> EMA200</label>
+          <label><input type="checkbox" data-emu-toggle="ema50" checked> EMA50</label>
+          <label><input type="checkbox" data-emu-toggle="ema20" checked> EMA20</label>
+          <label><input type="checkbox" data-emu-toggle="ema9" checked> EMA9</label>
+          <label><input type="checkbox" data-emu-toggle="ema3" checked> EMA3</label>
+          <label><input type="checkbox" data-emu-toggle="sar" checked> PSAR</label>
+          <label><input type="checkbox" data-emu-toggle="candles" checked> Colorear velas</label>
+          <label><input type="checkbox" data-emu-toggle="cross" checked> Cruces 3/9</label>
+          <label><input type="checkbox" data-emu-toggle="targets" checked> Target Price</label>
+          <label><input type="checkbox" data-emu-toggle="lastPriority" checked> Prioridad última</label>
+          <label><input type="checkbox" data-emu-toggle="nested" checked> Medias anidadas</label>
+          <label><input type="checkbox" data-emu-toggle="ema9Base" checked> Medias sobre EMA9</label>
+          <label><input type="checkbox" data-emu-toggle="classicBB" checked> Condición Bollinger clásica</label>
+        </div>
+
         <div class="chart-live-strip" aria-live="polite"><div><div class="muted">ÚLTIMO PRECIO DE SCHWAB</div><div id="chart-live-price" class="chart-live-price">—</div></div><div id="chart-live-state" class="chart-live-state">SIN COTIZACIÓN EN VIVO</div></div>
         <div id="chart-message" class="tab-message">El gráfico mostrará únicamente velas que estén guardadas. No se inventarán precios.</div>
         <svg id="chart-svg" viewBox="0 0 1000 500" width="100%" role="img" aria-label="Gráfico de velas de Schwab" style="display:block;min-height:260px;border:1px solid #24465b;background:#eef2f5;margin-bottom:14px"><text x="500" y="160" text-anchor="middle" fill="#718096" font-size="14">Carga velas guardadas para mostrar el gráfico</text></svg>
@@ -1146,84 +1165,191 @@
       }
       return result;
     }
-    function drawCandles(candles, liveQuote = null) {
-      const svg = document.getElementById("chart-svg");
-      const ns = "http://www.w3.org/2000/svg";
-      svg.replaceChildren();
-      const add = (tag,attrs,textValue) => {
-        const el = document.createElementNS(ns,tag);
-        for (const [key,value] of Object.entries(attrs||{})) el.setAttribute(key,String(value));
-        if (textValue != null) el.textContent = textValue;
-        svg.appendChild(el); return el;
-      };
-      const label=(x,y,text,anchor="start",fill="#526170")=>add("text",{x,y,"text-anchor":anchor,fill,"font-size":10,"font-family":"Arial"},text);
-      if (!candles.length) { add("text",{x:500,y:245,"text-anchor":"middle",fill:"#526170","font-size":14},"No hay velas reales guardadas para graficar"); return; }
-      const valid=candles.filter(c=>[c.open,c.high,c.low,c.close].every(v=>Number.isFinite(Number(v))));
-      if(!valid.length){add("text",{x:500,y:245,"text-anchor":"middle",fill:"#526170","font-size":14},"Las velas guardadas no contienen OHLC válido");return;}
-      const closes=valid.map(c=>Number(c.close));
-      const ema3=emaSeries(closes,3), ema9=emaSeries(closes,9), ema20=emaSeries(closes,20), ema50=emaSeries(closes,50), ema200=emaSeries(closes,200);
-      const bbMid=[],bbUpper=[],bbLower=[];
-      for(let i=0;i<closes.length;i++){
-        if(i<19){bbMid.push(null);bbUpper.push(null);bbLower.push(null);continue;}
-        const window=closes.slice(i-19,i+1),mean=window.reduce((a,b)=>a+b,0)/20;
-        const variance=window.reduce((a,b)=>a+(b-mean)**2,0)/20,sd=Math.sqrt(variance);
-        bbMid.push(mean);bbUpper.push(mean+2*sd);bbLower.push(mean-2*sd);
+    function emuSettings() {
+      const defaults = {bb:true,ema200:true,ema50:true,ema20:true,ema9:true,ema3:true,sar:true,candles:true,cross:true,targets:true,lastPriority:true,nested:true,ema9Base:true,classicBB:true};
+      const result = {};
+      for (const [key,fallback] of Object.entries(defaults)) {
+        const input = document.querySelector('[data-emu-toggle="' + key + '"]');
+        result[key] = input ? input.checked : fallback;
       }
-      const fast=emaSeries(closes,12),slow=emaSeries(closes,26),macd=fast.map((v,i)=>v-slow[i]),signal=emaSeries(macd,9),hist=macd.map((v,i)=>v-signal[i]);
-      const volumes=valid.map(c=>Math.max(0,Number(c.volume)||0));
-      const left=65,right=910,step=(right-left)/valid.length,xAt=i=>left+step*(i+.5);
-      const priceTop=24,priceBottom=280,macdTop=310,macdBottom=395,volTop=422,volBottom=480;
-      const allPrice=[...valid.map(c=>Number(c.low)),...valid.map(c=>Number(c.high)),...ema3,...ema9,...ema20,...ema50,...ema200,...bbUpper.filter(v=>v!==null),...bbLower.filter(v=>v!==null)];      const livePrice = liveQuote && Number.isFinite(Number(liveQuote.price)) && Number(liveQuote.price) > 0 ? Number(liveQuote.price) : null;
-      if (livePrice !== null) allPrice.push(livePrice);
-      const min=Math.min(...allPrice),max=Math.max(...allPrice),span=max-min||1;
-      const yPrice=v=>priceBottom-(v-min)/span*(priceBottom-priceTop);
-      const grid="#d7dee5";
-      for(let k=0;k<=4;k++){const y=priceTop+k*(priceBottom-priceTop)/4,val=max-k*span/4;add("line",{x1:left,y1:y,x2:right,y2:y,stroke:grid,"stroke-width":1});label(right+9,y+3,val.toFixed(2),"start");}
-      add("line",{x1:right,y1:priceTop,x2:right,y2:priceBottom,stroke:"#aab5bf","stroke-width":1});
-      const bw=Math.max(1.5,Math.min(9,step*.58));
-      valid.forEach((c,i)=>{
-        const x=xAt(i),open=yPrice(Number(c.open)),close=yPrice(Number(c.close)),high=yPrice(Number(c.high)),low=yPrice(Number(c.low));
-        const color=Number(c.close)>=Number(c.open)?"#15966b":"#d34b57";
-        add("line",{x1:x,y1:high,x2:x,y2:low,stroke:color,"stroke-width":1.2});
-        add("rect",{x:x-bw/2,y:Math.min(open,close),width:bw,height:Math.max(1,Math.abs(close-open)),fill:color,stroke:color});
-      });
-      const line=(values,color,width,dash="")=>{
-        let path="";
-        values.forEach((v,i)=>{if(v===null||!Number.isFinite(v))return;path+=(path?" L":"M")+xAt(i).toFixed(2)+" "+yPrice(v).toFixed(2);});
-        if(path)add("path",{d:path,fill:"none",stroke:color,"stroke-width":width,"stroke-linejoin":"round","stroke-linecap":"round",...(dash?{"stroke-dasharray":dash}:{})});
-      };
-      // Bollinger outer bands use a clearly dashed black line.
-      line(bbUpper,"#111827",3,"2 5"); line(bbLower,"#111827",3,"2 5");
-      // EMA20 usa exactamente el mismo color, grosor y patrón discontinuo que Bollinger.
-      line(ema20,"#111827",3,"2 5");
-      line(ema3,"#8b5cf6",1); line(ema9,"#ef4444",1); line(ema50,"#722f37",3); line(ema200,"#16a34a",3);
-      label(left,14,"PRECIO + EMA20 + EMA3/9/50/200 + BANDAS BOLLINGER","start","#344454");
-      // MACD panel: green MACD line, red signal line and green/red histogram.
-      const macdAbs=Math.max(.000001,...macd.map(Math.abs),...signal.map(Math.abs),...hist.map(Math.abs));
-      const yMacd=v=>(macdBottom+macdTop)/2-v/macdAbs*(macdBottom-macdTop)*.46;
-      add("line",{x1:left,y1:yMacd(0),x2:right,y2:yMacd(0),stroke:"#9aa7b3","stroke-width":1});
-      hist.forEach((v,i)=>{const x=xAt(i),y=yMacd(v),zero=yMacd(0);add("rect",{x:x-bw/2,y:Math.min(y,zero),width:bw,height:Math.max(1,Math.abs(zero-y)),fill:v>=0?"#16a34a":"#dc4444",opacity:.72});});
-      const macdPath=values=>values.map((v,i)=>(i?"L":"M")+xAt(i).toFixed(2)+" "+yMacd(v).toFixed(2)).join(" ");
-      add("path",{d:macdPath(macd),fill:"none",stroke:"#16a34a","stroke-width":1.8});
-      add("path",{d:macdPath(signal),fill:"none",stroke:"#dc4444","stroke-width":1.8});
-      label(left,302,"MACD 12 / 26 / 9","start","#344454");
-      // Volume panel.
-      const maxVol=Math.max(1,...volumes);
-      volumes.forEach((v,i)=>{const h=v/maxVol*(volBottom-volTop);add("rect",{x:xAt(i)-bw/2,y:volBottom-h,width:bw,height:h,fill:"#5b91ad",opacity:.8});});
-      label(left,414,"VOLUMEN","start","#344454");
-      const chartTimeframe=document.getElementById("chart-timeframe").value;
-      const timeOptions=chartTimeframe==="day" ? {month:"short",day:"numeric",timeZone:"America/New_York"} : chartTimeframe==="week" ? {month:"short",year:"2-digit",timeZone:"America/New_York"} : {hour:"2-digit",minute:"2-digit",hour12:false,timeZone:"America/New_York"};
-      const formatCandleTime=c=>c.candle_time_ms?new Intl.DateTimeFormat("es",timeOptions).format(new Date(Number(c.candle_time_ms))):"—";
-      const tickCount=Math.min(6,valid.length);
-      for(let t=0;t<tickCount;t++){const i=Math.round(t*(valid.length-1)/Math.max(1,tickCount-1));const x=xAt(i);add("line",{x1:x,y1:volBottom+2,x2:x,y2:volBottom+6,stroke:"#7b8792","stroke-width":1});label(x,496,formatCandleTime(valid[i]),"middle");}
-      label(right+9,14,"PRECIO","start","#344454");      if (livePrice !== null) {
-        const liveY = yPrice(livePrice);
-        add("line",{x1:left,y1:liveY,x2:right,y2:liveY,stroke:"#0891b2","stroke-width":1.8,"stroke-dasharray":"6 4",opacity:.95});
-        add("circle",{cx:right,cy:liveY,r:4,fill:"#0891b2",stroke:"#ffffff","stroke-width":1.5});
-        label(right+9,Math.max(priceTop+10,Math.min(priceBottom-3,liveY-5)),"$"+livePrice.toFixed(2),"start","#087e9c");
-      }
+      return result;
     }
+    document.querySelectorAll("[data-emu-toggle]").forEach(input => input.addEventListener("change", () => drawCandles(chartRows, chartLiveQuote)));
 
+    function emuEma(values, period) {
+      const out = Array(values.length).fill(null);
+      if (values.length < period) return out;
+      let seed = 0;
+      for (let i=0;i<period;i++) seed += values[i];
+      let current = seed / period;
+      out[period-1] = current;
+      const alpha = 2 / (period + 1);
+      for (let i=period;i<values.length;i++) {
+        current = values[i] * alpha + current * (1-alpha);
+        out[i] = current;
+      }
+      return out;
+    }
+    function emuSma(values, period) {
+      const out=Array(values.length).fill(null);
+      for(let i=period-1;i<values.length;i++){
+        let sum=0; for(let j=i-period+1;j<=i;j++) sum+=values[j];
+        out[i]=sum/period;
+      }
+      return out;
+    }
+    function emuStd(values, period) {
+      const out=Array(values.length).fill(null);
+      for(let i=period-1;i<values.length;i++){
+        let sum=0; for(let j=i-period+1;j<=i;j++) sum+=values[j];
+        const mean=sum/period; let variance=0;
+        for(let j=i-period+1;j<=i;j++) variance+=(values[j]-mean)**2;
+        out[i]=Math.sqrt(variance/period);
+      }
+      return out;
+    }
+    function emuCrossUp(a,b,i) {
+      return i>0 && a[i-1]!=null && b[i-1]!=null && a[i]!=null && b[i]!=null && a[i-1]<b[i-1] && a[i]>=b[i];
+    }
+    function emuCrossDown(a,b,i) {
+      return i>0 && a[i-1]!=null && b[i-1]!=null && a[i]!=null && b[i]!=null && a[i-1]>b[i-1] && a[i]<=b[i];
+    }
+    function emuCross(a,b,i) { return emuCrossUp(a,b,i)||emuCrossDown(a,b,i); }
+    function emuRecent(flags,i,n) {
+      for(let j=Math.max(0,i-n+1);j<=i;j++) if(flags[j]) return true;
+      return false;
+    }
+    function emuPsar(highs,lows,closes) {
+      const n=closes.length, out=Array(n).fill(null);
+      if(n<2) return out;
+      let up=(highs[1]+lows[1]) >= (highs[0]+lows[0]);
+      let af=0.02, ep=up?highs[0]:lows[0], sar=up?lows[0]:highs[0];
+      for(let i=1;i<n;i++){
+        let next=sar+af*(ep-sar);
+        if(up){
+          next=Math.min(next,lows[i-1],i>1?lows[i-2]:lows[i-1]);
+          if(lows[i]<next){up=false;next=ep;ep=lows[i];af=0.02;}
+          else if(highs[i]>ep){ep=highs[i];af=Math.min(0.20,af+0.02);}
+        } else {
+          next=Math.max(next,highs[i-1],i>1?highs[i-2]:highs[i-1]);
+          if(highs[i]>next){up=true;next=ep;ep=highs[i];af=0.02;}
+          else if(lows[i]<ep){ep=lows[i];af=Math.min(0.20,af+0.02);}
+        }
+        out[i]=next; sar=next;
+      }
+      return out;
+    }
+    function emuColorSeries(candles, settings) {
+      const n=candles.length, open=candles.map(c=>Number(c.open)), high=candles.map(c=>Number(c.high)), low=candles.map(c=>Number(c.low)), close=candles.map(c=>Number(c.close));
+      const e3=emuEma(close,3),e9=emuEma(close,9),e20=emuEma(close,20),e50=emuEma(close,50),e200=emuEma(close,200);
+      const sd=emuStd(close,20),sma20=emuSma(close,20),bbTop=e20.map((v,i)=>v==null||sd[i]==null?null:v+2*sd[i]),bbBot=e20.map((v,i)=>v==null||sd[i]==null?null:v-2*sd[i]);
+      const m20de9=emuEma(e9.map(v=>v==null?NaN:v),20),m50de9=emuEma(e9.map(v=>v==null?NaN:v),50);
+      const m50de20=emuEma(e20.map(v=>v==null?NaN:v),50),m170de20=emuEma(e20.map(v=>v==null?NaN:v),170),m200de20=emuEma(e20.map(v=>v==null?NaN:v),200);
+      const m150de50=emuEma(e50.map(v=>v==null?NaN:v),150),m200de50=emuEma(e50.map(v=>v==null?NaN:v),200);
+      const ema2=emuEma(close,2), ema23=emuEma(close,23), e3ema5=emuEma(e3.map(v=>v==null?NaN:v),5);
+      const sar=emuPsar(high,low,close);
+      const out={e3,e9,e20,e50,e200,bbTop,bbBot,sar,bbC1:[],bbC2:[],dC1:[],dC2:[],fC1:[],fC2:[],fC3:[],vC:[],nC1:[],nC2:[],tC1:[],tC2:[],sarC:[],kColor:[],cross:[],tp1:[],tp2:[],sd};
+      const flag=(condition)=>Boolean(condition);
+      for(let i=0;i<n;i++){
+        const ready=[e3[i],e9[i],e20[i],e50[i],e200[i],sd[i]].every(Number.isFinite);
+        if(!ready){out.bbC1.push("#111827");out.bbC2.push("#111827");out.dC1.push("#008000");out.dC2.push("#FFFF00");out.fC1.push("#C0C000");out.fC2.push("#400000");out.fC3.push("#000000");out.vC.push("#006400");out.nC1.push("#C00000");out.nC2.push("#C00000");out.tC1.push("#008000");out.tC2.push("#008000");out.sarC.push("#008000");out.kColor.push(close[i]>=open[i]?"#006400":"#800000");out.cross.push(null);out.tp1.push(null);out.tp2.push(null);continue;}
+        const prev=(arr)=>i>0?arr[i-1]:null, nested=settings.nested, base9=settings.ema9Base, last=settings.lastPriority;
+        const bbCenter=settings.classicBB?sma20[i]:e20[i], bbUpCond=bbCenter+2*sd[i],bbDnCond=bbCenter-2*sd[i];
+        const bbAbove=ema2[i]>=bbUpCond,bbBelow=ema2[i]<=bbDnCond;
+        const crossTop=emuCrossUp(close,bbTop,i),crossBottom=emuCrossDown(close,bbBot,i);
+        const bbBreak=emuRecent(Array.from({length:n},(_,j)=>j<=i&&(emuCrossUp(close,bbTop,j)||emuCrossDown(close,bbBot,j))),i,2);
+        const bb1=last?(bbBelow?2:bbAbove?1:0):(bbAbove?1:bbBelow?2:0);
+        const bb2=last?(bbBreak?3:bbBelow?2:bbAbove?1:0):(bbAbove?1:bbBelow?2:bbBreak?3:0);
+        out.bbC1.push(bb1===1?"#008000":bb1===2?"#FF0000":"#000000");
+        out.bbC2.push(bb2===1?"#008000":bb2===2?"#FF0000":bb2===3?"#FFFF00":"#000000");
+        const dM200=nested?m200de50[i]:e200[i],dM150=nested?m150de50[i]:emuEma(close,150)[i];
+        const dMedias=emuCrossDown(e50,nested?m200de50:e200,i)||emuRecent(Array.from({length:n},(_,j)=>emuCrossDown(e50,nested?m150de50:emuEma(close,150),j)),i,5)||emuRecent(Array.from({length:n},(_,j)=>emuCrossUp(e50,nested?m200de50:e200,j)),i,3)||emuRecent(Array.from({length:n},(_,j)=>emuCrossUp(e50,nested?m150de50:emuEma(close,150),j)),i,5);
+        const dPrecio=i>0&&((close[i-1]<e200[i-1]&&close[i]>e200[i])||(close[i-1]>e200[i-1]&&close[i]<e200[i]));
+        const dc=last?(dPrecio?2:dMedias?1:0):(dMedias?1:dPrecio?2:0);
+        out.dC1.push(dc===1?"#008000":dc===2?"#FF0000":"#FFFF00");out.dC2.push(dPrecio?"#FF0000":"#FFFF00");
+        const fM200=nested?m200de50:e200, fM150=nested?m150de50:emuEma(close,150), fM50de9=nested?m50de9:e50, fM50de20=nested?m50de20:e50;
+        const fPrecio=emuRecent(Array.from({length:n},(_,j)=>emuCross(close,e50,j)),i,2);
+        const fMedias=emuRecent(Array.from({length:n},(_,j)=>emuCross(e50,fM200,j)),i,2)||emuRecent(Array.from({length:n},(_,j)=>emuCross(e9,fM50de9,j)),i,2)||emuRecent(Array.from({length:n},(_,j)=>emuCross(e50,fM150,j)),i,5)||emuRecent(Array.from({length:n},(_,j)=>emuCross(e20,fM50de20,j)),i,3);
+        const fc=last?(fPrecio?2:fMedias?1:0):(fMedias?1:fPrecio?2:0);
+        out.fC1.push(fPrecio?"#C0C000":"#FF0000");out.fC2.push(fc===1?"#FF0000":fc===2?"#FFFFFF":"#400000");out.fC3.push(fMedias||fPrecio?"#FFFF00":"#000000");
+        const vM50=nested?m50de20[i]:e50[i],vM170=nested?m170de20[i]:emuEma(close,170)[i],vM200=nested?m200de20[i]:e200[i];
+        const vUp=emuRecent(Array.from({length:n},(_,j)=>emuCrossUp(e20,nested?m200de20:e200,j)),i,6)||emuRecent(Array.from({length:n},(_,j)=>emuCrossUp(e20,nested?m50de20:e50,j)),i,3);
+        const vDown=emuRecent(Array.from({length:n},(_,j)=>emuCrossDown(e20,nested?m50de20:e50,j)),i,3)||emuRecent(Array.from({length:n},(_,j)=>emuCrossDown(e20,nested?m170de20:emuEma(close,170),j)),i,6)||emuRecent(Array.from({length:n},(_,j)=>emuCrossDown(e20,nested?m200de20:e200,j)),i,6);
+        const vc=last?(vDown?2:vUp?1:0):(vUp?1:vDown?2:0);out.vC.push(vc===1?"#00FF00":vc===2?"#FF0000":"#006400");
+        const nM20=base9?m20de9:e20,nM50=base9?m50de9:e50;
+        const nS1=emuRecent(Array.from({length:n},(_,j)=>emuCrossDown(e9,base9?m50de9:e50,j)),i,5)||emuCrossUp(e9,nM50,i);
+        const nS2=emuRecent(Array.from({length:n},(_,j)=>emuCross(e9,nM20,j)),i,3),nS3=emuCrossUp(e3,e9,i),nS4=emuRecent(Array.from({length:n},(_,j)=>emuCrossDown(e3,e9,j)),i,2),nS5=e3[i]<1.0033*e9[i];
+        const nc=last?(nS5?1:nS4?2:nS3?2:nS2?2:nS1?1:0):(nS1?1:nS2?2:nS3?2:nS4?2:nS5?1:0);
+        out.nC1.push(nc===1?"#FF0000":nc===2?"#960000":"#C00000");
+        const nP1=emuRecent(Array.from({length:n},(_,j)=>emuCross(e9,nM50,j)),i,2),nP2=emuRecent(Array.from({length:n},(_,j)=>emuCross(e9,nM20,j)||emuCross(e3,e9,j)),i,3);
+        const npc=last?(nP2?2:nP1?1:0):(nP1?1:nP2?2:0);out.nC2.push(npc===1?"#FF0000":npc===2?"#FFFF00":"#C00000");
+        const tUpBot=emuCrossUp(e3,bbBot,i),tDnTop=emuCrossDown(e3,bbTop,i),tOutside=e3[i]>bbTop[i]||e3[i]<bbBot[i],tFalling=prev(e3)!=null&&prev(e3)>e3[i];
+        const tS2=emuRecent(Array.from({length:n},(_,j)=>emuCrossDown(e3,bbTop,j)),i,2);
+        const tc=last?(tFalling?2:tOutside?3:tS2?2:tUpBot?1:0):(tUpBot?1:tS2?2:tOutside?3:tFalling?2:0);
+        out.tC1.push(tc===1?"#00FF00":tc===2?"#FF0000":tc===3?"#0000FF":"#008000");
+        const tP1=emuRecent(Array.from({length:n},(_,j)=>emuCross(e3,e9,j)),i,2)||tS2||tUpBot,tP4=e3[i]>bbTop[i]||tUpBot,tP5=e3[i]<bbBot[i]||tS2;
+        const tpc=last?(tP5?2:tP4?3:tP1?1:0):(tP1?1:tP4?3:tP5?2:0);out.tC2.push(tpc===1?"#FFFF00":tpc===2?"#FF0000":tpc===3?"#00FF00":"#008000");
+        const sarBear=close[i]<sar[i], sarCond1=(sar[i]<e20[i]&&sarBear)||(sarBear&&emuCrossDown(sar,ema23,i)),sarCond3=sarBear&&sar[i]<e9[i];
+        const sarCol=last?(sarCond3?1:sarBear?2:sarCond1?1:0):(sarCond1?1:sarBear?2:0);
+        out.sarC.push(sarCol===1?"#FFA500":sarCol===2?"#FF0000":"#008000");
+        const kBull=open[i]<close[i],kBear=open[i]>close[i],kE9m1=e9[i]-e9[i]*.01;
+        const kBetween=(e3[i]<close[i]&&e3[i]>e9[i])||(e3[i]>close[i]&&e3[i]<e9[i]);
+        const kC1=kBear&&e3[i]>e9[i]&&e9[i]>e20[i]&&close[i]>e3[i],kC2=kBull&&e3[i]<e9[i]&&e9[i]<e20[i]&&close[i]<e3[i];
+        const kM200=nested?m200de50[i]:e200[i],kG34=emuCross(e50,kM200,i)||high[i]>=bbTop[i]||low[i]<=bbBot[i];
+        const kC3=kBear&&kG34,kC4=kBull&&kG34;
+        const kIntPos=high[i]>=e3[i]&&e20[i]>=e50[i]&&e3[i]>=e9[i]&&e20[i]>=kE9m1&&e9[i]>=e50[i]&&e50[i]>=low[i];
+        const kIntPos2=high[i]>=e3[i]&&e3[i]>=e9[i]&&e20[i]>=kE9m1&&e20[i]>=low[i],kC5=kBull&&(kIntPos||kIntPos2||kBetween);
+        const kIntNeg=e50[i]<=high[i]&&e20[i]<=e50[i]&&e3[i]<=e9[i]&&e9[i]<=e50[i]&&e3[i]>=low[i]&&(e20[i]<=e9[i]||e20[i]<=kE9m1);
+        const kIntNeg2=e50[i]<=high[i]&&e3[i]>=low[i]&&(e3[i]<=e9[i]||emuCrossDown(e3,e3ema5,i));
+        const kAtrav=high[i]>e3[i]&&high[i]>e9[i]&&high[i]>e20[i]&&low[i]<e3[i]&&low[i]<e9[i]&&low[i]<e20[i],kC6=kBear&&(kIntNeg||kIntNeg2||kAtrav||kBetween);
+        const kc=last?(kC6?3:kC5?4:kC4?4:kC3?3:kC2?2:kC1?1:0):(kC1?1:kC2?2:kC3?3:kC4?4:kC5?4:kC6?3:0);
+        out.kColor.push(kc===1?"#FFC0CB":kc===2?"#C0FFC0":kc===3?"#FF0000":kc===4?"#00DC00":kBear?"#800000":"#006400");
+        out.cross.push(emuCrossUp(e3,e9,i)?"#C8E6C9":emuCrossDown(e3,e9,i)?"#FFCDD2":null);
+        const tpBull=(i>0&&((e3[i-1]<e9[i-1]&&e9[i]<e3[i])||(e9[i-1]<e20[i-1]&&e20[i]<e9[i])||(e9[i-1]<e50[i-1]&&e50[i]<e9[i])||(e9[i-1]<e200[i-1]&&e200[i]<e9[i])||(e20[i-1]<e50[i-1]&&e50[i]<e20[i])||(e20[i-1]<e200[i-1]&&e200[i]<e20[i])||(e50[i-1]<e200[i-1]&&e200[i]<e50[i])));
+        const tpBear=(i>0&&((e3[i-1]>e9[i-1]&&e9[i]>e3[i])||(e9[i-1]>e20[i-1]&&e20[i]>e9[i])||(e9[i-1]>e50[i-1]&&e50[i]>e9[i])||(e9[i-1]>e200[i-1]&&e200[i]>e9[i])||(e20[i-1]>e50[i-1]&&e50[i]>e20[i])||(e20[i-1]>e200[i-1]&&e200[i]>e20[i])||(e50[i-1]>e200[i-1]&&e200[i]>e50[i])));
+        out.tp1.push(tpBull?e20[i]+4*sd[i]/3:tpBear?e20[i]-4*sd[i]/3:null);out.tp2.push(tpBull?e20[i]+8*sd[i]/3:tpBear?e20[i]-8*sd[i]/3:null);
+      }
+      return out;
+    }
+    function drawCandles(candles, liveQuote = null) {
+      const svg=document.getElementById("chart-svg"),ns="http://www.w3.org/2000/svg",settings=emuSettings();
+      svg.replaceChildren();
+      const add=(tag,attrs,textValue)=>{const el=document.createElementNS(ns,tag);for(const [key,value] of Object.entries(attrs||{}))if(value!=null)el.setAttribute(key,String(value));if(textValue!=null)el.textContent=textValue;svg.appendChild(el);return el;};
+      const label=(x,y,text,anchor="start",fill="#526170")=>add("text",{x,y,"text-anchor":anchor,fill,"font-size":10,"font-family":"Arial"},text);
+      if(!candles.length){add("text",{x:500,y:245,"text-anchor":"middle",fill:"#526170","font-size":14},"No hay velas reales guardadas para graficar");return;}
+      const valid=candles.filter(c=>[c.open,c.high,c.low,c.close].every(v=>Number.isFinite(Number(v))));
+      if(!valid.length){add("text",{x:500,y:245,"text-anchor":"middle",fill:"#526170","font-size":14},"Las velas no contienen OHLC válido");return;}
+      const ind=emuColorSeries(valid,settings),closes=valid.map(c=>Number(c.close)),volumes=valid.map(c=>Math.max(0,Number(c.volume)||0));
+      const left=65,right=910,step=(right-left)/valid.length,xAt=i=>left+step*(i+.5),priceTop=24,priceBottom=395,volTop=425,volBottom=480;
+      const livePrice=liveQuote&&Number.isFinite(Number(liveQuote.price))&&Number(liveQuote.price)>0?Number(liveQuote.price):null;
+      const overlays=[ind.e3,ind.e9,ind.e20,ind.e50,ind.e200,ind.bbTop,ind.bbBot,ind.sar,ind.tp1,ind.tp2].flat().filter(Number.isFinite);
+      const allPrice=[...valid.map(c=>Number(c.low)),...valid.map(c=>Number(c.high)),...overlays];
+      if(livePrice!==null)allPrice.push(livePrice);
+      const min=Math.min(...allPrice),max=Math.max(...allPrice),span=max-min||1,yPrice=v=>priceBottom-(v-min)/span*(priceBottom-priceTop);
+      for(let k=0;k<=5;k++){const y=priceTop+k*(priceBottom-priceTop)/5,val=max-k*span/5;add("line",{x1:left,y1:y,x2:right,y2:y,stroke:"#d7dee5","stroke-width":1});label(right+9,y+3,val.toFixed(2),"start");}
+      add("line",{x1:right,y1:priceTop,x2:right,y2:priceBottom,stroke:"#aab5bf","stroke-width":1});
+      const bw=Math.max(1.4,Math.min(9,step*.58));
+      if(settings.cross)ind.cross.forEach((color,i)=>{if(color)add("rect",{x:left+i*step,y:priceTop,width:step,height:priceBottom-priceTop,fill:color,opacity:.62});});
+      const candleColors=valid.map((c,i)=>settings.candles?ind.kColor[i]:(Number(c.close)>=Number(c.open)?"#15966b":"#d34b57"));
+      valid.forEach((c,i)=>{const x=xAt(i),o=yPrice(Number(c.open)),cl=yPrice(Number(c.close)),h=yPrice(Number(c.high)),l=yPrice(Number(c.low)),color=candleColors[i];add("line",{x1:x,y1:h,x2:x,y2:l,stroke:color,"stroke-width":1.3});add("rect",{x:x-bw/2,y:Math.min(o,cl),width:bw,height:Math.max(1,Math.abs(cl-o)),fill:color,stroke:color});});
+      const line=(values,color,width,dash="",skipEvery3=false)=>{let path="",active=false;values.forEach((v,i)=>{const usable=Number.isFinite(v)&&!(skipEvery3&&i%3===2);if(!usable){active=false;return;}path+=(active?" L":" M")+xAt(i).toFixed(2)+" "+yPrice(v).toFixed(2);active=true;});if(path)add("path",{d:path,fill:"none",stroke:color,"stroke-width":width,"stroke-linejoin":"round","stroke-linecap":"round",...(dash?{"stroke-dasharray":dash}:{})});};
+      if(settings.bb){line(ind.bbTop,ind.bbC1,4);line(ind.bbBot,ind.bbC1,4);line(ind.bbTop,ind.bbC2,2,"",true);line(ind.bbBot,ind.bbC2,2,"",true);}
+      if(settings.ema200){line(ind.e200,ind.dC1,5);line(ind.e200,ind.dC2,4,"",true);}
+      if(settings.ema50){line(ind.e50,ind.fC2,1);line(ind.e50,ind.fC1,4);line(ind.e50,ind.fC3,2,"",true);}
+      if(settings.ema20)line(ind.e20,ind.vC,3,"",true);
+      if(settings.ema9){line(ind.e9,ind.nC1,3);line(ind.e9,ind.nC2,2,"",true);}
+      if(settings.ema3){line(ind.e3,ind.tC1,2);line(ind.e3,ind.tC2,1,"",true);}
+      if(settings.sar)ind.sar.forEach((v,i)=>{if(Number.isFinite(v))add("circle",{cx:xAt(i),cy:yPrice(v),r:3.2,fill:ind.sarC[i],stroke:ind.sarC[i]});});
+      if(settings.targets){ind.tp1.forEach((v,i)=>{if(Number.isFinite(v))add("circle",{cx:xAt(i),cy:yPrice(v),r:4.4,fill:"#000000"});});ind.tp2.forEach((v,i)=>{if(Number.isFinite(v))add("circle",{cx:xAt(i),cy:yPrice(v),r:4.4,fill:"#000000"});});}
+      label(left,14,"EMU · EMA 3/9/20/50/200 · BOLLINGER · PSAR · TARGET PRICE","start","#344454");
+      const maxVol=Math.max(1,...volumes);volumes.forEach((v,i)=>{const h=v/maxVol*(volBottom-volTop);add("rect",{x:xAt(i)-bw/2,y:volBottom-h,width:bw,height:h,fill:"#5b91ad",opacity:.8});});
+      label(left,414,"VOLUMEN","start","#344454");
+      const tf=document.getElementById("chart-timeframe").value,timeOptions=tf==="day"?{month:"short",day:"numeric",timeZone:"America/New_York"}:tf==="week"?{month:"short",year:"2-digit",timeZone:"America/New_York"}:{hour:"2-digit",minute:"2-digit",hour12:false,timeZone:"America/New_York"};
+      const formatTime=c=>c.candle_time_ms?new Intl.DateTimeFormat("es",timeOptions).format(new Date(Number(c.candle_time_ms))):"—",tickCount=Math.min(6,valid.length);
+      for(let t=0;t<tickCount;t++){const i=Math.round(t*(valid.length-1)/Math.max(1,tickCount-1)),x=xAt(i);add("line",{x1:x,y1:volBottom+2,x2:x,y2:volBottom+6,stroke:"#7b8792","stroke-width":1});label(x,496,formatTime(valid[i]),"middle");}
+      label(right+9,14,"PRECIO","start","#344454");
+      if(livePrice!==null){const y=yPrice(livePrice);add("line",{x1:left,y1:y,x2:right,y2:y,stroke:"#0891b2","stroke-width":1.8,"stroke-dasharray":"6 4"});add("circle",{cx:right,cy:y,r:4,fill:"#0891b2",stroke:"#fff","stroke-width":1.5});label(right+9,Math.max(priceTop+10,Math.min(priceBottom-3,y-5)),"$"+livePrice.toFixed(2),"start","#087e9c");}
+    }
     let chartQuoteTimer = null;
     let chartQuoteSequence = 0;
     let chartQuoteInFlight = false;
