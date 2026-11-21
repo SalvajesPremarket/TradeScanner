@@ -7,7 +7,8 @@ import os
 import time
 import threading
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
+from zoneinfo import ZoneInfo
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -33,6 +34,7 @@ from tradescanner.schwab import (
     SchwabConfigurationError,
     get_quotes,
     get_chart_history,
+    get_all_time_daily_history,
 )
 
 ROOT = Path(__file__).resolve().parent
@@ -772,6 +774,205 @@ def candles_status(
         raise HTTPException(status_code=503, detail=str(exc)) from None
     except (OSError, RuntimeError, ValueError) + DB_ERRORS:
         raise HTTPException(status_code=503, detail="Candle storage or price history is unavailable.") from None
+
+
+
+
+_MARKET_LEVEL_TZ = ZoneInfo("America/New_York")
+_MARKET_LEVEL_TIMEFRAMES = [
+    ("1m", 1), ("2m", 2), ("3m", 3), ("5m", 5),
+    ("10m", 10), ("13m", 13), ("15m", 15), ("30m", 30), ("1h", 60),
+]
+
+
+def _market_level_aggregate_minutes(candles: list[dict], minutes: int, now: datetime) -> list[dict]:
+    """Aggregate real one-minute Schwab candles into completed ET session buckets."""
+    buckets: dict[tuple[str, int], dict] = {}
+    current_minute = now.replace(second=0, microsecond=0)
+    for candle in candles:
+        stamp = candle.get("candle_time_ms")
+        if not isinstance(stamp, (int, float)):
+            continue
+        local = datetime.fromtimestamp(float(stamp) / 1000, timezone.utc).astimezone(_MARKET_LEVEL_TZ)
+        if local >= current_minute:
+            continue
+        anchor = local.replace(hour=4, minute=0, second=0, microsecond=0)
+        elapsed = int((local - anchor).total_seconds() // 60)
+        if elapsed < 0:
+            continue
+        bucket_index = elapsed // minutes
+        bucket_start = anchor + timedelta(minutes=bucket_index * minutes)
+        bucket_end = bucket_start + timedelta(minutes=minutes)
+        if bucket_end > current_minute:
+            continue
+        key = (local.date().isoformat(), bucket_index)
+        current = buckets.get(key)
+        if current is None:
+            buckets[key] = {
+                "candle_time_ms": int(bucket_start.timestamp() * 1000),
+                "open": float(candle["open"]), "high": float(candle["high"]),
+                "low": float(candle["low"]), "close": float(candle["close"]),
+                "volume": int(candle.get("volume") or 0),
+            }
+        else:
+            current["high"] = max(current["high"], float(candle["high"]))
+            current["low"] = min(current["low"], float(candle["low"]))
+            current["close"] = float(candle["close"])
+            current["volume"] += int(candle.get("volume") or 0)
+    return [buckets[key] for key in sorted(buckets)]
+
+
+def _market_level_aggregate_calendar(candles: list[dict], unit: str, now: datetime) -> list[dict]:
+    """Aggregate completed daily/weekly bars into daily, weekly, or monthly bars."""
+    buckets: dict[tuple[int, int], dict] = {}
+    current_date = now.date()
+    current_week = current_date.isocalendar()[:2]
+    for candle in candles:
+        stamp = candle.get("candle_time_ms")
+        if not isinstance(stamp, (int, float)):
+            continue
+        local_date = datetime.fromtimestamp(float(stamp) / 1000, timezone.utc).astimezone(_MARKET_LEVEL_TZ).date()
+        if unit == "day":
+            if local_date >= current_date:
+                continue
+            key = (local_date.year, local_date.timetuple().tm_yday)
+        elif unit == "week":
+            iso = local_date.isocalendar()
+            if (iso.year, iso.week) >= current_week:
+                continue
+            key = (iso.year, iso.week)
+        else:
+            if (local_date.year, local_date.month) >= (current_date.year, current_date.month):
+                continue
+            key = (local_date.year, local_date.month)
+        current = buckets.get(key)
+        if current is None:
+            buckets[key] = {
+                "candle_time_ms": int(stamp), "open": float(candle["open"]),
+                "high": float(candle["high"]), "low": float(candle["low"]),
+                "close": float(candle["close"]), "volume": int(candle.get("volume") or 0),
+            }
+        else:
+            current["high"] = max(current["high"], float(candle["high"]))
+            current["low"] = min(current["low"], float(candle["low"]))
+            current["close"] = float(candle["close"])
+            current["volume"] += int(candle.get("volume") or 0)
+    return [buckets[key] for key in sorted(buckets)]
+
+
+def _market_level_ema(values: list[float], period: int) -> float | None:
+    if len(values) < period:
+        return None
+    alpha = 2.0 / (period + 1)
+    result = sum(values[:period]) / period
+    for value in values[period:]:
+        result = alpha * value + (1.0 - alpha) * result
+    return result
+
+
+def _market_level_reference(price: float, lines: dict[str, float]) -> tuple[float | None, str | None]:
+    ordered = sorted((value, name) for name, value in lines.items() if isinstance(value, (int, float)) and math.isfinite(value))
+    if not ordered:
+        return None, None
+    below = [item for item in ordered if item[0] <= price]
+    above = [item for item in ordered if item[0] >= price]
+    if below and above:
+        low = below[-1]
+        high = above[0]
+        if low[0] != high[0]:
+            return (low[0] + high[0]) / 2.0, low[1] + " + " + high[1]
+        return low[0], low[1]
+    nearest = min(ordered, key=lambda item: abs(item[0] - price))
+    return nearest[0], nearest[1]
+
+
+def _market_level_analyze(candles: list[dict], price: float, timeframe: str) -> dict:
+    closes = [float(c["close"]) for c in candles if isinstance(c.get("close"), (int, float)) and math.isfinite(float(c["close"]))]
+    if len(closes) < 20:
+        return {"timeframe": timeframe, "candles": len(closes), "status": "insufficient", "reason": "Se necesitan al menos 20 velas cerradas.", "overbought": False, "oversold": False, "reference": None}
+    lines: dict[str, float] = {}
+    for period in (3, 9, 20, 50, 200):
+        value = _market_level_ema(closes, period)
+        if value is not None:
+            lines[f"EMA{period}"] = value
+    window = closes[-20:]
+    mean = sum(window) / 20.0
+    variance = sum((value - mean) ** 2 for value in window) / 20.0
+    deviation = math.sqrt(variance)
+    lines["BB superior"] = mean + 2.0 * deviation
+    lines["BB inferior"] = mean - 2.0 * deviation
+    upper, lower = lines["BB superior"], lines["BB inferior"]
+    overbought, oversold = price > upper, price < lower
+    reference, reference_lines = _market_level_reference(price, lines)
+    if overbought:
+        state = "sobrecompra"
+    elif oversold:
+        state = "sobreventa"
+    else:
+        state = "neutral"
+    return {
+        "timeframe": timeframe, "candles": len(closes), "status": "ok",
+        "overbought": overbought, "oversold": oversold, "state": state,
+        "reference": reference, "reference_lines": reference_lines,
+        "ema": {key: lines[key] for key in ("EMA3", "EMA9", "EMA20", "EMA50", "EMA200") if key in lines},
+        "bb_upper": upper, "bb_lower": lower,
+    }
+
+
+@app.get("/api/market-levels/{symbol}")
+def market_levels_status(symbol: str):
+    """Calculate Bollinger overbought/oversold references across the 12 requested timeframes."""
+    normalized = symbol.strip().upper()
+    if not normalized or len(normalized) > 15 or not normalized.replace(".", "").replace("-", "").isalnum():
+        raise HTTPException(status_code=400, detail="Ticker inválido.")
+    try:
+        now = datetime.now(_MARKET_LEVEL_TZ)
+        quote_payload = get_quotes([normalized])
+        quote_rows = normalize_schwab_quotes(quote_payload)
+        quote = next((row for row in quote_rows if str(row.get("symbol", "")).upper() == normalized), None)
+        if not isinstance(quote, dict) or not isinstance(quote.get("price"), (int, float)) or quote["price"] <= 0:
+            raise HTTPException(status_code=503, detail="Schwab no devolvió un precio actual válido.")
+        price = float(quote["price"])
+        minute_payload = get_chart_history(normalized, "1m")
+        minute_candles = normalize_price_history(normalized, minute_payload)
+        daily_payload = get_all_time_daily_history(normalized)
+        daily_candles = normalize_price_history(normalized, daily_payload)
+        weekly_payload = get_chart_history(normalized, "week")
+        weekly_candles = normalize_price_history(normalized, weekly_payload)
+
+        results = []
+        for label, minutes in _MARKET_LEVEL_TIMEFRAMES:
+            aggregated = minute_candles if minutes == 1 else _market_level_aggregate_minutes(minute_candles, minutes, now)
+            results.append(_market_level_analyze(aggregated, price, label))
+        hourly = _market_level_aggregate_minutes(minute_candles, 60, now)
+        # Replace 1h result with the dedicated hourly aggregation.
+        results[-1] = _market_level_analyze(hourly, price, "1h")
+
+        daily = _market_level_aggregate_calendar(daily_candles, "day", now)
+        weekly = _market_level_aggregate_calendar(weekly_candles, "week", now)
+        monthly = _market_level_aggregate_calendar(daily_candles, "month", now)
+        results.extend([
+            _market_level_analyze(daily, price, "1D"),
+            _market_level_analyze(weekly, price, "1W"),
+            _market_level_analyze(monthly, price, "1M"),
+        ])
+        valid_overbought = [r["reference"] for r in results if r["status"] == "ok" and r["overbought"] and r["reference"] is not None]
+        valid_oversold = [r["reference"] for r in results if r["status"] == "ok" and r["oversold"] and r["reference"] is not None]
+        return {
+            "symbol": normalized, "provider": "Schwab", "price": price,
+            "quote_time_ms": quote.get("quote_time_ms") or quote.get("trade_time_ms"),
+            "timeframes": results,
+            "avg_overbought": sum(valid_overbought) / len(valid_overbought) if valid_overbought else None,
+            "avg_oversold": sum(valid_oversold) / len(valid_oversold) if valid_oversold else None,
+            "overbought_count": len(valid_overbought), "oversold_count": len(valid_oversold),
+            "source_note": "Indicadores calculados con velas cerradas reales de Schwab; precio de referencia de la cotización actual.",
+        }
+    except (SchwabAPIError, SchwabConfigurationError) as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from None
+    except (OSError, RuntimeError, ValueError, TypeError) + DB_ERRORS:
+        logger.exception("Market-level calculation failed for %s", normalized)
+        raise HTTPException(status_code=503, detail="No se pudieron calcular los niveles multitemporales con datos de Schwab.") from None
+
 
 
 @app.post("/api/scan")
