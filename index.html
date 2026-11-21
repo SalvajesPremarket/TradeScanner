@@ -686,6 +686,9 @@
       }
       for (const item of results) {
         const tr = document.createElement("tr");
+        tr.dataset.chartSymbol = item.symbol;
+        tr.title = "Seleccionar " + item.symbol + " y cargarlo en el gráfico";
+        tr.style.cursor = "pointer";
         const details = strategyDetailsForSymbol(item.symbol);
         const tickerCell = document.createElement("td");
         const quoteFresh = item.quote_is_fresh === true;
@@ -695,7 +698,7 @@
         tickerButton.className = "chart-ticker-link";
         tickerButton.textContent = (quoteFresh ? item.symbol : item.symbol + " · ÚLTIMO DATO");
         tickerButton.title = "Abrir " + item.symbol + " en el gráfico integrado";
-        tickerButton.addEventListener("click", () => loadChartForSymbol(item.symbol));
+        tickerButton.setAttribute("aria-label", "Cargar " + item.symbol + " en el gráfico");
         tickerCell.appendChild(tickerButton);
         tr.appendChild(tickerCell);
         if (!quoteFresh) tickerCell.title = "Cotización guardada no confirmada como actual. Se muestra como referencia, no como precio en tiempo real.";
@@ -1393,10 +1396,10 @@
       loadChartForSymbol(document.getElementById("chart-symbol").value);
     });
     document.getElementById("result-rows").addEventListener("click", event => {
-      const ticker = event.target.closest(".chart-ticker-link");
-      if (!ticker) return;
+      const row = event.target.closest("tr[data-chart-symbol]");
+      if (!row || !event.currentTarget.contains(row)) return;
       event.preventDefault();
-      loadChartForSymbol(ticker.textContent);
+      loadChartForSymbol(row.dataset.chartSymbol);
     });
 
     function readWatchlist() {
