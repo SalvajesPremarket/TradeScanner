@@ -1454,8 +1454,11 @@
     function mcEma(values,period){if(values.length<period)return null;const k=2/(period+1);let v=values.slice(0,period).reduce((a,b)=>a+b,0)/period;for(let i=period;i<values.length;i++)v=values[i]*k+v*(1-k);return v;}
     function mcRsi(values,period=14){if(values.length<=period)return null;let g=0,l=0;for(let i=values.length-period;i<values.length;i++){const d=values[i]-values[i-1];if(d>0)g+=d;else l-=d;}if(l===0)return 100;return 100-100/(1+(g/period)/(l/period));}
     function mcAnalyzeCandles(symbol,candles){
-      const valid=(Array.isArray(candles)?candles:[]).filter(c=>c&&Number.isFinite(Number(c.close))&&Number(c.close)>0&&Number.isFinite(Number(c.high))&&Number.isFinite(Number(c.low)));
-      if(valid.length<30)throw new Error(symbol+": Schwab devolvió menos de 30 velas válidas de 1 minuto.");
+      const currentMinute=Math.floor(Date.now()/60000)*60000;
+      const valid=(Array.isArray(candles)?candles:[]).filter(c=>c&&Number.isFinite(Number(c.close))&&Number(c.close)>0&&Number.isFinite(Number(c.high))&&Number.isFinite(Number(c.low))&&Number.isFinite(Number(c.candle_time_ms))&&Number(c.candle_time_ms)<currentMinute);
+      if(valid.length<30)throw new Error(symbol+": Schwab no devolvió al menos 30 velas cerradas de 1 minuto.");
+      const lastStamp=Number(valid.at(-1).candle_time_ms);
+      if(!Number.isFinite(lastStamp)||Date.now()-lastStamp>5*60*1000)throw new Error(symbol+": las velas están atrasadas más de 5 minutos; se evita generar una señal con datos antiguos.");
       const closes=valid.map(c=>Number(c.close)),last=closes.at(-1),e9=mcEma(closes.slice(-60),9),e20=mcEma(closes.slice(-80),20),e9prev=mcEma(closes.slice(-65,-5),9),rsi=mcRsi(closes);
       const fast=mcEma(closes,12),slow=mcEma(closes,26),macd=fast!==null&&slow!==null?fast-slow:null,signalValues=[];
       for(let i=25;i<closes.length;i++){const f=mcEma(closes.slice(0,i+1),12),s=mcEma(closes.slice(0,i+1),26);if(f!==null&&s!==null)signalValues.push(f-s);}
@@ -1470,7 +1473,8 @@
       if(rsi!==null){if(rsi>=55&&rsi<75){score+=10;notes.push("RSI favorece compradores");}else if(rsi<=45&&rsi>25){score-=10;notes.push("RSI favorece vendedores");}else if(rsi>=75||rsi<=25)notes.push("RSI extremo");}
       const move=Number(recent.at(-1).close)-Number(recent[0].open);if(move>0)score+=8;else if(move<0)score-=8;
       if(prior.length){const prev=Number(prior.at(-1).close)-Number(prior[0].open);if(move>prev)score+=5;else if(move<prev)score-=5;}
-      return{symbol,score:Math.max(-100,Math.min(100,score)),last,atr,vwap,rsi,notes,asOf:Number(valid.at(-1).candle_time_ms)||null};
+      const triggerHigh=Math.max(...valid.slice(-5).map(c=>Number(c.high))),triggerLow=Math.min(...valid.slice(-5).map(c=>Number(c.low)));
+      return{symbol,score:Math.max(-100,Math.min(100,score)),last,atr,vwap,rsi,notes,triggerHigh,triggerLow,asOf:lastStamp};
     }
     function mcRenderArrow(direction,price,stop,target){
       const svg=mcEl("market-forecast-svg"),ns="http://www.w3.org/2000/svg";svg.replaceChildren();
@@ -1493,7 +1497,7 @@
         const [spy,qqq,asset]=data,combined=spy.score*.30+qqq.score*.30+asset.score*.40,bull=Math.round((combined+100)/2),bear=100-bull;
         const aligned=(spy.score>0&&qqq.score>0&&asset.score>0)||(spy.score<0&&qqq.score<0&&asset.score<0),direction=aligned&&combined>=22?"LARGO":aligned&&combined<=-22?"CORTO":"ESPERAR";
         const price=asset.last,range=Number.isFinite(asset.atr)&&asset.atr>0?asset.atr*Math.sqrt(60):null;
-        const entry=direction==="LARGO"?price+asset.atr*.15:direction==="CORTO"?price-asset.atr*.15:null,risk=range!==null?Math.max(range*.65,asset.atr):null;
+        const entry=direction==="LARGO"?asset.triggerHigh+0.01:direction==="CORTO"?asset.triggerLow-0.01:null,risk=range!==null?Math.max(range*.65,asset.atr):null;
         const stop=direction==="LARGO"&&risk!==null?entry-risk:direction==="CORTO"&&risk!==null?entry+risk:null,t1=direction==="LARGO"&&risk!==null?entry+risk:direction==="CORTO"&&risk!==null?entry-risk:null,t2=direction==="LARGO"&&risk!==null?entry+2*risk:direction==="CORTO"&&risk!==null?entry-2*risk:null;
         mcEl("mc-direction").textContent=direction;mcEl("mc-direction").className="mc-direction "+(direction==="LARGO"?"mc-long":direction==="CORTO"?"mc-short":"mc-wait");
         mcEl("mc-action-note").textContent=direction==="ESPERAR"?"Las tres lecturas no están alineadas. No forzar operación.":direction==="LARGO"?"Esperar ruptura y confirmación por encima de la entrada.":"Esperar ruptura y confirmación por debajo de la entrada.";
@@ -1512,7 +1516,9 @@
     }
     mcEl("mc-analyze").addEventListener("click",runMarketCalculator);
     mcEl("mc-auto").addEventListener("change",()=>{if(mcState.timer!==null)window.clearInterval(mcState.timer);mcState.timer=null;if(mcEl("mc-auto").checked)mcState.timer=window.setInterval(()=>{if(!document.hidden)void runMarketCalculator();},30000);});
-    mcState.timer=window.setInterval(()=>{if(mcEl("mc-auto").checked&&!document.hidden)void runMarketCalculator();},30000);
+    let mcHasRun=false;
+    mcState.timer=window.setInterval(()=>{if(mcHasRun&&mcEl("mc-auto").checked&&!document.hidden)void runMarketCalculator();},30000);
+    mcEl("mc-analyze").addEventListener("click",()=>{mcHasRun=true;});
 
     function readWatchlist() {
       try { const value = JSON.parse(localStorage.getItem("tradescanner_watchlist") || "[]"); watchlist = Array.isArray(value) ? value.filter(v=>typeof v==="string") : []; }
