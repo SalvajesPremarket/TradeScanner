@@ -802,6 +802,8 @@ def _evaluate_pullback_strategy(store: SnapshotStore, batch: list[str], strategy
     # strategy's price range and with verified FLOAT need expensive daily history.
     scheduled = 0
     for row in rows:
+        if _engine_shutdown_event.is_set():
+            break
         symbol = row.get("symbol")
         price = row.get("price")
         float_shares = row.get("float_shares")
@@ -824,7 +826,8 @@ def _evaluate_pullback_strategy(store: SnapshotStore, batch: list[str], strategy
             continue
         prior_attempt = store.get_state("pullback_daily_history:" + symbol, {})
         attempted_at = prior_attempt.get("attempted_at", 0) if isinstance(prior_attempt, dict) else 0
-        if isinstance(attempted_at, (int, float)) and time.time() - float(attempted_at) < 24 * 60 * 60:
+        cooldown = 5 * 60 if isinstance(prior_attempt, dict) and prior_attempt.get("status") == "error" else 24 * 60 * 60
+        if isinstance(attempted_at, (int, float)) and time.time() - float(attempted_at) < cooldown:
             continue
         with _pullback_history_lock:
             if symbol in _pullback_history_inflight or len(_pullback_history_inflight) >= _PULLBACK_HISTORY_MAX_INFLIGHT:
