@@ -3,6 +3,7 @@ import concurrent.futures
 import hmac
 import jwt
 import logging
+import math
 import os
 import time
 import threading
@@ -935,6 +936,11 @@ def market_levels_status(symbol: str):
         price = float(quote["price"])
         minute_payload = get_chart_history(normalized, "1m")
         minute_candles = normalize_price_history(normalized, minute_payload)
+        current_minute = now.replace(second=0, microsecond=0)
+        minute_candles = [
+            candle for candle in minute_candles
+            if datetime.fromtimestamp(candle["candle_time_ms"] / 1000, timezone.utc).astimezone(_MARKET_LEVEL_TZ) < current_minute
+        ]
         daily_payload = get_all_time_daily_history(normalized)
         daily_candles = normalize_price_history(normalized, daily_payload)
         weekly_payload = get_chart_history(normalized, "week")
