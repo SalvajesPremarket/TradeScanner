@@ -968,14 +968,58 @@ def market_levels_status(symbol: str):
         ])
         valid_overbought = [r["reference"] for r in results if r["status"] == "ok" and r["overbought"] and r["reference"] is not None]
         valid_oversold = [r["reference"] for r in results if r["status"] == "ok" and r["oversold"] and r["reference"] is not None]
+        avg_overbought = sum(valid_overbought) / len(valid_overbought) if valid_overbought else None
+        avg_oversold = sum(valid_oversold) / len(valid_oversold) if valid_oversold else None
+        bp = (avg_overbought + avg_oversold) / 2.0 if avg_overbought is not None and avg_oversold is not None else None
+
+        # Manual rule: ATR/AvgDayChange is the mean High-Low of the last
+        # two completed daily candles plus today's still-forming daily candle.
+        today_daily = [
+            candle for candle in daily_candles
+            if datetime.fromtimestamp(candle["candle_time_ms"] / 1000, timezone.utc).astimezone(_MARKET_LEVEL_TZ).date() == now.date()
+        ]
+        completed_daily = [
+            candle for candle in daily_candles
+            if datetime.fromtimestamp(candle["candle_time_ms"] / 1000, timezone.utc).astimezone(_MARKET_LEVEL_TZ).date() < now.date()
+        ]
+        atr_candles = (completed_daily[-2:] + today_daily[-1:]) if today_daily and len(completed_daily) >= 2 else []
+        atr = sum(float(c["high"]) - float(c["low"]) for c in atr_candles) / 3.0 if len(atr_candles) == 3 else None
+
+        clock = now.time()
+        if clock >= datetime.strptime("09:30", "%H:%M").time() and clock < datetime.strptime("16:00", "%H:%M").time():
+            gap_mode = "market_open"
+            gm_factors = (1 / 3, 1 / 6, 2 / 3)
+        elif clock >= datetime.strptime("04:00", "%H:%M").time() and clock < datetime.strptime("09:30", "%H:%M").time():
+            gap_mode = "premarket"
+            gm_factors = (2 / 3, 1 / 3, 1.0)
+        else:
+            gap_mode = "after_hours"
+            gm_factors = None
+
+        gm1 = atr * gm_factors[0] if atr is not None and gm_factors else None
+        gm2 = atr * gm_factors[1] if atr is not None and gm_factors else None
+        gm3 = atr * gm_factors[2] if atr is not None and gm_factors else None
+        levels = None
+        if bp is not None:
+            levels = {
+                "BP": bp,
+                "MaxPos": bp + gm1 if gm1 is not None else None,
+                "IntPos": bp + gm2 if gm2 is not None else None,
+                "IntNeg": bp - gm2 if gm2 is not None else None,
+                "MaxNeg": bp - gm1 if gm1 is not None else None,
+                "TopReversal": bp + gm3 if gm3 is not None else None,
+                "BottomReversal": bp - gm3 if gm3 is not None else None,
+            }
         return {
             "symbol": normalized, "provider": "Schwab", "price": price,
             "quote_time_ms": quote.get("quote_time_ms") or quote.get("trade_time_ms"),
             "timeframes": results,
-            "avg_overbought": sum(valid_overbought) / len(valid_overbought) if valid_overbought else None,
-            "avg_oversold": sum(valid_oversold) / len(valid_oversold) if valid_oversold else None,
+            "avg_overbought": avg_overbought, "avg_oversold": avg_oversold,
             "overbought_count": len(valid_overbought), "oversold_count": len(valid_oversold),
-            "source_note": "Indicadores calculados con velas cerradas reales de Schwab; precio de referencia de la cotización actual.",
+            "bp": bp, "avg_day_change": atr, "atr_candles_used": len(atr_candles),
+            "gap_mode": gap_mode, "gm1": gm1, "gm2": gm2, "gm3": gm3,
+            "levels": levels,
+            "source_note": "Indicadores calculados con velas cerradas reales de Schwab; precio de referencia de la cotización actual. AvgDayChange requiere dos días completos y el día actual en formación.",
         }
     except (SchwabAPIError, SchwabConfigurationError) as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from None
