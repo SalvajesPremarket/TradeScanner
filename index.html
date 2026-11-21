@@ -1380,8 +1380,8 @@
       if(!candles.length){add("text",{x:500,y:245,"text-anchor":"middle",fill:"#526170","font-size":14},"No hay velas reales guardadas para graficar");return;}
       const valid=candles.filter(c=>[c.open,c.high,c.low,c.close].every(v=>Number.isFinite(Number(v))));
       if(!valid.length){add("text",{x:500,y:245,"text-anchor":"middle",fill:"#526170","font-size":14},"Las velas no contienen OHLC válido");return;}
-      const ind=emuColorSeries(valid,settings),volumes=valid.map(c=>Math.max(0,Number(c.volume)||0));
-      const left=65,right=910,step=(right-left)/valid.length,xAt=i=>left+step*(i+.5),priceTop=24,priceBottom=395,volTop=425,volBottom=480;
+      const ind=emuColorSeries(valid,settings),volumes=valid.map(c=>Math.max(0,Number(c.volume)||0)),closes=valid.map(c=>Number(c.close)),macdFast=emuEma(closes,12),macdSlow=emuEma(closes,26),macdLine=macdFast.map((v,i)=>Number.isFinite(v)&&Number.isFinite(macdSlow[i])?v-macdSlow[i]:null),macdSignal=emuEma(macdLine,9),macdHist=macdLine.map((v,i)=>Number.isFinite(v)&&Number.isFinite(macdSignal[i])?v-macdSignal[i]:null);
+      const left=65,right=910,step=(right-left)/valid.length,xAt=i=>left+step*(i+.5),priceTop=24,priceBottom=320,macdTop=342,macdBottom=405,volTop=430,volBottom=480;
       const livePrice=liveQuote&&Number.isFinite(Number(liveQuote.price))&&Number(liveQuote.price)>0?Number(liveQuote.price):null;
       const overlays=[ind.e3,ind.e9,ind.e20,ind.e50,ind.e200,ind.bbTop,ind.bbBot,ind.sar,ind.tp1,ind.tp2].flat().filter(Number.isFinite);
       const levelPrices=marketLevelOverlay&&marketLevelOverlay.symbol===String(document.getElementById("chart-symbol").value||"").toUpperCase()&&marketLevelOverlay.levels?Object.values(marketLevelOverlay.levels).filter(Number.isFinite):[];
@@ -1421,7 +1421,13 @@
       if(settings.sar)ind.sar.forEach((v,i)=>{if(Number.isFinite(v))add("circle",{cx:xAt(i),cy:yPrice(v),r:3.2,fill:ind.sarC[i],stroke:ind.sarC[i]});});
       if(settings.targets){ind.tp1.forEach((v,i)=>{if(Number.isFinite(v))add("circle",{cx:xAt(i),cy:yPrice(v),r:4.4,fill:"#000000"});});ind.tp2.forEach((v,i)=>{if(Number.isFinite(v))add("circle",{cx:xAt(i),cy:yPrice(v),r:4.4,fill:"#000000"});});}
       label(left,14,"ESTUDIOS TRADESCANNER · EMA 3/9/20/50/200 · BOLLINGER · PSAR · TARGET PRICE","start","#344454");
-      const maxVol=Math.max(1,...volumes);volumes.forEach((v,i)=>{const height=v/maxVol*(volBottom-volTop);add("rect",{x:xAt(i)-bw/2,y:volBottom-height,width:bw,height:height,fill:"#5b91ad",opacity:.8});});label(left,414,"VOLUMEN","start","#344454");
+      const macdValues=[...macdLine,...macdSignal,...macdHist].filter(Number.isFinite),macdAbs=Math.max(1e-8,...macdValues.map(Math.abs)),macdMid=(macdTop+macdBottom)/2,macdY=v=>macdMid-(v/macdAbs)*(macdBottom-macdTop)*.46;
+      add("line",{x1:left,y1:macdMid,x2:right,y2:macdMid,stroke:"#aab5bf","stroke-width":1,"stroke-dasharray":"3 3"});
+      macdHist.forEach((v,i)=>{if(!Number.isFinite(v))return;const y=macdY(v),color=v>=0?"#15966b":"#d34b57";add("rect",{x:xAt(i)-bw/2,y:Math.min(y,macdMid),width:bw,height:Math.max(1,Math.abs(macdMid-y)),fill:color,opacity:.9});});
+      const drawMacdLine=(values,color,width)=>{let path="";values.forEach((v,i)=>{if(!Number.isFinite(v)){path="";return;}path+=(path?" L":"M")+xAt(i).toFixed(2)+" "+macdY(v).toFixed(2);});if(path)add("path",{d:path,fill:"none",stroke:color,"stroke-width":width,"stroke-linejoin":"round","stroke-linecap":"round"});};
+      drawMacdLine(macdLine,"#087e9c",1.35);drawMacdLine(macdSignal,"#c07824",1.15);
+      label(left,macdTop-7,"MACD FULL COLOR · VERDE POSITIVO / ROJO NEGATIVO","start","#344454");
+      const maxVol=Math.max(1,...volumes);volumes.forEach((v,i)=>{const height=v/maxVol*(volBottom-volTop),up=Number(valid[i].close)>=Number(valid[i].open);add("rect",{x:xAt(i)-bw/2,y:volBottom-height,width:bw,height:height,fill:up?"#15966b":"#d34b57",opacity:.88});});label(left,volTop-7,"VOLUMEN · VERDE ALCISTA / ROJO BAJISTA","start","#344454");
       const tf=document.getElementById("chart-timeframe").value,timeOptions=tf==="day"?{month:"short",day:"numeric",timeZone:"America/New_York"}:tf==="week"?{month:"short",year:"2-digit",timeZone:"America/New_York"}:{hour:"2-digit",minute:"2-digit",hour12:false,timeZone:"America/New_York"};
       const formatTime=c=>c.candle_time_ms?new Intl.DateTimeFormat("es",timeOptions).format(new Date(Number(c.candle_time_ms))):"—",tickCount=Math.min(6,valid.length);
       for(let t=0;t<tickCount;t++){const i=Math.round(t*(valid.length-1)/Math.max(1,tickCount-1)),x=xAt(i);add("line",{x1:x,y1:volBottom+2,x2:x,y2:volBottom+6,stroke:"#7b8792","stroke-width":1});label(x,496,formatTime(valid[i]),"middle");}
