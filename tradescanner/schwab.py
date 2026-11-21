@@ -383,3 +383,28 @@ def get_daily_history(symbol: str) -> dict[str, Any]:
     if not isinstance(payload, dict) or not isinstance(payload.get("candles", []), list):
         raise SchwabAPIError("Schwab daily-history response was malformed.")
     return payload
+
+
+def get_pullback_daily_history(symbol: str) -> dict[str, Any]:
+    """Fetch two years of completed daily OHLCV for EMA200 and weekly setups."""
+    normalized = symbol.strip().upper()
+    if not _SYMBOL_RE.fullmatch(normalized):
+        raise ValueError("Invalid ticker symbol.")
+    query = urllib.parse.urlencode({
+        "symbol": normalized,
+        "periodType": "year",
+        "period": 2,
+        "frequencyType": "daily",
+        "frequency": 1,
+        "needExtendedHoursData": "false",
+        "needPreviousClose": "true",
+    })
+    request = urllib.request.Request(
+        f"{PRICE_HISTORY_URL}?{query}",
+        headers={"Authorization": f"Bearer {_access_token()}", "Accept": "application/json"},
+        method="GET",
+    )
+    payload = _request_json(request, timeout=12)
+    if not isinstance(payload, dict) or not isinstance(payload.get("candles", []), list):
+        raise SchwabAPIError("Schwab Pullback daily-history response was malformed.")
+    return payload

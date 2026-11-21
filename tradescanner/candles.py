@@ -275,3 +275,85 @@ class CandleStore:
             "sessions_used": len(historical_totals),
             "as_of": as_of.isoformat(),
         }
+
+
+class DailyCandleStore:
+    """Persist completed daily OHLCV separately from intraday bars."""
+
+    def __init__(self, path: str | Path | None = None) -> None:
+        configured_url = os.getenv("DATABASE_URL", "").strip()
+        self.path = (str(path) if path is not None else configured_url) or DEFAULT_DB_PATH
+        if not is_postgres(self.path):
+            Path(self.path).parent.mkdir(parents=True, exist_ok=True)
+        with self._connect() as connection:
+            connection.execute(
+                """CREATE TABLE IF NOT EXISTS daily_candles (
+                    symbol TEXT NOT NULL,
+                    candle_time_ms BIGINT NOT NULL,
+                    open DOUBLE PRECISION NOT NULL,
+                    high DOUBLE PRECISION NOT NULL,
+                    low DOUBLE PRECISION NOT NULL,
+                    close DOUBLE PRECISION NOT NULL,
+                    volume BIGINT NOT NULL,
+                    fetched_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY(symbol, candle_time_ms)
+                )"""
+            )
+
+    def _connect(self):
+        return db_connect(self.path)
+
+    def save(self, candles: list[dict[str, Any]]) -> int:
+        if not candles:
+            return 0
+        records = [
+            (row["symbol"], row["candle_time_ms"], row["open"], row["high"],
+             row["low"], row["close"], row["volume"])
+            for row in candles
+        ]
+        with self._connect() as connection:
+            connection.executemany(
+                """INSERT INTO daily_candles
+                   (symbol, candle_time_ms, open, high, low, close, volume)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(symbol, candle_time_ms) DO UPDATE SET
+                     open=excluded.open, high=excluded.high, low=excluded.low,
+                     close=excluded.close, volume=excluded.volume,
+                     fetched_at=CURRENT_TIMESTAMP""",
+                records,
+            )
+        return len(records)
+
+    def latest(self, symbol: str, limit: int = 600) -> list[dict[str, Any]]:
+        bounded_limit = max(1, min(int(limit), 1000))
+        with self._connect() as connection:
+            rows = connection.execute(
+                """SELECT symbol, candle_time_ms, open, high, low, close, volume
+                   FROM daily_candles WHERE symbol = ?
+                   ORDER BY candle_time_ms DESC LIMIT ?""",
+                (symbol.strip().upper(), bounded_limit),
+            ).fetchall()
+        keys = ("symbol", "candle_time_ms", "open", "high", "low", "close", "volume")
+        return [dict(zip(keys, row)) for row in reversed(rows)]
+
+    def history_status_by_symbols(self, symbols: list[str]) -> dict[str, dict[str, int | None]]:
+        normalized = list(dict.fromkeys(
+            symbol.strip().upper() for symbol in symbols
+            if isinstance(symbol, str) and symbol.strip()
+        ))
+        if not normalized:
+            return {}
+        placeholders = ",".join("?" for _ in normalized)
+        with self._connect() as connection:
+            rows = connection.execute(
+                f"SELECT symbol, COUNT(*), MAX(candle_time_ms) FROM daily_candles "
+                f"WHERE symbol IN ({placeholders}) GROUP BY symbol",
+                tuple(normalized),
+            ).fetchall()
+        return {
+            str(row[0]).strip().upper(): {
+                "count": int(row[1]),
+                "latest_candle_time_ms": int(row[2]) if row[2] is not None else None,
+            }
+            for row in rows
+        }
