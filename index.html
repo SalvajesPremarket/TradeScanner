@@ -187,6 +187,23 @@
     .filter-alerts .alert-ok{color:#4fe0b3}
     .filter-alerts .alert-error{color:#ff9aab}
 
+
+    .market-calculator{margin-top:16px;padding:16px;border:1px solid #31536a;border-radius:10px;background:linear-gradient(145deg,#102536,#091724);color:#d9e8f1}
+    .market-calculator h2{margin:0;color:#8ee7df;font-size:17px}
+    .market-calculator .mc-sub{color:#9bb2c1;font-size:12px;margin:6px 0 14px}
+    .mc-actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px}
+    .mc-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px;margin:12px 0}
+    .mc-card{padding:10px;border:1px solid #29475b;border-radius:8px;background:#0a1b29;min-width:0}
+    .mc-card small{display:block;color:#91aabb;font-size:10px;letter-spacing:.06em}
+    .mc-card strong{display:block;font-size:20px;margin-top:4px;color:#e8f4fa}
+    .mc-card span{display:block;color:#a9c0cd;font-size:11px;margin-top:4px;overflow-wrap:anywhere}
+    .mc-direction{font-size:22px!important;letter-spacing:.04em}
+    .mc-long{color:#55dfad!important}.mc-short{color:#ff8c9c!important}.mc-wait{color:#ffd27a!important}
+    #market-forecast-svg{display:block;width:100%;height:auto;min-height:150px;background:#081521;border:1px solid #203d50;border-radius:8px;margin:10px 0}
+    .mc-evidence{font-size:12px;line-height:1.55;color:#c0d2dc;padding:10px;border-left:3px solid #3c8495;background:#0a1b29;border-radius:4px}
+    .mc-warning{color:#ffd27a;font-size:11px;line-height:1.5;margin-top:10px}
+    .mc-status{font-size:12px;color:#a9c0cd}
+
 </style>
 </head>
 <body>
@@ -266,6 +283,28 @@
         <div id="chart-message" class="tab-message">El gráfico mostrará únicamente velas que estén guardadas. No se inventarán precios.</div>
         <svg id="chart-svg" viewBox="0 0 1000 500" width="100%" role="img" aria-label="Gráfico de velas de Schwab" style="display:block;min-height:260px;border:1px solid #24465b;background:#eef2f5;margin-bottom:14px"><text x="500" y="160" text-anchor="middle" fill="#718096" font-size="14">Carga velas guardadas para mostrar el gráfico</text></svg>
         <div class="table-wrap"><table class="simple-table"><thead><tr><th>FECHA</th><th>OPEN</th><th>HIGH</th><th>LOW</th><th>CLOSE</th><th>VOLUMEN</th></tr></thead><tbody id="chart-rows"><tr><td colspan="6">Introduce un ticker y carga sus velas.</td></tr></tbody></table></div>      </div>
+    </section>
+
+
+    <section id="market-calculator" class="market-calculator" aria-label="Calculador de dirección del mercado">
+      <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap"><h2>CALCULADOR DE DIRECCIÓN · PRÓXIMA HORA</h2><span class="mc-status" id="mc-updated">Sin análisis todavía</span></div>
+      <p class="mc-sub">Lectura combinada de SPY (30 %), QQQ (30 %) y el activo seleccionado (40 %), con velas reales de 1 minuto de Schwab.</p>
+      <div class="mc-actions"><button class="action" id="mc-analyze" type="button">Analizar SPY + QQQ + activo</button><label class="filter" style="display:flex;align-items:center;gap:6px"><input id="mc-auto" type="checkbox" checked> Actualizar cada 30 s</label><span class="mc-status" id="mc-symbol-label">Activo: —</span></div>
+      <div class="mc-grid">
+        <div class="mc-card"><small>DECISIÓN CONDICIONAL</small><strong class="mc-direction mc-wait" id="mc-direction">ESPERAR</strong><span id="mc-action-note">Analiza los tres activos para obtener la lectura.</span></div>
+        <div class="mc-card"><small>SESGO ALCISTA · EVIDENCIA</small><strong id="mc-bull">—</strong><span>Índice técnico, no probabilidad garantizada.</span></div>
+        <div class="mc-card"><small>SESGO BAJISTA · EVIDENCIA</small><strong id="mc-bear">—</strong><span>Índice técnico, no probabilidad garantizada.</span></div>
+        <div class="mc-card"><small>PRECIO DEL ACTIVO</small><strong id="mc-price">—</strong><span id="mc-price-time">Esperando cotización.</span></div>
+      </div>
+      <svg id="market-forecast-svg" viewBox="0 0 520 170" role="img" aria-label="Escenario condicional de movimiento durante la próxima hora"><text x="260" y="80" text-anchor="middle" fill="#91aabb" font-size="12">La proyección aparecerá después del análisis.</text></svg>
+      <div class="mc-grid">
+        <div class="mc-card"><small>ENTRADA CONDICIONADA</small><strong id="mc-entry">—</strong><span id="mc-entry-note">Requiere confirmación del precio.</span></div>
+        <div class="mc-card"><small>INVALIDACIÓN / STOP TÉCNICO</small><strong id="mc-stop">—</strong><span>No garantiza limitar el deslizamiento.</span></div>
+        <div class="mc-card"><small>OBJETIVO 1 · 1R</small><strong id="mc-target1">—</strong><span>Primer nivel de referencia.</span></div>
+        <div class="mc-card"><small>OBJETIVO 2 · 2R</small><strong id="mc-target2">—</strong><span>Segundo nivel de referencia.</span></div>
+      </div>
+      <div class="mc-evidence" id="mc-explanation">El análisis explicará por separado SPY, QQQ y el activo seleccionado. Si faltan velas, la lectura será incompleta y no se recomendará una entrada.</div>
+      <div class="mc-warning">Importante: la dirección futura no puede conocerse con certeza. Los porcentajes representan la fuerza relativa de señales técnicas simples, no probabilidades calibradas ni promesas de rentabilidad. La flecha es un escenario, no una trayectoria segura. No se envían órdenes a TradeZero.</div>
     </section>
 
     </section>
@@ -1407,6 +1446,73 @@
       event.preventDefault();
       loadChartForSymbol(row.dataset.chartSymbol);
     });
+
+
+    const mcState = {timer:null,busy:false,lastSymbol:null};
+    const mcEl = id => document.getElementById(id);
+    const mcFmt = value => Number.isFinite(value) ? "$"+value.toFixed(2) : "—";
+    function mcEma(values,period){if(values.length<period)return null;const k=2/(period+1);let v=values.slice(0,period).reduce((a,b)=>a+b,0)/period;for(let i=period;i<values.length;i++)v=values[i]*k+v*(1-k);return v;}
+    function mcRsi(values,period=14){if(values.length<=period)return null;let g=0,l=0;for(let i=values.length-period;i<values.length;i++){const d=values[i]-values[i-1];if(d>0)g+=d;else l-=d;}if(l===0)return 100;return 100-100/(1+(g/period)/(l/period));}
+    function mcAnalyzeCandles(symbol,candles){
+      const valid=(Array.isArray(candles)?candles:[]).filter(c=>c&&Number.isFinite(Number(c.close))&&Number(c.close)>0&&Number.isFinite(Number(c.high))&&Number.isFinite(Number(c.low)));
+      if(valid.length<30)throw new Error(symbol+": Schwab devolvió menos de 30 velas válidas de 1 minuto.");
+      const closes=valid.map(c=>Number(c.close)),last=closes.at(-1),e9=mcEma(closes.slice(-60),9),e20=mcEma(closes.slice(-80),20),e9prev=mcEma(closes.slice(-65,-5),9),rsi=mcRsi(closes);
+      const fast=mcEma(closes,12),slow=mcEma(closes,26),macd=fast!==null&&slow!==null?fast-slow:null,signalValues=[];
+      for(let i=25;i<closes.length;i++){const f=mcEma(closes.slice(0,i+1),12),s=mcEma(closes.slice(0,i+1),26);if(f!==null&&s!==null)signalValues.push(f-s);}
+      const sig=mcEma(signalValues,9),hist=macd!==null&&sig!==null?macd-sig:null;
+      let pv=0,vol=0;for(const c of valid){const v=Math.max(0,Number(c.volume)||0);pv+=((Number(c.high)+Number(c.low)+Number(c.close))/3)*v;vol+=v;}const vwap=vol>0?pv/vol:null;
+      let tr=0,n=0;for(let i=Math.max(1,valid.length-14);i<valid.length;i++){const c=valid[i],p=valid[i-1],v=Math.max(Number(c.high)-Number(c.low),Math.abs(Number(c.high)-Number(p.close)),Math.abs(Number(c.low)-Number(p.close)));if(Number.isFinite(v)){tr+=v;n++;}}
+      const atr=n?tr/n:null,recent=valid.slice(-6),prior=valid.slice(-12,-6);let score=0,notes=[];
+      if(e9!==null&&e20!==null){if(e9>e20){score+=22;notes.push("EMA9 sobre EMA20");}else{score-=22;notes.push("EMA9 bajo EMA20");}}
+      if(e9!==null&&e9prev!==null){if(e9>e9prev){score+=12;notes.push("EMA9 con pendiente positiva");}else{score-=12;notes.push("EMA9 con pendiente negativa");}}
+      if(vwap!==null){if(last>vwap){score+=16;notes.push("precio sobre VWAP");}else{score-=16;notes.push("precio bajo VWAP");}}
+      if(hist!==null){if(hist>0){score+=14;notes.push("MACD positivo");}else{score-=14;notes.push("MACD negativo");}}
+      if(rsi!==null){if(rsi>=55&&rsi<75){score+=10;notes.push("RSI favorece compradores");}else if(rsi<=45&&rsi>25){score-=10;notes.push("RSI favorece vendedores");}else if(rsi>=75||rsi<=25)notes.push("RSI extremo");}
+      const move=Number(recent.at(-1).close)-Number(recent[0].open);if(move>0)score+=8;else if(move<0)score-=8;
+      if(prior.length){const prev=Number(prior.at(-1).close)-Number(prior[0].open);if(move>prev)score+=5;else if(move<prev)score-=5;}
+      return{symbol,score:Math.max(-100,Math.min(100,score)),last,atr,vwap,rsi,notes,asOf:Number(valid.at(-1).candle_time_ms)||null};
+    }
+    function mcRenderArrow(direction,price,stop,target){
+      const svg=mcEl("market-forecast-svg"),ns="http://www.w3.org/2000/svg";svg.replaceChildren();
+      const add=(tag,attrs,txt)=>{const n=document.createElementNS(ns,tag);Object.entries(attrs).forEach(([k,v])=>n.setAttribute(k,String(v)));if(txt!==undefined)n.textContent=txt;svg.appendChild(n);};
+      add("line",{x1:36,y1:82,x2:484,y2:82,stroke:"#547083","stroke-width":1,"stroke-dasharray":"4 4"});
+      add("text",{x:36,y:20,fill:"#9bb2c1","font-size":10},"PRECIO ACTUAL");add("text",{x:484,y:20,fill:"#9bb2c1","font-size":10,"text-anchor":"end"},"ESCENARIO · 1 HORA");
+      add("text",{x:36,y:101,fill:"#d9e8f1","font-size":12},mcFmt(price));
+      if(direction==="ESPERAR"){add("line",{x1:54,y1:82,x2:466,y2:82,stroke:"#ffd27a","stroke-width":3});add("text",{x:260,y:58,fill:"#ffd27a","font-size":13,"text-anchor":"middle"},"SIN VENTAJA CLARA · ESPERAR");return;}
+      const up=direction==="LARGO",y=up?34:130;add("line",{x1:54,y1:82,x2:466,y2:y,stroke:up?"#55dfad":"#ff8c9c","stroke-width":4,"stroke-linecap":"round"});
+      add("polygon",{points:up?"466,34 450,39 459,51":"466,130 450,125 459,113",fill:up?"#55dfad":"#ff8c9c"});
+      add("text",{x:260,y:up?27:151,fill:up?"#55dfad":"#ff8c9c","font-size":13,"text-anchor":"middle"},up?"ESCENARIO ALCISTA CONDICIONAL":"ESCENARIO BAJISTA CONDICIONAL");
+      add("text",{x:260,y:96,fill:"#d9e8f1","font-size":10,"text-anchor":"middle"},"Stop "+mcFmt(stop)+" · Objetivo "+mcFmt(target));
+    }
+    async function runMarketCalculator(){
+      if(mcState.busy)return;const symbol=String(mcEl("chart-symbol").value||"").trim().toUpperCase();
+      if(!/^[A-Z0-9.\\-]{1,15}$/.test(symbol)){mcEl("mc-explanation").textContent="Selecciona primero un ticker válido en el gráfico.";return;}
+      mcState.busy=true;mcEl("mc-analyze").disabled=true;mcEl("mc-updated").textContent="Consultando Schwab…";mcEl("mc-symbol-label").textContent="Activo: "+symbol;
+      try{
+        const data=await Promise.all(["SPY","QQQ",symbol].map(async s=>{const p=await readJson(await fetch("/api/candles/"+encodeURIComponent(s)+"?limit=180&timeframe=1m",{cache:"no-store"}));return mcAnalyzeCandles(s,p.candles);}));
+        const [spy,qqq,asset]=data,combined=spy.score*.30+qqq.score*.30+asset.score*.40,bull=Math.round((combined+100)/2),bear=100-bull;
+        const aligned=(spy.score>0&&qqq.score>0&&asset.score>0)||(spy.score<0&&qqq.score<0&&asset.score<0),direction=aligned&&combined>=22?"LARGO":aligned&&combined<=-22?"CORTO":"ESPERAR";
+        const price=asset.last,range=Number.isFinite(asset.atr)&&asset.atr>0?asset.atr*Math.sqrt(60):null;
+        const entry=direction==="LARGO"?price+asset.atr*.15:direction==="CORTO"?price-asset.atr*.15:null,risk=range!==null?Math.max(range*.65,asset.atr):null;
+        const stop=direction==="LARGO"&&risk!==null?entry-risk:direction==="CORTO"&&risk!==null?entry+risk:null,t1=direction==="LARGO"&&risk!==null?entry+risk:direction==="CORTO"&&risk!==null?entry-risk:null,t2=direction==="LARGO"&&risk!==null?entry+2*risk:direction==="CORTO"&&risk!==null?entry-2*risk:null;
+        mcEl("mc-direction").textContent=direction;mcEl("mc-direction").className="mc-direction "+(direction==="LARGO"?"mc-long":direction==="CORTO"?"mc-short":"mc-wait");
+        mcEl("mc-action-note").textContent=direction==="ESPERAR"?"Las tres lecturas no están alineadas. No forzar operación.":direction==="LARGO"?"Esperar ruptura y confirmación por encima de la entrada.":"Esperar ruptura y confirmación por debajo de la entrada.";
+        mcEl("mc-bull").textContent=bull+"%";mcEl("mc-bear").textContent=bear+"%";mcEl("mc-price").textContent=mcFmt(price);
+        mcEl("mc-price-time").textContent=asset.asOf?"Última vela: "+new Date(asset.asOf).toLocaleTimeString("es",{timeZone:"America/New_York"})+" ET":"Hora de vela no disponible";
+        mcEl("mc-entry").textContent=entry===null?"—":mcFmt(entry);mcEl("mc-entry-note").textContent=direction==="ESPERAR"?"Sin entrada: esperar alineación.":"Confirmar con cierre de vela de 1 minuto; no perseguir el precio.";
+        mcEl("mc-stop").textContent=stop===null?"—":mcFmt(stop);mcEl("mc-target1").textContent=t1===null?"—":mcFmt(t1);mcEl("mc-target2").textContent=t2===null?"—":mcFmt(t2);mcRenderArrow(direction,price,stop,t2);
+        const explain=x=>x.symbol+": "+(x.score>0?"sesgo alcista ":x.score<0?"sesgo bajista ":"neutral ")+Math.abs(Math.round(x.score))+"/100. "+x.notes.join("; ")+".";
+        mcEl("mc-explanation").textContent=explain(spy)+" "+explain(qqq)+" "+explain(asset)+" Combinación: SPY 30 % + QQQ 30 % + "+symbol+" 40 %. "+(aligned?"Las tres lecturas coinciden.":"Las lecturas no coinciden plenamente; se aplica cautela.");
+        mcEl("mc-updated").textContent="Actualizado "+new Date().toLocaleTimeString("es",{timeZone:"America/Costa_Rica"})+" · Schwab";mcState.lastSymbol=symbol;
+      }catch(error){
+        mcEl("mc-direction").textContent="ESPERAR";mcEl("mc-direction").className="mc-direction mc-wait";mcEl("mc-action-note").textContent="Datos insuficientes; no operar con esta lectura.";
+        mcEl("mc-explanation").textContent="Análisis detenido: "+apiMessage(error)+" No se sustituyen datos faltantes ni se inventan velas.";
+        mcEl("mc-updated").textContent="No se pudo completar el análisis";["mc-entry","mc-stop","mc-target1","mc-target2"].forEach(id=>mcEl(id).textContent="—");mcRenderArrow("ESPERAR",NaN,null,null);
+      }finally{mcState.busy=false;mcEl("mc-analyze").disabled=false;}
+    }
+    mcEl("mc-analyze").addEventListener("click",runMarketCalculator);
+    mcEl("mc-auto").addEventListener("change",()=>{if(mcState.timer!==null)window.clearInterval(mcState.timer);mcState.timer=null;if(mcEl("mc-auto").checked)mcState.timer=window.setInterval(()=>{if(!document.hidden)void runMarketCalculator();},30000);});
+    mcState.timer=window.setInterval(()=>{if(mcEl("mc-auto").checked&&!document.hidden)void runMarketCalculator();},30000);
 
     function readWatchlist() {
       try { const value = JSON.parse(localStorage.getItem("tradescanner_watchlist") || "[]"); watchlist = Array.isArray(value) ? value.filter(v=>typeof v==="string") : []; }
