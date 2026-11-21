@@ -320,6 +320,7 @@
           <div class="mc-card"><small>AvgOverbought · REFERENCIA PROMEDIO</small><strong id="mc-avg-overbought">—</strong><span id="mc-overbought-count">0 temporalidades válidas</span></div>
           <div class="mc-card"><small>AvgOversold · REFERENCIA PROMEDIO</small><strong id="mc-avg-oversold">—</strong><span id="mc-oversold-count">0 temporalidades válidas</span></div>
         </div>
+        <div class="mc-grid" id="mc-levels-values"><div class="mc-card"><small>NIVELES DEL MANUAL</small><strong>—</strong><span>Se calculan cuando haya AvgOverbought, AvgOversold y ATR válidos.</span></div></div>
         <div class="table-wrap">
           <table class="simple-table" style="min-width:720px">
             <thead><tr><th>TEMPORALIDAD</th><th>VELAS</th><th>ESTADO</th><th>REFERENCIA</th><th>LÍNEAS USADAS</th><th>EMA / BOLLINGER</th></tr></thead>
@@ -1370,6 +1371,7 @@
     zoomSvg.addEventListener("pointerup",stopChartDrag);zoomSvg.addEventListener("pointercancel",stopChartDrag);zoomSvg.addEventListener("lostpointercapture",stopChartDrag);
     zoomSvg.addEventListener("wheel",e=>{e.preventDefault();if(e.shiftKey)changeChartZoom("y",e.deltaY<0?1.1:.91);else changeChartZoom("x",e.deltaY<0?1.1:.91);},{passive:false});
 
+    let marketLevelOverlay = null;
     function drawCandles(candles, liveQuote = null) {
       const svg=document.getElementById("chart-svg"),ns="http://www.w3.org/2000/svg",settings=emuSettings();
       svg.replaceChildren();
@@ -1389,7 +1391,26 @@
       const bw=Math.max(1.4,Math.min(9,step*.58));
       if(settings.cross)ind.cross.forEach((color,i)=>{if(color)add("rect",{x:left+i*step,y:priceTop,width:step,height:priceBottom-priceTop,fill:color,opacity:.62});});
       valid.forEach((c,i)=>{const x=xAt(i),o=yPrice(Number(c.open)),cl=yPrice(Number(c.close)),hh=yPrice(Number(c.high)),ll=yPrice(Number(c.low)),color=settings.candles?ind.kColor[i]:(Number(c.close)>=Number(c.open)?"#15966b":"#d34b57");add("line",{x1:x,y1:hh,x2:x,y2:ll,stroke:color,"stroke-width":1.3});add("rect",{x:x-bw/2,y:Math.min(o,cl),width:bw,height:Math.max(1,Math.abs(cl-o)),fill:color,stroke:color});});
-      const line=(values,colors,width,skipEvery3=false)=>{const paths=new Map();for(let i=1;i<values.length;i++){const a=values[i-1],b=values[i];if(!Number.isFinite(a)||!Number.isFinite(b)||(skipEvery3&&i%3===2))continue;const color=Array.isArray(colors)?colors[i]:colors;if(!color)continue;const segment="M"+xAt(i-1).toFixed(2)+" "+yPrice(a).toFixed(2)+" L"+xAt(i).toFixed(2)+" "+yPrice(b).toFixed(2);paths.set(color,(paths.get(color)||"")+segment);}for(const [color,path] of paths)add("path",{d:path,fill:"none",stroke:color,"stroke-width":width,"stroke-linejoin":"round","stroke-linecap":"round"});};
+      if(marketLevelOverlay&&marketLevelOverlay.symbol===String(document.getElementById("chart-symbol").value||"").toUpperCase()&&marketLevelOverlay.levels){
+        const specs=[
+          ["TopReversal","TOP REVERSAL","#9b59b6"],["MaxPos","MAX POS","#d35400"],
+          ["IntPos","INT POS","#148f77"],["BP","BP","#34495e"],
+          ["IntNeg","INT NEG","#148f77"],["MaxNeg","MAX NEG","#d35400"],
+          ["BottomReversal","BOTTOM REVERSAL","#9b59b6"]
+        ];
+        let visible=0;
+        for(const [key,name,color] of specs){
+          const value=marketLevelOverlay.levels[key];
+          if(!Number.isFinite(Number(value))||Number(value)<min||Number(value)>max)continue;
+          const y=yPrice(Number(value));
+          add("line",{x1:left,y1:y,x2:right,y2:y,stroke:color,"stroke-width":1.15,"stroke-dasharray":key==="BP"?"2 3":"6 4",opacity:.92});
+          add("rect",{x:left+3,y:y-12,width:Math.max(68,name.length*6+10),height:14,rx:2,fill:"#f5f1e8",stroke:color,"stroke-width":.6,opacity:.94});
+          add("text",{x:left+7,y:y-2,fill:color,"font-size":9,"font-weight":700},name+" "+Number(value).toFixed(2));
+          visible++;
+        }
+        if(!visible)add("text",{x:left+5,y:35,fill:"#7c4d12","font-size":10},"Niveles calculados fuera del rango vertical visible");
+      }
+      const line=      const line=(values,colors,width,skipEvery3=false)=>{const paths=new Map();for(let i=1;i<values.length;i++){const a=values[i-1],b=values[i];if(!Number.isFinite(a)||!Number.isFinite(b)||(skipEvery3&&i%3===2))continue;const color=Array.isArray(colors)?colors[i]:colors;if(!color)continue;const segment="M"+xAt(i-1).toFixed(2)+" "+yPrice(a).toFixed(2)+" L"+xAt(i).toFixed(2)+" "+yPrice(b).toFixed(2);paths.set(color,(paths.get(color)||"")+segment);}for(const [color,path] of paths)add("path",{d:path,fill:"none",stroke:color,"stroke-width":width,"stroke-linejoin":"round","stroke-linecap":"round"});};
       if(settings.bb){line(ind.bbTop,ind.bbC1,1.25);line(ind.bbBot,ind.bbC1,1.25);line(ind.bbTop,ind.bbC2,.9,true);line(ind.bbBot,ind.bbC2,.9,true);}
       if(settings.ema200){line(ind.e200,ind.dC1,1.65);line(ind.e200,ind.dC2,1.15,true);}
       if(settings.ema50){line(ind.e50,ind.fC2,1.0);line(ind.e50,ind.fC1,1.55);line(ind.e50,ind.fC3,1.0,true);}
@@ -1554,7 +1575,21 @@
         for(const value of values){const td=document.createElement("td");td.textContent=String(value);tr.appendChild(td);}
         rows.appendChild(tr);
       }
-      mcEl("mc-levels-status").textContent="Schwab · "+payload.timeframes.length+" temporalidades evaluadas";
+      const valueHost=mcEl("mc-levels-values");valueHost.replaceChildren();
+      const summaries=[
+        ["AvgDayChange / ATR",payload.avg_day_change],
+        ["GM1",payload.gm1],["GM2",payload.gm2],["GM3",payload.gm3],
+        ...Object.entries(payload.levels||{})
+      ];
+      for(const [name,value] of summaries){
+        const card=document.createElement("div");card.className="mc-card";
+        const small=document.createElement("small");small.textContent=name;
+        const strong=document.createElement("strong");strong.textContent=value==null?"—":fmt(value);
+        card.append(small,strong);valueHost.appendChild(card);
+      }
+      mcEl("mc-levels-status").textContent="Schwab · "+payload.timeframes.length+" temporalidades · "+(payload.gap_mode==="market_open"?"Horario regular":payload.gap_mode==="premarket"?"Premarket":"Fuera de horario");
+      marketLevelOverlay={symbol:payload.symbol,levels:payload.levels||null};
+      drawCandles(getLiveChartCandles(),chartLiveQuote);
     }
     async function runMarketCalculator(){
       if(mcState.busy)return;const symbol=String(mcEl("chart-symbol").value||"").trim().toUpperCase();
@@ -1584,7 +1619,7 @@
       }catch(error){
         mcEl("mc-direction").textContent="ESPERAR";mcEl("mc-direction").className="mc-direction mc-wait";mcEl("mc-action-note").textContent="Datos insuficientes; no operar con esta lectura.";
         mcEl("mc-explanation").textContent="Análisis detenido: "+apiMessage(error)+" No se sustituyen datos faltantes ni se inventan velas.";
-        mcEl("mc-updated").textContent="No se pudo completar el análisis";mcEl("mc-levels-status").textContent="No se pudieron calcular los niveles";["mc-entry","mc-stop","mc-target1","mc-target2","mc-avg-overbought","mc-avg-oversold"].forEach(id=>mcEl(id).textContent="—");mcRenderArrow("ESPERAR",NaN,null,null);
+        mcEl("mc-updated").textContent="No se pudo completar el análisis";mcEl("mc-levels-status").textContent="No se pudieron calcular los niveles";marketLevelOverlay=null;["mc-entry","mc-stop","mc-target1","mc-target2","mc-avg-overbought","mc-avg-oversold"].forEach(id=>mcEl(id).textContent="—");mcRenderArrow("ESPERAR",NaN,null,null);
       }finally{mcState.busy=false;mcEl("mc-analyze").disabled=false;}
     }
     mcEl("mc-analyze").addEventListener("click",runMarketCalculator);
