@@ -1213,11 +1213,20 @@
     }
     function emuPsar(highs,lows){
       const n=highs.length,out=Array(n).fill(null);if(n<2)return out;
-      let up=((highs[1]+lows[1])>=(highs[0]+lows[0])),af=.02,ep=up?highs[0]:lows[0],sar=up?lows[0]:highs[0];
-      for(let i=1;i<n;i++){
+      const upMove=highs[1]-highs[0],downMove=lows[0]-lows[1];
+      let up=upMove>downMove&&upMove>0,af=.02,ep=up?highs[1]:lows[1],sar=up?lows[0]:highs[0];
+      out[1]=sar;
+      for(let i=2;i<n;i++){
         let next=sar+af*(ep-sar);
-        if(up){next=Math.min(next,lows[i-1],i>1?lows[i-2]:lows[i-1]);if(lows[i]<next){up=false;next=ep;ep=lows[i];af=.02;}else if(highs[i]>ep){ep=highs[i];af=Math.min(.2,af+.02);}}
-        else{next=Math.max(next,highs[i-1],i>1?highs[i-2]:highs[i-1]);if(highs[i]>next){up=true;next=ep;ep=highs[i];af=.02;}else if(lows[i]<ep){ep=lows[i];af=Math.min(.2,af+.02);}}
+        if(up){
+          next=Math.min(next,lows[i-1],lows[i-2]);
+          if(lows[i]<next){up=false;next=ep;ep=lows[i];af=.02;}
+          else if(highs[i]>ep){ep=highs[i];af=Math.min(.2,af+.02);}
+        }else{
+          next=Math.max(next,highs[i-1],highs[i-2]);
+          if(highs[i]>next){up=true;next=ep;ep=highs[i];af=.02;}
+          else if(lows[i]<ep){ep=lows[i];af=Math.min(.2,af+.02);}
+        }
         out[i]=next;sar=next;
       }
       return out;
@@ -1290,7 +1299,7 @@
       const bw=Math.max(1.4,Math.min(9,step*.58));
       if(settings.cross)ind.cross.forEach((color,i)=>{if(color)add("rect",{x:left+i*step,y:priceTop,width:step,height:priceBottom-priceTop,fill:color,opacity:.62});});
       valid.forEach((c,i)=>{const x=xAt(i),o=yPrice(Number(c.open)),cl=yPrice(Number(c.close)),hh=yPrice(Number(c.high)),ll=yPrice(Number(c.low)),color=settings.candles?ind.kColor[i]:(Number(c.close)>=Number(c.open)?"#15966b":"#d34b57");add("line",{x1:x,y1:hh,x2:x,y2:ll,stroke:color,"stroke-width":1.3});add("rect",{x:x-bw/2,y:Math.min(o,cl),width:bw,height:Math.max(1,Math.abs(cl-o)),fill:color,stroke:color});});
-      const line=(values,color,width,skipEvery3=false)=>{let path="",active=false;values.forEach((v,i)=>{const usable=Number.isFinite(v)&&!(skipEvery3&&i%3===2);if(!usable){active=false;return;}path+=(active?" L":" M")+xAt(i).toFixed(2)+" "+yPrice(v).toFixed(2);active=true;});if(path)add("path",{d:path,fill:"none",stroke:color,"stroke-width":width,"stroke-linejoin":"round","stroke-linecap":"round"});};
+      const line=(values,colors,width,skipEvery3=false)=>{const paths=new Map();for(let i=1;i<values.length;i++){const a=values[i-1],b=values[i];if(!Number.isFinite(a)||!Number.isFinite(b)||(skipEvery3&&i%3===2))continue;const color=Array.isArray(colors)?colors[i]:colors;if(!color)continue;const segment="M"+xAt(i-1).toFixed(2)+" "+yPrice(a).toFixed(2)+" L"+xAt(i).toFixed(2)+" "+yPrice(b).toFixed(2);paths.set(color,(paths.get(color)||"")+segment);}for(const [color,path] of paths)add("path",{d:path,fill:"none",stroke:color,"stroke-width":width,"stroke-linejoin":"round","stroke-linecap":"round"});};
       if(settings.bb){line(ind.bbTop,ind.bbC1,4);line(ind.bbBot,ind.bbC1,4);line(ind.bbTop,ind.bbC2,2,true);line(ind.bbBot,ind.bbC2,2,true);}
       if(settings.ema200){line(ind.e200,ind.dC1,5);line(ind.e200,ind.dC2,4,true);}
       if(settings.ema50){line(ind.e50,ind.fC2,1);line(ind.e50,ind.fC1,4);line(ind.e50,ind.fC3,2,true);}
