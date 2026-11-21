@@ -10,15 +10,15 @@ from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 from typing import Any, Callable
 
-from tradescanner.candles import CandleStore, normalize_price_history
+from tradescanner.candles import CandleStore, DailyCandleStore, normalize_price_history
 from tradescanner.analyzer import analyze_candles
 from tradescanner.db import DB_ERRORS
 from tradescanner.float_provider import apply_cached_float, refresh_float_cache
 from tradescanner.infisical_vault import is_configured as infisical_is_configured
 from tradescanner.snapshots import BATCH_SIZE, SnapshotStore, collect_snapshots
-from tradescanner.schwab import SchwabAPIError, SchwabConfigurationError, get_all_time_daily_history, get_daily_history, get_price_history, get_quotes
+from tradescanner.schwab import SchwabAPIError, SchwabConfigurationError, get_all_time_daily_history, get_daily_history, get_price_history, get_pullback_daily_history, get_quotes
 from tradescanner.universe import load_symbol_universe
-from tradescanner.strategies import active_strategies, is_momentum_trader_program, is_momentum_scan_program, strategy_matches
+from tradescanner.strategies import active_strategies, is_momentum_trader_program, is_momentum_scan_program, is_pullback_scan_program, strategy_matches
 from tradescanner.momentum_data import recent_stock_news
 from tradescanner.opengap_franco import evaluate as evaluate_open_gap_franco
 
@@ -737,6 +737,138 @@ def _evaluate_rompiendo_minimos(store: SnapshotStore, rows: list[dict[str, Any]]
     return state
 
 
+
+_PULLBACK_HISTORY_MAX_INFLIGHT = 8
+_pullback_history_inflight: set[str] = set()
+_pullback_history_lock = threading.Lock()
+_pullback_history_semaphore = threading.BoundedSemaphore(4)
+
+
+def _fetch_pullback_daily_history_background(symbol: str, store_path: Any) -> None:
+    """Backfill two years of daily bars independently from the one-minute store."""
+    try:
+        with _pullback_history_semaphore:
+            payload = get_pullback_daily_history(symbol)
+        normalized = normalize_price_history(symbol, payload)
+        today_et = datetime.now(ZoneInfo("America/New_York")).date()
+        completed = [
+            row for row in normalized
+            if datetime.fromtimestamp(row["candle_time_ms"] / 1000, ZoneInfo("America/New_York")).date() < today_et
+        ]
+        saved = DailyCandleStore(store_path).save(completed)
+        logger.info("Pullback daily_history symbol=%s provider=%s completed=%s saved=%s",
+                    symbol, len(payload.get("candles", [])), len(completed), saved)
+    except Exception as exc:
+        logger.warning("Pullback daily_history_failed symbol=%s error_type=%s", symbol, type(exc).__name__)
+    finally:
+        with _pullback_history_lock:
+            _pullback_history_inflight.discard(symbol)
+
+
+def _evaluate_pullback_strategy(store: SnapshotStore, batch: list[str], strategy: dict[str, Any]) -> dict[str, Any]:
+    """Evaluate the stored PullBackArteaga contract on daily and derived weekly bars."""
+    from tradescanner.pullback_runtime import evaluate as evaluate_pullback
+
+    rows = store.latest_for_symbols(batch)
+    apply_cached_float(rows, store)
+    daily_store = DailyCandleStore(store.path)
+    history_status = daily_store.history_status_by_symbols([
+        row["symbol"] for row in rows if isinstance(row.get("symbol"), str)
+    ])
+    # Keep the provider workload bounded. Only quote-fresh symbols within the
+    # strategy's price range and with verified FLOAT need expensive daily history.
+    scheduled = 0
+    for row in rows:
+        symbol = row.get("symbol")
+        price = row.get("price")
+        float_shares = row.get("float_shares")
+        if (row.get("quote_is_fresh") is not True or not isinstance(symbol, str)
+                or not isinstance(price, (int, float)) or isinstance(price, bool)
+                or not 2.0 <= float(price) <= 30.0
+                or not isinstance(float_shares, (int, float)) or isinstance(float_shares, bool)
+                or not 0 < float(float_shares) <= 50_000_000):
+            continue
+        status = history_status.get(symbol, {})
+        count = int(status.get("count", 0))
+        latest_ms = status.get("latest_candle_time_ms")
+        stale = True
+        if latest_ms:
+            latest_day = datetime.fromtimestamp(latest_ms / 1000, ZoneInfo("America/New_York")).date()
+            quote_ms = row.get("quote_time_ms")
+            quote_day = datetime.fromtimestamp(quote_ms / 1000, ZoneInfo("America/New_York")).date() if isinstance(quote_ms, (int, float)) and quote_ms > 0 else datetime.now(ZoneInfo("America/New_York")).date()
+            stale = (quote_day - latest_day).days > 5
+        if count >= 300 and not stale:
+            continue
+        with _pullback_history_lock:
+            if symbol in _pullback_history_inflight or len(_pullback_history_inflight) >= _PULLBACK_HISTORY_MAX_INFLIGHT:
+                continue
+            _pullback_history_inflight.add(symbol)
+        worker = threading.Thread(
+            target=_fetch_pullback_daily_history_background,
+            args=(symbol, store.path),
+            name="pullback-daily-" + symbol,
+            daemon=True,
+        )
+        worker.start()
+        scheduled += 1
+        if scheduled >= 8:
+            break
+
+    evaluations = []
+    skipped = {}
+    for row in rows:
+        symbol = row.get("symbol")
+        if not isinstance(symbol, str) or not symbol:
+            continue
+        if row.get("quote_is_fresh") is not True:
+            skipped[symbol] = "quote_not_fresh"
+            continue
+        daily = daily_store.latest(symbol, limit=600)
+        context = {
+            "symbol": symbol,
+            "quote_time_ms": row.get("quote_time_ms"),
+            "quote_price": row.get("price"),
+            "float_shares": row.get("float_shares"),
+        }
+        result = evaluate_pullback(daily, context, str(strategy.get("source", "")))
+        daily_bars = len(daily)
+        weekly_bars = len(__import__("tradescanner.pullback_runtime", fromlist=["to_weekly"]).to_weekly(daily))
+        evaluations.append({
+            "symbol": symbol,
+            "passed": bool(result.get("passed")),
+            "action": "ENTER" if result.get("passed") else None,
+            "strategy": strategy.get("name"),
+            "strategy_id": strategy.get("id"),
+            "side": result.get("side"),
+            "timeframe": result.get("timeframe"),
+            "metrics": result.get("metrics", {}),
+            "reasons": result.get("reasons", []),
+            "timeframe_results": result.get("timeframe_results", []),
+            "candles_available": daily_bars,
+            "daily_bars": daily_bars,
+            "weekly_bars": weekly_bars,
+            "data_source": "Schwab completed daily OHLCV + weekly aggregation",
+            "quote_price": row.get("price"),
+        })
+    state = {
+        "status": "evaluated" if evaluations else "no_fresh_quotes",
+        "strategy_id": strategy.get("id"),
+        "strategy": strategy.get("name"),
+        "evaluated_at": _now(),
+        "candidate_count": len(rows),
+        "processed_quotes": len(evaluations),
+        "evaluations": evaluations,
+        "matches": [item["symbol"] for item in evaluations if item.get("passed")],
+        "daily_history_ready": sum(1 for item in evaluations if item.get("daily_bars", 0) >= 60),
+        "weekly_history_ready": sum(1 for item in evaluations if item.get("weekly_bars", 0) >= 55),
+        "daily_history_scheduled": scheduled,
+        "daily_history_inflight": len(_pullback_history_inflight),
+        "skipped": skipped,
+        "note": "PullBackArteaga se evalúa de forma nativa y aislada con velas diarias completas de Schwab; W se agrega desde D. El código Python almacenado no se ejecuta y no se colocan órdenes.",
+    }
+    store.set_state("strategy_scan_status:" + str(strategy.get("id")), state)
+    return state
+
 def _evaluate_active_strategies(store: SnapshotStore, batch: list[str]) -> dict[str, Any]:
     """Evaluate every enabled strategy once per scanner cycle, without placing orders."""
     strategies = active_strategies(store)
@@ -780,6 +912,8 @@ def _evaluate_active_strategies(store: SnapshotStore, batch: list[str]) -> dict[
             state = _evaluate_rompiendo_maximos(store, rows, strategy)
         elif str(strategy.get("name", "")).casefold() == "rompiendominimos":
             state = _evaluate_rompiendo_minimos(store, rows, strategy)
+        elif is_pullback_scan_program(strategy):
+            state = _evaluate_pullback_strategy(store, batch, strategy)
         elif is_momentum_scan_program(strategy):
             state = _evaluate_original_scan_strategy(store, batch, strategy)
             store.set_state("momentum_scan_status", state)
