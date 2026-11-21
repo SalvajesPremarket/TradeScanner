@@ -723,7 +723,7 @@ def quote_status(symbol: str):
 @app.get("/api/candles/{symbol}")
 def candles_status(
     symbol: str,
-    limit: int = Query(500, ge=1, le=5000),
+    limit: int = Query(500, ge=1),
     timeframe: str | None = Query(None, pattern="^(1m|5m|15m|30m|1h|day|week)$"),
 ):
     normalized = symbol.strip().upper()
