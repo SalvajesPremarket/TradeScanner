@@ -311,6 +311,22 @@
         <div class="mc-card"><small>OBJETIVO 2 · 2R</small><strong id="mc-target2">—</strong><span>Segundo nivel de referencia.</span></div>
       </div>
       <div class="mc-evidence" id="mc-explanation">El análisis explicará las señales técnicas del activo seleccionado. Si faltan velas, la lectura será incompleta y no se recomendará una entrada.</div>
+      <div class="mc-card" style="margin:12px 0">
+        <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap">
+          <div><small>PROMEDIOS MULTITEMPORALES · BOLLINGER + EMA</small><div class="mc-sub" style="margin:5px 0 0">La banda Bollinger detecta sobrecompra/sobreventa; la referencia se obtiene de las líneas técnicas que rodean el precio.</div></div>
+          <span class="mc-status" id="mc-levels-status">Pendiente de análisis</span>
+        </div>
+        <div class="mc-grid">
+          <div class="mc-card"><small>AvgOverbought · REFERENCIA PROMEDIO</small><strong id="mc-avg-overbought">—</strong><span id="mc-overbought-count">0 temporalidades válidas</span></div>
+          <div class="mc-card"><small>AvgOversold · REFERENCIA PROMEDIO</small><strong id="mc-avg-oversold">—</strong><span id="mc-oversold-count">0 temporalidades válidas</span></div>
+        </div>
+        <div class="table-wrap">
+          <table class="simple-table" style="min-width:720px">
+            <thead><tr><th>TEMPORALIDAD</th><th>VELAS</th><th>ESTADO</th><th>REFERENCIA</th><th>LÍNEAS USADAS</th></tr></thead>
+            <tbody id="mc-levels-rows"><tr><td colspan="5">Ejecuta el análisis para calcular las 12 temporalidades.</td></tr></tbody>
+          </table>
+        </div>
+      </div>
       <div class="mc-warning">Importante: la dirección futura no puede conocerse con certeza. Los porcentajes representan la fuerza relativa de señales técnicas simples, no probabilidades calibradas ni promesas de rentabilidad. La flecha es un escenario, no una trayectoria segura. No se envían órdenes a TradeZero.</div>
     </section>
 
@@ -1521,30 +1537,51 @@
       add("text",{x:260,y:up?27:151,fill:up?"#55dfad":"#ff8c9c","font-size":13,"text-anchor":"middle"},up?"ESCENARIO ALCISTA CONDICIONAL":"ESCENARIO BAJISTA CONDICIONAL");
       add("text",{x:260,y:96,fill:"#d9e8f1","font-size":10,"text-anchor":"middle"},"Stop "+mcFmt(stop)+" · Objetivo "+mcFmt(target));
     }
+    function mcRenderLevels(payload){
+      const fmt=value=>Number.isFinite(Number(value))?"$"+Number(value).toFixed(4):"—";
+      mcEl("mc-avg-overbought").textContent=payload.avg_overbought==null?"—":fmt(payload.avg_overbought);
+      mcEl("mc-avg-oversold").textContent=payload.avg_oversold==null?"—":fmt(payload.avg_oversold);
+      mcEl("mc-overbought-count").textContent=payload.overbought_count+" temporalidades con sobrecompra válida";
+      mcEl("mc-oversold-count").textContent=payload.oversold_count+" temporalidades con sobreventa válida";
+      const rows=mcEl("mc-levels-rows");rows.replaceChildren();
+      for(const item of payload.timeframes||[]){
+        const tr=document.createElement("tr");
+        const state=item.status!=="ok"?"Datos insuficientes":item.state==="sobrecompra"?"SOBRECOMPRA":item.state==="sobreventa"?"SOBREVENTA":"NEUTRAL";
+        const values=[item.timeframe,item.candles,state,item.reference==null?"—":fmt(item.reference),item.reference_lines||item.reason||"—"];
+        for(const value of values){const td=document.createElement("td");td.textContent=String(value);tr.appendChild(td);}
+        rows.appendChild(tr);
+      }
+      mcEl("mc-levels-status").textContent="Schwab · "+payload.timeframes.length+" temporalidades evaluadas";
+    }
     async function runMarketCalculator(){
       if(mcState.busy)return;const symbol=String(mcEl("chart-symbol").value||"").trim().toUpperCase();
       if(!/^[A-Z0-9.\\-]{1,15}$/.test(symbol)){mcEl("mc-explanation").textContent="Selecciona primero un ticker válido en el gráfico.";return;}
       mcState.busy=true;mcEl("mc-analyze").disabled=true;mcEl("mc-updated").textContent="Consultando Schwab…";mcEl("mc-symbol-label").textContent="Activo: "+symbol;
       try{
-        const p=await readJson(await fetch("/api/candles/"+encodeURIComponent(symbol)+"?limit=180&timeframe=1m",{cache:"no-store"}));
+        const [candleResponse,levelsResponse]=await Promise.all([
+          fetch("/api/candles/"+encodeURIComponent(symbol)+"?limit=500&timeframe=1m",{cache:"no-store"}),
+          fetch("/api/market-levels/"+encodeURIComponent(symbol),{cache:"no-store"})
+        ]);
+        const [p,levels]=await Promise.all([readJson(candleResponse),readJson(levelsResponse)]);
+        mcRenderLevels(levels);
         const asset=mcAnalyzeCandles(symbol,p.candles),score=asset.score,bull=Math.round((score+100)/2),bear=100-bull;
         const direction=score>=22?"LARGO":score<=-22?"CORTO":"ESPERAR";
-        const price=asset.last,range=Number.isFinite(asset.atr)&&asset.atr>0?asset.atr*Math.sqrt(60):null;
+        const price=levels.price,range=Number.isFinite(asset.atr)&&asset.atr>0?asset.atr*Math.sqrt(60):null;
         const entry=direction==="LARGO"?asset.triggerHigh+0.01:direction==="CORTO"?asset.triggerLow-0.01:null,risk=range!==null?Math.max(range*.65,asset.atr):null;
         const stop=direction==="LARGO"&&risk!==null?entry-risk:direction==="CORTO"&&risk!==null?entry+risk:null,t1=direction==="LARGO"&&risk!==null?entry+risk:direction==="CORTO"&&risk!==null?entry-risk:null,t2=direction==="LARGO"&&risk!==null?entry+2*risk:direction==="CORTO"&&risk!==null?entry-2*risk:null;
         mcEl("mc-direction").textContent=direction;mcEl("mc-direction").className="mc-direction "+(direction==="LARGO"?"mc-long":direction==="CORTO"?"mc-short":"mc-wait");
         mcEl("mc-action-note").textContent=direction==="ESPERAR"?"La lectura del activo no muestra suficiente ventaja. Esperar.":direction==="LARGO"?"Esperar ruptura y confirmación por encima de la entrada.":"Esperar ruptura y confirmación por debajo de la entrada.";
         mcEl("mc-bull").textContent=bull+"%";mcEl("mc-bear").textContent=bear+"%";mcEl("mc-price").textContent=mcFmt(price);
-        mcEl("mc-price-time").textContent=asset.asOf?"Última vela: "+new Date(asset.asOf).toLocaleTimeString("es",{timeZone:"America/New_York"})+" ET":"Hora de vela no disponible";
+        mcEl("mc-price-time").textContent=levels.quote_time_ms?"Cotización Schwab: "+new Date(levels.quote_time_ms).toLocaleTimeString("es",{timeZone:"America/New_York"})+" ET":"Cotización actual de Schwab";
         mcEl("mc-entry").textContent=entry===null?"—":mcFmt(entry);mcEl("mc-entry-note").textContent=direction==="ESPERAR"?"Sin entrada: esperar alineación.":"Confirmar con cierre de vela de 1 minuto; no perseguir el precio.";
         mcEl("mc-stop").textContent=stop===null?"—":mcFmt(stop);mcEl("mc-target1").textContent=t1===null?"—":mcFmt(t1);mcEl("mc-target2").textContent=t2===null?"—":mcFmt(t2);mcRenderArrow(direction,price,stop,t2);
         const explain=x=>x.symbol+": "+(x.score>0?"sesgo alcista ":x.score<0?"sesgo bajista ":"neutral ")+Math.abs(Math.round(x.score))+"/100. "+x.notes.join("; ")+".";
-        mcEl("mc-explanation").textContent=explain(asset)+" Decisión basada únicamente en "+symbol+"; no se utilizan SPY ni QQQ.";
+        mcEl("mc-explanation").textContent=explain(asset)+" Los niveles AvgOverbought/AvgOversold se calculan con "+levels.overbought_count+" y "+levels.oversold_count+" temporalidades válidas, respectivamente. El sesgo direccional conserva su cálculo técnico previo; no equivale a probabilidad calibrada.";
         mcEl("mc-updated").textContent="Actualizado "+new Date().toLocaleTimeString("es",{timeZone:"America/Costa_Rica"})+" · Schwab";mcState.lastSymbol=symbol;
       }catch(error){
         mcEl("mc-direction").textContent="ESPERAR";mcEl("mc-direction").className="mc-direction mc-wait";mcEl("mc-action-note").textContent="Datos insuficientes; no operar con esta lectura.";
         mcEl("mc-explanation").textContent="Análisis detenido: "+apiMessage(error)+" No se sustituyen datos faltantes ni se inventan velas.";
-        mcEl("mc-updated").textContent="No se pudo completar el análisis";["mc-entry","mc-stop","mc-target1","mc-target2"].forEach(id=>mcEl(id).textContent="—");mcRenderArrow("ESPERAR",NaN,null,null);
+        mcEl("mc-updated").textContent="No se pudo completar el análisis";mcEl("mc-levels-status").textContent="No se pudieron calcular los niveles";["mc-entry","mc-stop","mc-target1","mc-target2","mc-avg-overbought","mc-avg-oversold"].forEach(id=>mcEl(id).textContent="—");mcRenderArrow("ESPERAR",NaN,null,null);
       }finally{mcState.busy=false;mcEl("mc-analyze").disabled=false;}
     }
     mcEl("mc-analyze").addEventListener("click",runMarketCalculator);
