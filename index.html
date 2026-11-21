@@ -1601,9 +1601,23 @@
           fetch("/api/candles/"+encodeURIComponent(symbol)+"?limit=500&timeframe=1m",{cache:"no-store"}),
           fetch("/api/market-levels/"+encodeURIComponent(symbol),{cache:"no-store"})
         ]);
-        const [p,levels]=await Promise.all([readJson(candleResponse),readJson(levelsResponse)]);
+        const levels=await readJson(levelsResponse);
         mcRenderLevels(levels);
-        const asset=mcAnalyzeCandles(symbol,p.candles),score=asset.score,bull=Math.round((score+100)/2),bear=100-bull;
+        let asset;
+        try{
+          const p=await readJson(candleResponse);
+          asset=mcAnalyzeCandles(symbol,p.candles);
+        }catch(directionError){
+          mcEl("mc-direction").textContent="ESPERAR";mcEl("mc-direction").className="mc-direction mc-wait";
+          mcEl("mc-action-note").textContent="Niveles multitemporales disponibles; sesgo de 1 minuto no confirmado.";
+          mcEl("mc-bull").textContent="—";mcEl("mc-bear").textContent="—";
+          mcEl("mc-price").textContent=mcFmt(levels.price);
+          mcEl("mc-price-time").textContent="Cotización actual de Schwab";
+          mcEl("mc-explanation").textContent="Los niveles multitemporales sí se calcularon. El sesgo direccional de 1 minuto no está disponible: "+apiMessage(directionError);
+          mcEl("mc-updated").textContent="Niveles actualizados · Schwab";mcState.lastSymbol=symbol;
+          return;
+        }
+        const score=asset.score,bull=Math.round((score+100)/2),bear=100-bull;
         const direction=score>=22?"LARGO":score<=-22?"CORTO":"ESPERAR";
         const price=levels.price,range=Number.isFinite(asset.atr)&&asset.atr>0?asset.atr*Math.sqrt(60):null;
         const entry=direction==="LARGO"?asset.triggerHigh+0.01:direction==="CORTO"?asset.triggerLow-0.01:null,risk=range!==null?Math.max(range*.65,asset.atr):null;
@@ -1620,7 +1634,7 @@
       }catch(error){
         mcEl("mc-direction").textContent="ESPERAR";mcEl("mc-direction").className="mc-direction mc-wait";mcEl("mc-action-note").textContent="Datos insuficientes; no operar con esta lectura.";
         mcEl("mc-explanation").textContent="Análisis detenido: "+apiMessage(error)+" No se sustituyen datos faltantes ni se inventan velas.";
-        mcEl("mc-updated").textContent="No se pudo completar el análisis";mcEl("mc-levels-status").textContent="No se pudieron calcular los niveles";marketLevelOverlay=null;["mc-entry","mc-stop","mc-target1","mc-target2","mc-avg-overbought","mc-avg-oversold"].forEach(id=>mcEl(id).textContent="—");mcRenderArrow("ESPERAR",NaN,null,null);
+        mcEl("mc-updated").textContent="No se pudo completar el análisis";mcEl("mc-levels-status").textContent="No se pudieron calcular los niveles";["mc-entry","mc-stop","mc-target1","mc-target2","mc-avg-overbought","mc-avg-oversold"].forEach(id=>mcEl(id).textContent="—");mcRenderArrow("ESPERAR",NaN,null,null);
       }finally{mcState.busy=false;mcEl("mc-analyze").disabled=false;}
     }
     mcEl("mc-analyze").addEventListener("click",runMarketCalculator);
