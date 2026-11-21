@@ -75,9 +75,8 @@ def strategy_config(source: str) -> tuple[dict[str, Any], dict[str, dict[str, An
                     for key, value in supplied.items():
                         if key in tf_config and isinstance(value, dict):
                             tf_config[key].update(value)
-    except (SyntaxError, ValueError, TypeError):
-        # A malformed or dynamic config is never executed; use audited defaults.
-        pass
+    except (SyntaxError, ValueError, TypeError) as exc:
+        raise ValueError("La configuración de Pullback no es literal o contiene valores no admitidos.") from exc
     return config, tf_config
 
 
@@ -236,7 +235,11 @@ def _bands_at(rows: list[dict[str, Any]], index: int, cfg: dict[str, Any]) -> tu
 
 
 def evaluate(daily: list[dict[str, Any]], ctx: dict[str, Any], source: str) -> dict[str, Any]:
-    cfg, tf_cfg = strategy_config(source)
+    try:
+        cfg, tf_cfg = strategy_config(source)
+    except ValueError as exc:
+        return {"passed": False, "strategy": "PullBackArteaga", "symbol": ctx.get("symbol"),
+                "side": None, "metrics": {}, "reasons": [str(exc)], "timeframe": "D/W"}
     now_ms = ctx.get("quote_time_ms")
     quote_time = datetime.fromtimestamp(now_ms / 1000, ET) if isinstance(now_ms, (int, float)) and now_ms > 0 else None
     out = {"passed": False, "strategy": "PullBackArteaga", "symbol": ctx.get("symbol"),
