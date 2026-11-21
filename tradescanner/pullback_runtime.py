@@ -256,7 +256,16 @@ def evaluate(daily: list[dict[str, Any]], ctx: dict[str, Any], source: str) -> d
     results = []
     for timeframe, rows in (("D", daily), ("W", to_weekly(daily))):
         tf = tf_cfg.get(timeframe, DEFAULT_TF[timeframe])
-        result = _scan_timeframe(rows, context, timeframe, cfg, tf)
+        # The source strategy defines RVol as the latest bar volume divided by
+        # the mean of the previous 20 bars on the same timeframe.
+        previous_volumes = [float(x["volume"]) for x in rows[-21:-1]]
+        rvol = None
+        if len(previous_volumes) == 20:
+            baseline = sum(previous_volumes) / 20
+            rvol = float(rows[-1]["volume"]) / baseline if baseline > 0 else None
+        timeframe_context = {**context, "rvol": rvol}
+        result = _scan_timeframe(rows, timeframe_context, timeframe, cfg, tf)
+        result["metrics"]["rvol"] = round(rvol, 4) if rvol is not None else None
         results.append(result)
     passed = [item for item in results if item["passed"]]
     out["passed"] = bool(passed)
