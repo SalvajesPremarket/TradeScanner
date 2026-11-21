@@ -65,7 +65,15 @@ def request_engine_shutdown(timeout_seconds: float = 8.0) -> dict[str, Any]:
         worker.join(max(0.0, deadline - time.monotonic()))
     with _history_inflight_lock:
         pending = sorted(worker.name for worker in _history_worker_threads if worker.is_alive())
-    return {"completed": len(workers) - len(pending), "pending": pending}
+    with _pullback_history_lock:
+        daily_workers = list(_pullback_history_worker_threads)
+    for worker in daily_workers:
+        if worker is threading.current_thread():
+            continue
+        worker.join(max(0.0, deadline - time.monotonic()))
+    with _pullback_history_lock:
+        pending.extend(sorted(worker.name for worker in _pullback_history_worker_threads if worker.is_alive()))
+    return {"completed": len(workers) + len(daily_workers) - len(pending), "pending": pending}
 
 
 def _now() -> str:
@@ -740,6 +748,7 @@ def _evaluate_rompiendo_minimos(store: SnapshotStore, rows: list[dict[str, Any]]
 
 _PULLBACK_HISTORY_MAX_INFLIGHT = 8
 _pullback_history_inflight: set[str] = set()
+_pullback_history_worker_threads: set[threading.Thread] = set()
 _pullback_history_lock = threading.Lock()
 _pullback_history_semaphore = threading.BoundedSemaphore(4)
 
@@ -763,6 +772,7 @@ def _fetch_pullback_daily_history_background(symbol: str, store_path: Any) -> No
     finally:
         with _pullback_history_lock:
             _pullback_history_inflight.discard(symbol)
+            _pullback_history_worker_threads.discard(threading.current_thread())
 
 
 def _evaluate_pullback_strategy(store: SnapshotStore, batch: list[str], strategy: dict[str, Any]) -> dict[str, Any]:
@@ -809,6 +819,8 @@ def _evaluate_pullback_strategy(store: SnapshotStore, batch: list[str], strategy
             name="pullback-daily-" + symbol,
             daemon=True,
         )
+        with _pullback_history_lock:
+            _pullback_history_worker_threads.add(worker)
         worker.start()
         scheduled += 1
         if scheduled >= 8:
