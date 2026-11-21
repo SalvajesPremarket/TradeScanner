@@ -322,8 +322,8 @@
         </div>
         <div class="table-wrap">
           <table class="simple-table" style="min-width:720px">
-            <thead><tr><th>TEMPORALIDAD</th><th>VELAS</th><th>ESTADO</th><th>REFERENCIA</th><th>LÍNEAS USADAS</th></tr></thead>
-            <tbody id="mc-levels-rows"><tr><td colspan="5">Ejecuta el análisis para calcular las 12 temporalidades.</td></tr></tbody>
+            <thead><tr><th>TEMPORALIDAD</th><th>VELAS</th><th>ESTADO</th><th>REFERENCIA</th><th>LÍNEAS USADAS</th><th>EMA / BOLLINGER</th></tr></thead>
+            <tbody id="mc-levels-rows"><tr><td colspan="6">Ejecuta el análisis para calcular las 12 temporalidades.</td></tr></tbody>
           </table>
         </div>
       </div>
@@ -1546,8 +1546,11 @@
       const rows=mcEl("mc-levels-rows");rows.replaceChildren();
       for(const item of payload.timeframes||[]){
         const tr=document.createElement("tr");
-        const state=item.status!=="ok"?"Datos insuficientes":item.state==="sobrecompra"?"SOBRECOMPRA":item.state==="sobreventa"?"SOBREVENTA":"NEUTRAL";
-        const values=[item.timeframe,item.candles,state,item.reference==null?"—":fmt(item.reference),item.reference_lines||item.reason||"—"];
+        const state=item.status==="insufficient"?"DATOS INSUFICIENTES":item.status==="partial"?"PARCIAL · "+(item.state||"neutral"):item.state==="sobrecompra"?"SOBRECOMPRA":item.state==="sobreventa"?"SOBREVENTA":"NEUTRAL";
+        const indicatorValues=Object.entries(item.ema||{}).map(([name,value])=>name+" "+fmt(value));
+        if(item.bb_upper!=null)indicatorValues.push("BB sup "+fmt(item.bb_upper));
+        if(item.bb_lower!=null)indicatorValues.push("BB inf "+fmt(item.bb_lower));
+        const values=[item.timeframe,item.candles,state,item.reference==null?"—":fmt(item.reference),[item.reference_lines,item.reason].filter(Boolean).join(" · ")||"—",indicatorValues.join(" · ")||"—"];
         for(const value of values){const td=document.createElement("td");td.textContent=String(value);tr.appendChild(td);}
         rows.appendChild(tr);
       }
