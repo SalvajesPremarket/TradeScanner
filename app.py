@@ -941,14 +941,14 @@ def market_levels_status(symbol: str):
         minute_payload = get_price_history(normalized, period=10, frequency=1)
         minute_candles = normalize_price_history(normalized, minute_payload)
         current_minute = now.replace(second=0, microsecond=0)
-        minute_candles = [
+        minute_candles = sorted([
             candle for candle in minute_candles
             if datetime.fromtimestamp(candle["candle_time_ms"] / 1000, timezone.utc).astimezone(_MARKET_LEVEL_TZ) < current_minute
-        ]
+        ], key=lambda candle: candle["candle_time_ms"])
         daily_payload = get_all_time_daily_history(normalized)
-        daily_candles = normalize_price_history(normalized, daily_payload)
+        daily_candles = sorted(normalize_price_history(normalized, daily_payload), key=lambda candle: candle["candle_time_ms"])
         weekly_payload = get_chart_history(normalized, "week")
-        weekly_candles = normalize_price_history(normalized, weekly_payload)
+        weekly_candles = sorted(normalize_price_history(normalized, weekly_payload), key=lambda candle: candle["candle_time_ms"])
 
         results = []
         for label, minutes in _MARKET_LEVEL_TIMEFRAMES:
