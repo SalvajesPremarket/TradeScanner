@@ -433,6 +433,44 @@ def engine_status():
         interval = 30
     task = getattr(app.state, "scan_task", None)
     task_done = task.done() if task is not None else None
+    now = datetime.now(timezone.utc)
+
+    def age_seconds(value):
+        if not isinstance(value, str) or not value.strip():
+            return None
+        try:
+            stamp = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            if stamp.tzinfo is None:
+                stamp = stamp.replace(tzinfo=timezone.utc)
+            return (now - stamp.astimezone(timezone.utc)).total_seconds()
+        except (TypeError, ValueError, OverflowError):
+            return None
+
+    cycle_age = age_seconds(state.get("last_cycle_at"))
+    quote_age = age_seconds(state.get("last_quote_received_at"))
+    cycle_is_recent = (
+        state.get("status") in {"running", "streaming"}
+        and cycle_age is not None
+        and -30 <= cycle_age <= max(180, interval * 4)
+    )
+    market_data_fresh = quote_age is not None and -30 <= quote_age <= 300
+    try:
+        raw_stream = SnapshotStore().get_state("schwab_stream_status", {})
+    except (OSError, RuntimeError, ValueError) + DB_ERRORS:
+        raw_stream = {}
+    raw_stream = raw_stream if isinstance(raw_stream, dict) else {}
+    stream = {
+        "status": raw_stream.get("status", "unknown"),
+        "connected": raw_stream.get("connected") is True,
+        "authenticated": raw_stream.get("authenticated") is True,
+        "subscribed": raw_stream.get("subscribed") is True,
+        "received_quotes": raw_stream.get("received_quotes", 0),
+        "last_quote_at": raw_stream.get("last_quote_at"),
+        "updated_at": raw_stream.get("updated_at"),
+    }
+    engine_healthy = bool(
+        enabled and task is not None and not task_done and cycle_is_recent
+    )
     return {
         "automatic_scan_enabled": enabled,
         "scan_loop_task_created": task is not None,
@@ -442,6 +480,13 @@ def engine_status():
         "batch_size": 100,
         "provider": "Schwab",
         "float_provider": "Massive FLOAT + local cache" if os.getenv("MASSIVE_API_KEY", "").strip() else "Massive FLOAT not configured; local cache only",
+        "health": {
+            "engine_healthy": engine_healthy,
+            "cycle_age_seconds": round(cycle_age, 1) if cycle_age is not None else None,
+            "market_data_fresh": market_data_fresh,
+            "quote_age_seconds": round(quote_age, 1) if quote_age is not None else None,
+        },
+        "stream": stream,
         "state": state or {"status": "starting"},
     }
 
