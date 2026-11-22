@@ -29,6 +29,13 @@ _THREAD: threading.Thread | None = None
 _ACTIVE_APP: websocket.WebSocketApp | None = None
 
 
+def _next_retry_delay(current_delay: float, socket_uptime: float) -> float:
+    """Back off after short-lived disconnects; reset after a stable session."""
+    if socket_uptime >= 60.0:
+        return 2.0
+    return min(max(2.0, float(current_delay) * 2.0), 60.0)
+
+
 def _symbol_batches() -> list[list[str]]:
     """Split the full universe into Schwab-compliant Level One subscription batches."""
     payload = load_symbol_universe()
@@ -382,14 +389,13 @@ def _run_stream() -> None:
                 # A server-closed socket used to reset this delay to 2 seconds
                 # on every return, causing rapid reconnect loops. Reset only
                 # after a stable session; otherwise apply bounded exponential backoff.
-                if socket_uptime >= 60.0:
-                    delay = 2.0
+                retry_delay = 2.0 if socket_uptime >= 60.0 else delay
                 logger.warning(
                     "Schwab stream loop ended; reconnecting after %s seconds; socket_uptime=%.1f",
-                    delay, socket_uptime,
+                    retry_delay, socket_uptime,
                 )
-                _STOP.wait(delay)
-                delay = min(delay * 2.0, 60.0)
+                _STOP.wait(retry_delay)
+                delay = _next_retry_delay(retry_delay, socket_uptime)
         except Exception as exc:
             rotation_stop.set()
             if rotation_thread is not None and rotation_thread.is_alive():
