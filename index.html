@@ -141,8 +141,8 @@
     .chart-live-state.is-live{color:#35e6b1}
 
     /* Área interior del gráfico: blanco hueso; la tabla OHLC conserva el tema general. */
-    #integrated-chart #chart-svg{background:#f5f1e8!important;border-color:#d5cbbb!important}
-    #integrated-chart #chart-svg text{fill:#39495a}
+    #integrated-chart #chart-svg{background:#07111b!important;border-color:#294050!important}
+    #integrated-chart #chart-svg text{fill:#9aafbf}
 
     #auth-form input{background:#071522!important;color:#e0f2fc!important;border-color:#28465a!important}
     #auth-form label{color:#a8c4d4}
@@ -1370,7 +1370,7 @@
       const svg=document.getElementById("chart-svg"),ns="http://www.w3.org/2000/svg",settings=emuSettings();
       svg.replaceChildren();
       const add=(tag,attrs,textValue)=>{const el=document.createElementNS(ns,tag);for(const [key,value] of Object.entries(attrs||{}))if(value!=null)el.setAttribute(key,String(value));if(textValue!=null)el.textContent=textValue;svg.appendChild(el);return el;};
-      const label=(x,y,text,anchor="start",fill="#526170")=>add("text",{x,y,"text-anchor":anchor,fill,"font-size":10,"font-family":"Arial"},text);
+      const label=(x,y,text,anchor="start",fill="#8ea3b5")=>add("text",{x,y,"text-anchor":anchor,fill,"font-size":10,"font-family":"Arial"},text);
       if(!candles.length){add("text",{x:500,y:245,"text-anchor":"middle",fill:"#526170","font-size":14},"No hay velas reales guardadas para graficar");return;}
       const valid=candles.filter(c=>[c.open,c.high,c.low,c.close].every(v=>Number.isFinite(Number(v))));
       if(!valid.length){add("text",{x:500,y:245,"text-anchor":"middle",fill:"#526170","font-size":14},"Las velas no contienen OHLC válido");return;}
@@ -1381,11 +1381,11 @@
       const levelPrices=marketLevelOverlay&&marketLevelOverlay.symbol===String(document.getElementById("chart-symbol").value||"").toUpperCase()&&marketLevelOverlay.levels?Object.values(marketLevelOverlay.levels).filter(Number.isFinite):[];
       const allPrice=[...valid.map(c=>Number(c.low)),...valid.map(c=>Number(c.high)),...overlays,...levelPrices];if(livePrice!==null)allPrice.push(livePrice);
       const min=Math.min(...allPrice),max=Math.max(...allPrice),span=max-min||1,yPrice=v=>priceBottom-(v-min)/span*(priceBottom-priceTop);
-      for(let k=0;k<=5;k++){const y=priceTop+k*(priceBottom-priceTop)/5,val=max-k*span/5;add("line",{x1:left,y1:y,x2:right,y2:y,stroke:"#d7dee5","stroke-width":1});label(right+9,y+3,val.toFixed(2),"start");}
-      add("line",{x1:right,y1:priceTop,x2:right,y2:priceBottom,stroke:"#aab5bf","stroke-width":1});
-      const bw=Math.max(1.4,Math.min(9,step*.58));
+      for(let k=0;k<=5;k++){const y=priceTop+k*(priceBottom-priceTop)/5,val=max-k*span/5;add("line",{x1:left,y1:y,x2:right,y2:y,stroke:"#233746","stroke-width":.7});label(right+9,y+3,val.toFixed(2),"start");}
+      add("line",{x1:right,y1:priceTop,x2:right,y2:priceBottom,stroke:"#496071","stroke-width":.8});
+      const bw=Math.max(1,Math.min(8,step*.48));
       if(settings.cross)ind.cross.forEach((color,i)=>{if(color)add("rect",{x:left+i*step,y:priceTop,width:step,height:priceBottom-priceTop,fill:color,opacity:.62});});
-      valid.forEach((c,i)=>{const x=xAt(i),o=yPrice(Number(c.open)),cl=yPrice(Number(c.close)),hh=yPrice(Number(c.high)),ll=yPrice(Number(c.low)),color=settings.candles?ind.kColor[i]:(Number(c.close)>=Number(c.open)?"#15966b":"#d34b57");add("line",{x1:x,y1:hh,x2:x,y2:ll,stroke:color,"stroke-width":1.3});add("rect",{x:x-bw/2,y:Math.min(o,cl),width:bw,height:Math.max(1,Math.abs(cl-o)),fill:color,stroke:color});});
+      valid.forEach((c,i)=>{const x=xAt(i),o=yPrice(Number(c.open)),cl=yPrice(Number(c.close)),hh=yPrice(Number(c.high)),ll=yPrice(Number(c.low)),color=settings.candles?ind.kColor[i]:(Number(c.close)>=Number(c.open)?"#15966b":"#d34b57");add("line",{x1:x,y1:hh,x2:x,y2:ll,stroke:color,"stroke-width":.8});add("rect",{x:x-bw/2,y:Math.min(o,cl),width:bw,height:Math.max(1,Math.abs(cl-o)),fill:color,stroke:color});});
       if(marketLevelOverlay&&marketLevelOverlay.symbol===String(document.getElementById("chart-symbol").value||"").toUpperCase()&&marketLevelOverlay.levels){
         const specs=[
           ["TopReversal","TOP REVERSAL","#9b59b6"],["MaxPos","MAX POS","#d35400"],
@@ -1398,35 +1398,35 @@
           const value=marketLevelOverlay.levels[key];
           if(!Number.isFinite(Number(value)))continue;
           const y=yPrice(Number(value));
-          add("line",{x1:left,y1:y,x2:right,y2:y,stroke:color,"stroke-width":1.15,"stroke-dasharray":key==="BP"?"2 3":"6 4",opacity:.92});
-          add("rect",{x:left+3,y:y-12,width:Math.max(68,name.length*6+10),height:14,rx:2,fill:"#f5f1e8",stroke:color,"stroke-width":.6,opacity:.94});
+          add("line",{x1:left,y1:y,x2:right,y2:y,stroke:color,"stroke-width":.75,"stroke-dasharray":key==="BP"?"2 3":"6 4",opacity:.92});
+          add("rect",{x:left+3,y:y-12,width:Math.max(68,name.length*6+10),height:14,rx:2,fill:"#0b1a28",stroke:color,"stroke-width":.6,opacity:.94});
           add("text",{x:left+7,y:y-2,fill:color,"font-size":9,"font-weight":700},name+" "+Number(value).toFixed(2));
           visible++;
         }
         if(!visible)add("text",{x:left+5,y:35,fill:"#7c4d12","font-size":10},"Niveles calculados fuera del rango vertical visible");
       }
       const line=(values,colors,width,skipEvery3=false)=>{const paths=new Map();for(let i=1;i<values.length;i++){const a=values[i-1],b=values[i];if(!Number.isFinite(a)||!Number.isFinite(b)||(skipEvery3&&i%3===2))continue;const color=Array.isArray(colors)?colors[i]:colors;if(!color)continue;const segment="M"+xAt(i-1).toFixed(2)+" "+yPrice(a).toFixed(2)+" L"+xAt(i).toFixed(2)+" "+yPrice(b).toFixed(2);paths.set(color,(paths.get(color)||"")+segment);}for(const [color,path] of paths)add("path",{d:path,fill:"none",stroke:color,"stroke-width":width,"stroke-linejoin":"round","stroke-linecap":"round"});};
-      if(settings.bb){line(ind.bbTop,ind.bbC1,1.25);line(ind.bbBot,ind.bbC1,1.25);line(ind.bbTop,ind.bbC2,.9,true);line(ind.bbBot,ind.bbC2,.9,true);}
-      if(settings.ema200){line(ind.e200,ind.dC1,1.65);line(ind.e200,ind.dC2,1.15,true);}
-      if(settings.ema50){line(ind.e50,ind.fC2,1.0);line(ind.e50,ind.fC1,1.55);line(ind.e50,ind.fC3,1.0,true);}
-      if(settings.ema20)line(ind.e20,ind.vC,1.45,true);
-      if(settings.ema9){line(ind.e9,ind.nC1,1.25);line(ind.e9,ind.nC2,.95,true);}
-      if(settings.ema3){line(ind.e3,ind.tC1,1.05);line(ind.e3,ind.tC2,.85,true);}
-      if(settings.sar)ind.sar.forEach((v,i)=>{if(Number.isFinite(v))add("circle",{cx:xAt(i),cy:yPrice(v),r:3.2,fill:ind.sarC[i],stroke:ind.sarC[i]});});
-      if(settings.targets){ind.tp1.forEach((v,i)=>{if(Number.isFinite(v))add("circle",{cx:xAt(i),cy:yPrice(v),r:4.4,fill:"#000000"});});ind.tp2.forEach((v,i)=>{if(Number.isFinite(v))add("circle",{cx:xAt(i),cy:yPrice(v),r:4.4,fill:"#000000"});});}
+      if(settings.bb){line(ind.bbTop,ind.bbC1,.75);line(ind.bbBot,ind.bbC1,.75);line(ind.bbTop,ind.bbC2,.55,true);line(ind.bbBot,ind.bbC2,.55,true);}
+      if(settings.ema200){line(ind.e200,ind.dC1,.95);line(ind.e200,ind.dC2,.65,true);}
+      if(settings.ema50){line(ind.e50,ind.fC2,.65);line(ind.e50,ind.fC1,.9);line(ind.e50,ind.fC3,.6,true);}
+      if(settings.ema20)line(ind.e20,ind.vC,.8,true);
+      if(settings.ema9){line(ind.e9,ind.nC1,.75);line(ind.e9,ind.nC2,.55,true);}
+      if(settings.ema3){line(ind.e3,ind.tC1,.65);line(ind.e3,ind.tC2,.5,true);}
+      if(settings.sar)ind.sar.forEach((v,i)=>{if(Number.isFinite(v))add("circle",{cx:xAt(i),cy:yPrice(v),r:2,fill:ind.sarC[i],stroke:ind.sarC[i]});});
+      if(settings.targets){ind.tp1.forEach((v,i)=>{if(Number.isFinite(v))add("circle",{cx:xAt(i),cy:yPrice(v),r:2.8,fill:"#000000"});});ind.tp2.forEach((v,i)=>{if(Number.isFinite(v))add("circle",{cx:xAt(i),cy:yPrice(v),r:4.4,fill:"#000000"});});}
       label(left,14,"ESTUDIOS TRADESCANNER · EMA 3/9/20/50/200 · BOLLINGER · PSAR · TARGET PRICE","start","#344454");
       const macdValues=[...macdLine,...macdSignal,...macdHist].filter(Number.isFinite),macdAbs=Math.max(1e-8,...macdValues.map(Math.abs)),macdMid=(macdTop+macdBottom)/2,macdY=v=>macdMid-(v/macdAbs)*(macdBottom-macdTop)*.46;
-      add("line",{x1:left,y1:macdMid,x2:right,y2:macdMid,stroke:"#aab5bf","stroke-width":1,"stroke-dasharray":"3 3"});
+      add("line",{x1:left,y1:macdMid,x2:right,y2:macdMid,stroke:"#496071","stroke-width":.7,"stroke-dasharray":"3 3"});
       macdHist.forEach((v,i)=>{if(!Number.isFinite(v))return;const y=macdY(v),color=v>=0?"#15966b":"#d34b57";add("rect",{x:xAt(i)-bw/2,y:Math.min(y,macdMid),width:bw,height:Math.max(1,Math.abs(macdMid-y)),fill:color,opacity:.9});});
       const drawMacdLine=(values,color,width)=>{let path="";values.forEach((v,i)=>{if(!Number.isFinite(v)){path="";return;}path+=(path?" L":"M")+xAt(i).toFixed(2)+" "+macdY(v).toFixed(2);});if(path)add("path",{d:path,fill:"none",stroke:color,"stroke-width":width,"stroke-linejoin":"round","stroke-linecap":"round"});};
-      drawMacdLine(macdLine,"#087e9c",1.35);drawMacdLine(macdSignal,"#c07824",1.15);
+      drawMacdLine(macdLine,"#087e9c",.9);drawMacdLine(macdSignal,"#c07824",.75);
       label(left,macdTop-7,"MACD FULL COLOR · VERDE POSITIVO / ROJO NEGATIVO","start","#344454");
       const maxVol=Math.max(1,...volumes);volumes.forEach((v,i)=>{const height=v/maxVol*(volBottom-volTop),up=Number(valid[i].close)>=Number(valid[i].open);add("rect",{x:xAt(i)-bw/2,y:volBottom-height,width:bw,height:height,fill:up?"#15966b":"#d34b57",opacity:.88});});label(left,volTop-7,"VOLUMEN · VERDE ALCISTA / ROJO BAJISTA","start","#344454");
       const tf=document.getElementById("chart-timeframe").value,timeOptions=tf==="day"?{month:"short",day:"numeric",timeZone:"America/New_York"}:tf==="week"?{month:"short",year:"2-digit",timeZone:"America/New_York"}:{hour:"2-digit",minute:"2-digit",hour12:false,timeZone:"America/New_York"};
       const formatTime=c=>c.candle_time_ms?new Intl.DateTimeFormat("es",timeOptions).format(new Date(Number(c.candle_time_ms))):"—",tickCount=Math.min(6,valid.length);
       for(let t=0;t<tickCount;t++){const i=Math.round(t*(valid.length-1)/Math.max(1,tickCount-1)),x=xAt(i);add("line",{x1:x,y1:volBottom+2,x2:x,y2:volBottom+6,stroke:"#7b8792","stroke-width":1});label(x,496,formatTime(valid[i]),"middle");}
       label(right+9,14,"PRECIO","start","#344454");
-      if(livePrice!==null){const y=yPrice(livePrice);add("line",{x1:left,y1:y,x2:right,y2:y,stroke:"#0891b2","stroke-width":1.8,"stroke-dasharray":"6 4"});add("circle",{cx:right,cy:y,r:4,fill:"#0891b2",stroke:"#fff","stroke-width":1.5});label(right+9,Math.max(priceTop+10,Math.min(priceBottom-3,y-5)),"$"+livePrice.toFixed(2),"start","#087e9c");}
+      if(livePrice!==null){const y=yPrice(livePrice);add("line",{x1:left,y1:y,x2:right,y2:y,stroke:"#0891b2","stroke-width":1.1,"stroke-dasharray":"6 4"});add("circle",{cx:right,cy:y,r:3,fill:"#0891b2",stroke:"#fff","stroke-width":1});label(right+9,Math.max(priceTop+10,Math.min(priceBottom-3,y-5)),"$"+livePrice.toFixed(2),"start","#087e9c");}
       wrapChartZoomLayer();
     }
     let chartQuoteTimer = null;
