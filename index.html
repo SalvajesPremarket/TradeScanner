@@ -307,12 +307,6 @@
           <div class="mc-card"><small>AvgOversold · REFERENCIA PROMEDIO</small><strong id="mc-avg-oversold">—</strong><span id="mc-oversold-count">0 temporalidades válidas</span></div>
         </div>
         <div class="mc-grid" id="mc-levels-values"><div class="mc-card"><small>NIVELES DEL MANUAL</small><strong>—</strong><span>Se calculan cuando haya AvgOverbought, AvgOversold y ATR válidos.</span></div></div>
-        <div class="table-wrap">
-          <table class="simple-table" style="min-width:720px">
-            <thead><tr><th>TEMPORALIDAD</th><th>VELAS</th><th>ESTADO</th><th>REFERENCIA</th><th>LÍNEAS USADAS</th><th>EMA / BOLLINGER</th></tr></thead>
-            <tbody id="mc-levels-rows"><tr><td colspan="6">Ejecuta el análisis para calcular las 12 temporalidades.</td></tr></tbody>
-          </table>
-        </div>
       </div>
       <div class="mc-warning">Importante: la dirección futura no puede conocerse con certeza. Los porcentajes representan la fuerza relativa de señales técnicas simples, no probabilidades calibradas ni promesas de rentabilidad. La flecha es un escenario, no una trayectoria segura. No se envían órdenes a TradeZero.</div>
     </section>
@@ -1553,17 +1547,6 @@
       mcEl("mc-avg-oversold").textContent=payload.avg_oversold==null?"—":fmt(payload.avg_oversold);
       mcEl("mc-overbought-count").textContent=payload.overbought_count+" temporalidades con sobrecompra válida";
       mcEl("mc-oversold-count").textContent=payload.oversold_count+" temporalidades con sobreventa válida";
-      const rows=mcEl("mc-levels-rows");rows.replaceChildren();
-      for(const item of payload.timeframes||[]){
-        const tr=document.createElement("tr");
-        const state=item.status==="insufficient"?"DATOS INSUFICIENTES":item.status==="partial"?"PARCIAL · "+(item.state||"neutral"):item.state==="sobrecompra"?"SOBRECOMPRA":item.state==="sobreventa"?"SOBREVENTA":"NEUTRAL";
-        const indicatorValues=Object.entries(item.ema||{}).map(([name,value])=>name+" "+fmt(value));
-        if(item.bb_upper!=null)indicatorValues.push("BB sup "+fmt(item.bb_upper));
-        if(item.bb_lower!=null)indicatorValues.push("BB inf "+fmt(item.bb_lower));
-        const values=[item.timeframe,item.candles,state,item.reference==null?"—":fmt(item.reference),[item.reference_lines,item.reason].filter(Boolean).join(" · ")||"—",indicatorValues.join(" · ")||"—"];
-        for(const value of values){const td=document.createElement("td");td.textContent=String(value);tr.appendChild(td);}
-        rows.appendChild(tr);
-      }
       const valueHost=mcEl("mc-levels-values");valueHost.replaceChildren();
       const summaries=[
         ["AvgDayChange / ATR",payload.avg_day_change],
