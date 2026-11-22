@@ -371,15 +371,25 @@ def _run_stream() -> None:
             _ACTIVE_APP = app
             logger.info("Schwab stream connecting; symbol_batches=%s rotation_seconds=%s",
                         len(batches), rotation_seconds)
+            socket_started = time.monotonic()
             app.run_forever(ping_interval=20, ping_timeout=10)
+            socket_uptime = time.monotonic() - socket_started
             rotation_stop.set()
             if rotation_thread is not None and rotation_thread.is_alive():
                 rotation_thread.join(timeout=2)
             _ACTIVE_APP = None
-            delay = 2.0
             if not _STOP.is_set():
-                logger.warning("Schwab stream loop ended; reconnecting after %s seconds", delay)
+                # A server-closed socket used to reset this delay to 2 seconds
+                # on every return, causing rapid reconnect loops. Reset only
+                # after a stable session; otherwise apply bounded exponential backoff.
+                if socket_uptime >= 60.0:
+                    delay = 2.0
+                logger.warning(
+                    "Schwab stream loop ended; reconnecting after %s seconds; socket_uptime=%.1f",
+                    delay, socket_uptime,
+                )
                 _STOP.wait(delay)
+                delay = min(delay * 2.0, 60.0)
         except Exception as exc:
             rotation_stop.set()
             if rotation_thread is not None and rotation_thread.is_alive():
