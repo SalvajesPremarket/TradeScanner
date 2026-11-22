@@ -3,6 +3,12 @@ import time
 from tradescanner import schwab_stream
 
 
+def test_reconnect_backoff_increases_after_short_disconnects_and_resets_after_stability():
+    assert schwab_stream._next_retry_delay(2, 10) == 4
+    assert schwab_stream._next_retry_delay(32, 10) == 60
+    assert schwab_stream._next_retry_delay(32, 90) == 2
+
+
 def _item(*, age_seconds=0, price=12.5, close=11.0):
     stamp = int((time.time() - age_seconds) * 1000)
     return {
