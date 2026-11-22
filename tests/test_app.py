@@ -33,6 +33,37 @@ class AppEntrypointTests(unittest.TestCase):
             result = app_module.engine_status()
         self.assertFalse(result["automatic_scan_enabled"])
 
+    def test_engine_health_is_separate_from_stale_market_quotes(self):
+        class RunningTask:
+            def done(self):
+                return False
+
+        state = {
+            "status": "running",
+            "cycles_completed": 42,
+            "last_cycle_at": datetime.now(timezone.utc).isoformat(),
+            "last_quote_received_at": "2026-11-20T23:04:42+00:00",
+        }
+        with patch.dict(os.environ, {"TRADESCANNER_AUTO_SCAN_ENABLED": "true"}, clear=True), patch(
+            "app.get_engine_status", return_value=state
+        ), patch("app.SnapshotStore") as store_class, patch.object(
+            app_module.app.state, "scan_task", RunningTask(), create=True
+        ):
+            store_class.return_value.get_state.return_value = {
+                "status": "subscribed",
+                "connected": True,
+                "authenticated": True,
+                "subscribed": True,
+                "received_quotes": 0,
+            }
+            result = app_module.engine_status()
+
+        self.assertTrue(result["health"]["engine_healthy"])
+        self.assertFalse(result["health"]["market_data_fresh"])
+        self.assertTrue(result["stream"]["connected"])
+        self.assertTrue(result["stream"]["authenticated"])
+        self.assertEqual(result["stream"]["received_quotes"], 0)
+
     def test_schwab_provider_is_configured_when_refresh_token_is_in_infisical(self):
         env = {
             "SCHWAB_CLIENT_ID": "test-client",
